@@ -1,0 +1,13 @@
+[hyperparamters]
+classes = ["__background__", "1"]
+num_epochs = 20 
+batch_size = 500 
+kfolds = 10 
+learning_rate = 0.001 
+save_dir = "models/fasterrcnn.pt" 
+
+[training]
+datapath = "/home/weygoldt/Projects/mscthesis/data/processed/deepnn/train"
+
+[evaluation]
+datapath = "/home/weygoldt/Projects/mscthesis/data/processed/deepnn/test"
