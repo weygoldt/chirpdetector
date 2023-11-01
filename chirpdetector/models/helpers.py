@@ -30,6 +30,14 @@ def get_device():
     return device
 
 
+def collate_fn(batch):
+    """
+    Since each image may have a different number of objects, we need a collate
+    function (to be passed to the DataLoader).
+    """
+    return tuple(zip(*batch))
+
+
 def load_fasterrcnn(num_classes: int) -> torch.nn.Module:
     """
     Create a pretrained Faster RCNN Model and replaces the final predictor in order to fit

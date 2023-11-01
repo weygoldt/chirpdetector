@@ -1,10 +1,15 @@
-[hyperparamters]
+[hyperparameters]
+width = 1076
+height = 430
 classes = ["__background__", "1"]
 num_epochs = 20 
-batch_size = 500 
+batch_size = 5 
 kfolds = 10 
 learning_rate = 0.001 
-save_dir = "models/fasterrcnn.pt" 
+momentum = 0.9
+weight_decay = 0.0005
+num_workers = 4
+modelpath = "../../data/processed/models" 
 
 [training]
 datapath = "/home/weygoldt/Projects/mscthesis/data/processed/deepnn/train"

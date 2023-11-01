@@ -12,11 +12,14 @@ from pydantic import BaseModel, ConfigDict
 
 
 def load_config(path: str) -> ConfigDict:
+    path = path
+    print(path)
     file = toml.load(path)
-    hy = Hyperparams(**file["hyper"])
-    tr = Training(**file["train"])
-    te = Testing(**file["test"])
+    hy = Hyperparams(**file["hyperparameters"])
+    tr = Training(**file["training"])
+    te = Testing(**file["evaluation"])
     config = Config(
+        path=path,
         hyper=hy,
         train=tr,
         test=te,
@@ -25,12 +28,17 @@ def load_config(path: str) -> ConfigDict:
 
 
 class Hyperparams(BaseModel):
-    classes: List(str)
+    width: int
+    height: int
+    classes: List
     num_epochs: int
     batch_size: int
+    kfolds: int
     learning_rate: float
     momentum: float
-    model_path: str
+    weight_decay: float
+    num_workers: int
+    modelpath: str
 
 
 class Training(BaseModel):
@@ -43,6 +51,7 @@ class Testing(BaseModel):
 
 class Config(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    path: str
     hyper: Hyperparams
     train: Training
     test: Testing
