@@ -20,7 +20,7 @@ from ..utils.configfiles import load_config
 from .helpers import collate_fn
 
 
-class CustomDataset(Dataset):
+class CustomDataset(set):
     """
     Custom dataset class for the training and testing data.
     """

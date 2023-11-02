@@ -16,12 +16,12 @@ def load_config(path: str) -> ConfigDict:
     file = toml.load(path)
     hy = Hyperparams(**file["hyperparameters"])
     tr = Training(**file["training"])
-    te = Testing(**file["evaluation"])
+    det = Detection(**file["detection"])
     config = Config(
         path=path,
         hyper=hy,
         train=tr,
-        test=te,
+        det=det,
     )
     return config
 
@@ -44,8 +44,13 @@ class Training(BaseModel):
     datapath: str
 
 
-class Testing(BaseModel):
-    datapath: str
+class Detection(BaseModel):
+    threshold: float
+    time_window: float
+    freq_window: List
+    spec_overlap: float
+    overlap_frac: float
+    freq_res: float
 
 
 class Config(BaseModel):
@@ -53,4 +58,4 @@ class Config(BaseModel):
     path: str
     hyper: Hyperparams
     train: Training
-    test: Testing
+    det: Detection

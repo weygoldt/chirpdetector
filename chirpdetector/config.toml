@@ -2,9 +2,9 @@
 width = 1076
 height = 430
 classes = ["__background__", "1"]
-num_epochs = 5 
+num_epochs = 10 
 batch_size = 2 
-kfolds = 2 
+kfolds = 10
 learning_rate = 0.001 
 momentum = 0.9
 weight_decay = 0.0005
@@ -14,5 +14,10 @@ modelpath = "/home/weygoldt/Projects/mscthesis/data/processed/models"
 [training]
 datapath = "/home/weygoldt/Projects/mscthesis/data/processed/deepnn/train"
 
-[evaluation]
-datapath = "/home/weygoldt/Projects/mscthesis/data/processed/deepnn/val"
+[detection]
+threshold = 0.8
+time_window = 20 
+freq_window = [100, 2200]
+freq_res = 6
+overlap_frac = 0.9
+spec_overlap = 1
