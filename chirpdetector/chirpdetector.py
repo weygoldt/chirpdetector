@@ -177,16 +177,34 @@ def chirpdetector(conf: Config, data: Dataset):
         path /= f"chunk{chunk_no:05d}.png"
 
         # convert the spec tensor to the same format as a PIL image would be
+        # put to the CPU and convert to numpy array
         spec = spec.detach().cpu().numpy()
+
+        # flip the spectrogram upside down
         img = np.flipud(spec)
+
+        # scale the spectrogram to be between 0 and 255
         img = np.uint8((img - img.min()) / (img.max() - img.min()) * 255)
+
+        # convert to PIL image
         img = Image.fromarray(img)
+
+        # convert to RGB
+        img = img.convert("RGB")
         img.save(path)
-        img = F.to_tensor(img.convert("RGB"))
+
+        # make tensor
+        img = F.to_tensor(img)
+
+        # scale between 0 and 1
+        img = img / 255
+
+        # add batch dimension
+        img = [img.to(device)]
 
         # perform the detection
         with torch.no_grad():
-            outputs = model([img.to(device)])
+            outputs = model(img)
 
         print(outputs)
         # plot_detections(img, outputs[0], conf.det.threshold, path)
