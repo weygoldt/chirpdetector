@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict
 
 def load_config(path: str) -> ConfigDict:
     path = path
-    print(path)
     file = toml.load(path)
     hy = Hyperparams(**file["hyperparameters"])
     tr = Training(**file["training"])

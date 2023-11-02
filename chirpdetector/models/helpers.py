@@ -3,7 +3,7 @@
 """
 Load, save and handle models.
 """
-
+import albumentations as A
 import torch
 import torch.nn
 import torchvision
@@ -28,6 +28,29 @@ def get_device():
     else:
         device = torch.device("cpu")  # no gpu
     return device
+
+
+def get_transforms(width, height, train: bool):
+    """
+    Define the transformations that should be applied to the images.
+    """
+    if train:
+        return A.Compose(
+            [
+                A.PixelDropout(p=0.2),
+                A.RandomBrightnessContrast(p=0.2),
+                A.Resize(width, height),
+            ],
+            bbox_params=A.BboxParams(
+                format="pascal_voc", label_fields=["labels"]
+            ),
+        )
+    return A.Compose(
+        [
+            A.Resize(width, height),
+        ],
+        bbox_params=A.BboxParams(format="pascal_voc", label_fields=["labels"]),
+    )
 
 
 def collate_fn(batch):
