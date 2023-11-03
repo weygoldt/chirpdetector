@@ -72,7 +72,7 @@ def plot_avg_losses(
     """
     Plot the training and validation losses.
     """
-    _, ax = plt.subplots()
+    _, ax = plt.subplots(figsize=(15, 10), constrained_layout=True)
     x = np.arange(len(train_loss))
 
     ax.plot(x, train_loss, label="Training Loss")
@@ -100,7 +100,7 @@ def plot_all_losses(
     """
     Plot the training and validation losses.
     """
-    _, ax = plt.subplots(figsixe=(10, 20))
+    _, ax = plt.subplots(figsize=(15, 10), constrained_layout=True)
 
     x_train = np.arange(len(train_loss[0]))
     x_val = np.arange(len(val_loss[0])) + len(train_loss[0])
@@ -108,9 +108,10 @@ def plot_all_losses(
         ax.plot(x_train, train_epoch_loss, label="Training Loss", c="tab:blue")
         ax.plot(x_val, val_epoch_loss, label="Validation Loss", c="tab:orange")
         x_train += len(train_loss[0])
-        x_val += len(val_loss[0])
+        x_val += len(train_loss[0])
 
     ax.set_ylabel("Loss")
+    ax.set_xlabel("Batch")
     ax.legend()
     ax.set_ylim(bottom=0)
 
@@ -373,7 +374,7 @@ def verify_detections(
     plt.close()
 
 
-def inference_on_trainingdata(conf: Config) -> None:
+def inference_on_trainingdata(conf: Config, path) -> None:
     """
     Perform inference on the training data.
     """
@@ -384,7 +385,7 @@ def inference_on_trainingdata(conf: Config) -> None:
         "[bold magenta] ------------------ Starting Inference ------------------ [reset]"
     )
     data = CustomDataset(
-        path=conf.train.datapath,
+        path=path,
         classes=conf.hyper.classes,
         width=conf.hyper.width,
         height=conf.hyper.height,
@@ -427,5 +428,12 @@ def inference_cli():
         type=str,
         help="Path to config file.",
     )
+    parser.add_argument(
+        "--input",
+        "-i",
+        type=str,
+        help="Path to the data.",
+    )
     config = load_config(parser.parse_args().config)
-    inference_on_trainingdata(config)
+    path = pathlib.Path(parser.parse_args().input)
+    inference_on_trainingdata(config, path)

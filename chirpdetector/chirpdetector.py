@@ -7,12 +7,19 @@ Detect chirps on a spectrogram.
 import argparse
 import pathlib
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchvision.transforms.functional as F
+from IPython import embed
 from matplotlib.patches import Rectangle
-from PIL import Image
+from rich.progress import (
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
+)
 
 from gridtools.datasets import Dataset, load, subset
 from gridtools.utils.spectrograms import (
@@ -25,38 +32,82 @@ from gridtools.utils.spectrograms import (
 from .models.helpers import get_device, load_fasterrcnn
 from .utils.configfiles import Config, load_config
 
+matplotlib.use("Agg")
 
-def plot_detections(img_tensor, output, threshold, save_path):
-    fig, ax = plt.subplots(constrained_layout=True)
-    ax.imshow(
-        img_tensor.cpu().squeeze().permute(1, 2, 0),
+prog = Progress(
+    SpinnerColumn(),
+    *Progress.get_default_columns(),
+    MofNCompleteColumn(),
+    TimeElapsedColumn(),
+)
+
+
+def flip_boxes(boxes, img_height):
+    """
+    Flip the boxes vertically.
+    """
+
+    # correct the y coordinates
+    boxes[:, 1], boxes[:, 3] = (
+        img_height - boxes[:, 3],
+        img_height - boxes[:, 1],
     )
-    for (x0, y0, x1, y1), l, score in zip(
-        output["boxes"].cpu(), output["labels"].cpu(), output["scores"].cpu()
-    ):
-        ax.text(
-            x0,
-            y0,
-            f"{score:.2f}",
-            ha="left",
-            va="bottom",
-            fontsize=10,
-            color="white",
-        )
-        ax.add_patch(
-            Rectangle(
-                (x0, y0),
-                (x1 - x0),
-                (y1 - y0),
-                fill=False,
-                color="tab:red",
-                linewidth=1,
-                zorder=10,
-            )
-        )
 
-    ax.set_axis_off()
-    plt.savefig(save_path, bbox_inches="tight", pad_inches=0)
+    return boxes
+
+
+def corner_coords_to_center_coords(boxes):
+    """
+    Convert box defined by corner coordinates to box defined by lower left, width
+    and height.
+    """
+    new_boxes = np.zeros_like(boxes)
+    new_boxes[:, 0] = boxes[:, 0]
+    new_boxes[:, 1] = boxes[:, 1]
+    new_boxes[:, 2] = boxes[:, 2] - boxes[:, 0]
+    new_boxes[:, 3] = boxes[:, 3] - boxes[:, 1]
+
+    return new_boxes
+
+
+def plot_detections(img_tensor, output, threshold, save_path, conf):
+    img = img_tensor.detach().cpu().numpy().transpose(1, 2, 0)
+    boxes = output["boxes"].detach().cpu().numpy()
+    boxes = corner_coords_to_center_coords(boxes)
+    scores = output["scores"].detach().cpu().numpy()
+    labels = output["labels"].detach().cpu().numpy()
+    labels = [conf.hyper.classes[i] for i in labels]
+
+    _, ax = plt.subplots(figsize=(20, 10))
+
+    ax.pcolormesh(img, cmap="gray")
+
+    for i, box in enumerate(boxes):
+        if scores[i] > threshold:
+            ax.scatter(
+                box[0],
+                box[1],
+            )
+            ax.add_patch(
+                Rectangle(
+                    box[:2],
+                    box[2],
+                    box[3],
+                    fill=False,
+                    color="white",
+                    linewidth=1,
+                )
+            )
+            ax.text(
+                box[0],
+                box[1],
+                f"{scores[i]:.2f}",
+                color="black",
+                fontsize=8,
+                bbox=dict(facecolor="white", alpha=1),
+            )
+    plt.axis("off")
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close()
 
 
@@ -74,8 +125,13 @@ def spec_to_image(spec):
     desired_shape = (3, num_rows, num_cols)
     reshaped_tensor = spec.view(desired_shape)
 
+    # normalize the spectrogram to be between 0 and 1
+    normalized_tensor = (reshaped_tensor - reshaped_tensor.min()) / (
+        reshaped_tensor.max() - reshaped_tensor.min()
+    )
+
     # make sure image is float32
-    scaled_tensor = reshaped_tensor.float()
+    scaled_tensor = normalized_tensor.float()
 
     return scaled_tensor
 
@@ -171,43 +227,18 @@ def chirpdetector(conf: Config, data: Dataset):
         ]
 
         # normalize the spectrogram to be between 0 and 1
-        # spec = (spec - spec.min()) / (spec.max() - spec.min())
         path = data.path / "chirpdetections"
         path.mkdir(exist_ok=True)
         path /= f"chunk{chunk_no:05d}.png"
 
-        # convert the spec tensor to the same format as a PIL image would be
-        # put to the CPU and convert to numpy array
-        spec = spec.detach().cpu().numpy()
-
-        # flip the spectrogram upside down
-        img = np.flipud(spec)
-
-        # scale the spectrogram to be between 0 and 255
-        img = np.uint8((img - img.min()) / (img.max() - img.min()) * 255)
-
-        # convert to PIL image
-        img = Image.fromarray(img)
-
-        # convert to RGB
-        img = img.convert("RGB")
-        img.save(path)
-
-        # make tensor
-        img = F.to_tensor(img)
-
-        # scale between 0 and 1
-        img = img / 255
-
-        # add batch dimension
-        img = [img.to(device)]
+        # add the 3 channels, normalize to 0-1, etc
+        img = spec_to_image(spec)
 
         # perform the detection
         with torch.inference_mode():
-            outputs = model(img)
+            outputs = model([img])
 
-        print(outputs)
-        # plot_detections(img, outputs[0], conf.det.threshold, path)
+        plot_detections(img, outputs[0], conf.det.threshold, path, conf)
 
 
 def chirpdetector_cli():
@@ -232,6 +263,11 @@ def chirpdetector_cli():
 
     datasets = [dir for dir in args.input.iterdir() if dir.is_dir()]
     config = load_config(str(args.config))
-    for dataset in datasets:
-        data = load(dataset, grid=True)
-        chirpdetector(config, data)
+    with prog:
+        task = prog.add_task("[green]Detecting chirps...", total=len(datasets))
+        for dataset in datasets:
+            prog.console.log(f"Processing {dataset.name}...")
+            data = load(dataset, grid=True)
+            chirpdetector(config, data)
+            prog.advance(task, 1)
+        prog.update(task, completed=len(datasets))

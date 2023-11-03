@@ -1,7 +1,7 @@
 [hyperparameters]
 width = 1076
 height = 430
-classes = ["__background__", "1"]
+classes = ["__background__", "chirp"]
 num_epochs = 5 
 batch_size = 2 
 kfolds = 5
@@ -15,7 +15,7 @@ modelpath = "/home/weygoldt/Projects/mscthesis/data/processed/models"
 datapath = "/home/weygoldt/Projects/mscthesis/data/processed/deepnn/train"
 
 [detection]
-threshold = 0.8
+threshold = 0.5
 time_window = 20 
 freq_window = [100, 2200]
 freq_res = 6
