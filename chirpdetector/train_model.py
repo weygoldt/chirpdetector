@@ -7,12 +7,12 @@ import argparse
 import pathlib
 from typing import List
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from IPython import embed
 from rich.progress import (
-    BarColumn,
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
@@ -30,6 +30,8 @@ from .models.helpers import (
     load_fasterrcnn,
 )
 from .utils.configfiles import Config, load_config
+
+matplotlib.use("Agg")
 
 prog = Progress(
     SpinnerColumn(),
@@ -61,13 +63,11 @@ def save_model(
     )
 
 
-def plot_losses(
+def plot_avg_losses(
     path: str,
-    filename: str,
     train_loss: np.ndarray,
-    # train_spread: np.ndarray,
     val_loss: np.ndarray,
-    # val_spread: np.ndarray,
+    checkpoint: bool = False,
 ) -> None:
     """
     Plot the training and validation losses.
@@ -77,13 +77,44 @@ def plot_losses(
 
     ax.plot(x, train_loss, label="Training Loss")
     ax.plot(val_loss, label="Validation Loss")
+    if checkpoint:
+        ax.axvline(
+            x[-1], color="gray", linestyle="--", lw=1, label="Checkpoint"
+        )
 
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
     ax.legend()
     ax.set_ylim(bottom=0)
 
-    savepath = pathlib.Path(path) / filename
+    savepath = pathlib.Path(path) / "avg_losses.png"
+    plt.savefig(savepath)
+    plt.close()
+
+
+def plot_all_losses(
+    path: str,
+    train_loss: np.ndarray,
+    val_loss: np.ndarray,
+) -> None:
+    """
+    Plot the training and validation losses.
+    """
+    _, ax = plt.subplots(figsixe=(10, 20))
+
+    x_train = np.arange(len(train_loss[0]))
+    x_val = np.arange(len(val_loss[0])) + len(train_loss[0])
+    for train_epoch_loss, val_epoch_loss in zip(train_loss, val_loss):
+        ax.plot(x_train, train_epoch_loss, label="Training Loss", c="tab:blue")
+        ax.plot(x_val, val_epoch_loss, label="Validation Loss", c="tab:orange")
+        x_train += len(train_loss[0])
+        x_val += len(val_loss[0])
+
+    ax.set_ylabel("Loss")
+    ax.legend()
+    ax.set_ylim(bottom=0)
+
+    savepath = pathlib.Path(path) / "all_losses.png"
     plt.savefig(savepath)
     plt.close()
 
@@ -161,7 +192,7 @@ def train(config: Config) -> None:
     )
 
     # initialize the model and optimizer and kfolds
-    model = load_fasterrcnn(len(config.hyper.classes)).to(device)
+    model = load_fasterrcnn(len(config.hyper.classes)).to(device).train()
     splits = KFold(n_splits=config.hyper.kfolds, shuffle=True, random_state=42)
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(
@@ -174,6 +205,12 @@ def train(config: Config) -> None:
 
     # iterate over the folds for k-fold cross-validation
     with prog:
+        # save loss across all epochs and folds
+        all_train_loss = []
+        all_val_loss = []
+        epoch_train_loss = []
+        epoch_val_loss = []
+
         task_folds = prog.add_task("[blue]Crossval", total=config.hyper.kfolds)
         for fold, (train_idx, val_idx) in enumerate(
             splits.split(np.arange(len(data)))
@@ -196,14 +233,6 @@ def train(config: Config) -> None:
                 collate_fn=collate_fn,
             )
 
-            epoch_train_loss = []
-            epoch_train_loss_spread = []
-            epoch_val_loss = []
-            epoch_val_loss_spread = []
-
-            all_train_loss = []
-            all_val_loss = []
-
             # train the model for the specified number of epochs
             task_epochs = prog.add_task(
                 f"Epochs k={fold + 1}", total=config.hyper.num_epochs
@@ -218,6 +247,7 @@ def train(config: Config) -> None:
                     model=model,
                     optimizer=optimizer,
                 )
+
                 _, val_loss = val_epoch(
                     dataloader=val_loader,
                     device=device,
@@ -228,14 +258,18 @@ def train(config: Config) -> None:
                 all_val_loss.append(val_loss)
 
                 epoch_train_loss.append(np.median(train_loss))
-                epoch_train_loss_spread.append(
-                    np.percentile(train_loss, [25, 75])
-                )
                 epoch_val_loss.append(np.median(val_loss))
-                epoch_val_loss_spread.append(np.percentile(val_loss, [25, 75]))
+
+                plot_all_losses(
+                    path=config.hyper.modelpath,
+                    train_loss=np.array(all_train_loss),
+                    val_loss=np.array(all_val_loss),
+                )
 
                 # save the model if it is the best so far
+                checkpoint = False
                 if np.mean(val_loss) < best_val_loss:
+                    checkpoint = True
                     best_val_loss = sum(val_loss) / len(val_loss)
 
                     prog.console.log(
@@ -249,19 +283,12 @@ def train(config: Config) -> None:
                         path=config.hyper.modelpath,
                     )
 
-                    plot_losses(
-                        path=config.hyper.modelpath,
-                        filename="best_model_losses_epoch.png",
-                        train_loss=np.array(epoch_train_loss),
-                        val_loss=np.array(epoch_val_loss),
-                    )
-
-                    plot_losses(
-                        path=config.hyper.modelpath,
-                        filename="best_model_losses_all.png",
-                        train_loss=np.array(all_train_loss).reshape((-1)),
-                        val_loss=np.array(all_val_loss).reshape((-1)),
-                    )
+                plot_avg_losses(
+                    path=config.hyper.modelpath,
+                    train_loss=np.array(epoch_train_loss),
+                    val_loss=np.array(epoch_val_loss),
+                    checkpoint=True,
+                )
 
                 prog.update(task_epochs, advance=1)
 
@@ -298,3 +325,107 @@ def train_cli() -> None:
     )
     config = load_config(parser.parse_args().config)
     train(config)
+
+
+def verify_detections(
+    image: torch.Tensor, target: dict, output: dict, path: str
+) -> None:
+    """
+    Verify the detections.
+    """
+
+    _, ax = plt.subplots()
+    ax.imshow(image.cpu().numpy().transpose((1, 2, 0)))
+
+    for box in target["boxes"]:
+        box = box.cpu().numpy()
+        ax.add_patch(
+            matplotlib.patches.Rectangle(
+                (box[0], box[1]),
+                box[2] - box[0],
+                box[3] - box[1],
+                fill=False,
+                edgecolor="red",
+                linewidth=1,
+            )
+        )
+
+    for box in output["boxes"]:
+        box = box.cpu().numpy()
+        ax.add_patch(
+            matplotlib.patches.Rectangle(
+                (box[0], box[1]),
+                box[2] - box[0],
+                box[3] - box[1],
+                fill=False,
+                edgecolor="blue",
+                linewidth=1,
+            )
+        )
+        ax.text(
+            box[0],
+            box[1],
+            f"{output['scores'][0].cpu().numpy():.2f}",
+            color="blue",
+        )
+
+    plt.savefig(path)
+    plt.close()
+
+
+def inference_on_trainingdata(conf: Config) -> None:
+    """
+    Perform inference on the training data.
+    """
+    device = get_device()
+    prog.console.log(f"Using device: [bold blue]{device}[reset]")
+    prog.console.log(f"Using config file: [bold blue]{conf.path}[reset]")
+    prog.console.log(
+        "[bold magenta] ------------------ Starting Inference ------------------ [reset]"
+    )
+    data = CustomDataset(
+        path=conf.train.datapath,
+        classes=conf.hyper.classes,
+        width=conf.hyper.width,
+        height=conf.hyper.height,
+    )
+
+    modelpath = pathlib.Path(conf.hyper.modelpath) / "model.pt"
+
+    model = load_fasterrcnn(len(conf.hyper.classes)).to(device)
+    model.load_state_dict(torch.load(modelpath)["model_state_dict"])
+    model.eval()
+
+    # with prog:
+    # task = prog.add_task("Inference", total=len(data))
+    for idx in range(len(data)):
+        image, target = data[idx]
+        image = image.to(device)
+        target = {k: v.to(device) for k, v in target.items()}
+
+        with torch.inference_mode():
+            output = model([image])
+
+        path = pathlib.Path(conf.hyper.modelpath) / "verify"
+        path.mkdir(parents=True, exist_ok=True)
+        path = path / f"{idx}.png"
+        verify_detections(
+            image=image,
+            target=target,
+            output=output[0],
+            path=path,
+        )
+
+
+def inference_cli():
+    parser = argparse.ArgumentParser(
+        description="Perform inference on the training data."
+    )
+    parser.add_argument(
+        "--config",
+        "-c",
+        type=str,
+        help="Path to config file.",
+    )
+    config = load_config(parser.parse_args().config)
+    inference_on_trainingdata(config)

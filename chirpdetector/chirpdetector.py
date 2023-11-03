@@ -203,7 +203,7 @@ def chirpdetector(conf: Config, data: Dataset):
         img = [img.to(device)]
 
         # perform the detection
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = model(img)
 
         print(outputs)

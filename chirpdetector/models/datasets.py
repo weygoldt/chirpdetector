@@ -61,11 +61,11 @@ class CustomDataset(set):
         labels = []
 
         for annot in annotations:
-            labels.append(int(annot[1]))
+            labels.append(int(annot[0]))
 
             # resize the normed bounding boxes according to the image width
             # and height
-            x1 = annot[0] * img_width
+            x1 = annot[1] * img_width
             y1 = annot[2] * img_height
             x2 = annot[3] * img_width
             y2 = annot[4] * img_height

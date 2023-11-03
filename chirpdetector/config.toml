@@ -2,9 +2,9 @@
 width = 1076
 height = 430
 classes = ["__background__", "1"]
-num_epochs = 10 
+num_epochs = 5 
 batch_size = 2 
-kfolds = 10
+kfolds = 5
 learning_rate = 0.001 
 momentum = 0.9
 weight_decay = 0.0005

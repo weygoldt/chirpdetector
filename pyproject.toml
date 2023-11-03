@@ -24,9 +24,10 @@ black = "^23.10.1"
 pre-commit = "^3.5.0"
 
 [tool.poetry.scripts]
-datasets = "chirpdetector.datasets:main"
+datasets = "chirpdetector.models.datasets:main"
 train = "chirpdetector.train_model:train_cli"
 detect = "chirpdetector.chirpdetector:chirpdetector_cli"
+inference = "chirpdetector.train_model:inference_cli"
 
 [build-system]
 requires = ["poetry-core"]
