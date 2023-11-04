@@ -139,7 +139,7 @@ def chirpdetector_cli():
         detect(args)
 
     elif args.command == "convert":
-        parse_datasets(args.input, args.output, args.estimate_labels)
+        parse_datasets(args.input, args.output, args.labels)
 
     else:
         raise ValueError("Unknown command. See --help for more information.")

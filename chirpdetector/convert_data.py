@@ -210,6 +210,43 @@ def synthetic_labels(
     return bboxes
 
 
+def detected_labels(
+    output: pathlib.Path,
+    chunk: Dataset,
+    imgname: str,
+    spec: np.ndarray,
+    spec_times: np.ndarray,
+) -> None:
+    # load the detected bboxes csv
+    df = pd.read_csv(chunk.path / "chirpdetector_bboxes.csv")
+
+    # get chunk start and stop time
+    start, stop = spec_times[0], spec_times[-1]
+
+    # get the bboxes for this chunk
+    bboxes = df[(df.t1 >= start) & (df.t2 <= stop)]
+
+    # get the x and y coordinates of the bboxes in pixels as dataframe
+    bboxes_xy = bboxes[["x1", "y1", "x2", "y2"]]
+
+    # convert the bboxes to relative coordinates from spec shape
+    bboxes_xy.loc[:, "x1"] /= spec.shape[1]
+    bboxes_xy.loc[:, "x2"] /= spec.shape[1]
+    bboxes_xy.loc[:, "y1"] /= spec.shape[0]
+    bboxes_xy.loc[:, "y2"] /= spec.shape[0]
+
+    # add as first colum instance id
+    bboxes_xy.insert(0, "instance_id", np.ones(len(bboxes_xy), dtype=int))
+
+    # save dataframe for every spec without headers as txt
+    bboxes_xy.to_csv(
+        output / "labels" / f"{imgname}.txt",
+        header=False,
+        index=False,
+        sep=" ",
+    )
+
+
 def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
     """
     Notes
@@ -319,6 +356,7 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
             & (spec_freqs <= spectrogram_freq_limits[1])
         ]
 
+        imgname = f"{data.path.name}_{chunk_no:06}.png"
         if label_mode == "synthetic":
             bbox_df = synthetic_labels(
                 dataroot,
@@ -332,7 +370,7 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
             )
             bbox_dfs.append(bbox_df)
         elif label_mode == "detected":
-            print("Not implemented yet")
+            detected_labels(dataroot, chunk, imgname, spec, spec_times)
 
         # normalize the spectrogram to zero mean and unit variance
         # the spec is still a tensor
@@ -342,7 +380,6 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
         img = numpy_to_pil(spec)
 
         # save image
-        imgname = f"{data.path.name}_{chunk_no:06}.png"
         img.save(dataroot / "images" / f"{imgname}")
 
     if label_mode == "synthetic":

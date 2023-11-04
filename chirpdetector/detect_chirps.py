@@ -63,22 +63,22 @@ def float_index_interpolation(
     numpy.ndarray
         The interpolated value.
     """
-
+    newvalues = np.zeros_like(values)
     for i, value in enumerate(values):
         nextlower = np.floor(value).astype(int)
         rest = value - nextlower
 
         if nextlower > len(data_arr) - 2:
-            values[i] = data_arr[-1]
+            newvalues[i] = data_arr[-1]
             continue
 
         nextlower_data = data_arr[index_arr == nextlower][0]
         nexthigher_data = data_arr[index_arr == nextlower + 1][0]
 
         newvalue = nextlower_data + rest * (nexthigher_data - nextlower_data)
-        values[i] = newvalue
+        newvalues[i] = newvalue
 
-    return values
+    return newvalues
 
 
 def flip_boxes(boxes, img_height):
@@ -310,12 +310,6 @@ def detect_chirps(conf: Config, data: Dataset):
         bbox_df["f2"] = float_index_interpolation(
             bbox_df["y2"].values, spec_freqs_index, spec_freqs
         )
-
-        # add time and freq to the dataframe
-        bbox_df["t1"] = bboxes[:, 0]
-        bbox_df["f1"] = bboxes[:, 1]
-        bbox_df["t2"] = bboxes[:, 2]
-        bbox_df["f2"] = bboxes[:, 3]
 
         # save df to list
         bbox_dfs.append(bbox_df)
