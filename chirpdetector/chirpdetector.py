@@ -5,7 +5,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich_argparse import RichHelpFormatter
 
-from .dataconverter import parse_datasets
+from .convert_data import parse_datasets
 from .detect_chirps import detect
 from .train_model import train
 from .utils.configfiles import copy_config, load_config
@@ -111,10 +111,15 @@ def parse_args():
         required=True,
     )
     convert.add_argument(
-        "--estimate_labels",
-        "-e",
-        action="store_true",
-        help="Whether to infer the labeled bounding boxes from chirp parameters of the dataset. Only works if the dataset is synthetic.",
+        "--labels",
+        "-l",
+        type=str,
+        choices=["none", "synthetic", "detected"],
+        help="""Whether to, and how to, add labes to the dataset,
+            none: Don't make labels, just spectrograms,
+            synthetic: Make labels from the chirp parameters used to generate 
+            the synthetic data, detected: Make labels from the detected chirps""",
+        required=True,
     )
 
     return parser.parse_args()

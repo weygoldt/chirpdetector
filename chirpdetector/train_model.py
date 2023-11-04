@@ -23,7 +23,7 @@ from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader
 
 from .models.datasets import CustomDataset
-from .models.helpers import collate_fn, get_device, load_fasterrcnn
+from .models.utils import collate_fn, get_device, load_fasterrcnn
 from .utils.configfiles import Config
 from .utils.logging import make_logger
 
@@ -202,9 +202,9 @@ def train(config: Config) -> None:
     )
     device = get_device()
 
-    con.rule("Starting training")
+    progress.console.rule("Starting training")
     msg = f"Device: {device}, Config: {config.path}"
-    con.log(msg)
+    progress.console.log(msg)
     logger.info(msg)
 
     data = CustomDataset(
@@ -281,7 +281,7 @@ def train(config: Config) -> None:
                     f"Training epoch {epoch + 1} of {config.hyper.num_epochs} "
                     f"for fold {fold + 1} of {config.hyper.kfolds}"
                 )
-                con.log(msg)
+                progress.console.log(msg)
                 logger.info(msg)
 
                 train_loss = train_epoch(
@@ -307,9 +307,12 @@ def train(config: Config) -> None:
                 if np.mean(val_loss) < best_val_loss:
                     best_val_loss = sum(val_loss) / len(val_loss)
 
-                    con.log(
-                        f"New best validation loss: {best_val_loss:.4f}, saving model..."
+                    msg = (
+                        f"New best validation loss: {best_val_loss:.4f}, "
+                        "saving model..."
                     )
+                    progress.console.log(msg)
+                    logger.info(msg)
 
                     save_model(
                         epoch=epoch,
@@ -329,12 +332,6 @@ def train(config: Config) -> None:
 
                 progress.update(task_epochs, advance=1)
 
-            plot_folds(
-                fold_avg_train_loss=fold_avg_train_loss,
-                fold_avg_val_loss=fold_avg_val_loss,
-                path=pathlib.Path(config.hyper.modelpath) / "losses.png",
-            )
-
             progress.update(task_epochs, visible=False)
 
             fold_train_loss.append(epoch_train_loss)
@@ -342,15 +339,20 @@ def train(config: Config) -> None:
             fold_avg_train_loss.append(epoch_avg_train_loss)
             fold_avg_val_loss.append(epoch_avg_val_loss)
 
-            fold_val_loss.append(np.mean(val_loss))
+            plot_folds(
+                fold_avg_train_loss=fold_avg_train_loss,
+                fold_avg_val_loss=fold_avg_val_loss,
+                path=pathlib.Path(config.hyper.modelpath) / "losses.png",
+            )
+
             progress.update(task_folds, advance=1)
 
         progress.update(task_folds, visible=False)
 
         msg = f"Average validation loss of last epoch across folds: {np.mean(fold_val_loss):.4f}"
-        con.log(msg)
+        progress.console.log(msg)
         logger.info(msg)
-        con.rule("[bold blue]Finished training")
+        progress.console.rule("[bold blue]Finished training")
 
 
 def verify_detections(

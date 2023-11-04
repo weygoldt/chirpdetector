@@ -17,7 +17,7 @@ from matplotlib.patches import Rectangle
 from torch.utils.data import DataLoader, Dataset
 
 from ..utils.configfiles import load_config
-from .helpers import collate_fn
+from .utils import collate_fn
 
 
 class CustomDataset(set):

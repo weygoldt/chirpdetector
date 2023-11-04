@@ -10,6 +10,7 @@ import pathlib
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import torch
 import torchvision.transforms.functional as F
 from IPython import embed
@@ -29,7 +30,7 @@ from gridtools.utils.spectrograms import (
     spectrogram,
 )
 
-from .models.helpers import get_device, load_fasterrcnn
+from .models.utils import get_device, load_fasterrcnn
 from .utils.configfiles import Config, copy_config, load_config
 from .utils.logging import make_logger
 
@@ -150,11 +151,13 @@ def detect_chirps(conf: Config, data: Dataset):
     model.to(device).eval()
 
     # make spec config
-    nfft = freqres_to_nfft(conf.det.freq_res, data.grid.samplerate)  # samples
-    hop_len = overlap_to_hoplen(conf.det.overlap_frac, nfft)  # samples
+    nfft = freqres_to_nfft(conf.spec.freq_res, data.grid.samplerate)  # samples
+    hop_len = overlap_to_hoplen(conf.spec.overlap_frac, nfft)  # samples
     chunksize = conf.det.time_window * data.grid.samplerate  # samples
     nchunks = np.ceil(data.grid.rec.shape[0] / chunksize).astype(int)
-    window_overlap_samples = int(conf.det.spec_overlap * data.grid.samplerate)
+    window_overlap_samples = int(conf.spec.spec_overlap * data.grid.samplerate)
+
+    bbox_dfs = []
 
     # iterate over the chunks
     for chunk_no in range(nchunks):
@@ -218,13 +221,13 @@ def detect_chirps(conf: Config, data: Dataset):
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
         spec = spec[
-            (spec_freqs >= conf.det.freq_window[0])
-            & (spec_freqs <= conf.det.freq_window[1]),
+            (spec_freqs >= conf.spec.freq_window[0])
+            & (spec_freqs <= conf.spec.freq_window[1]),
             :,
         ]
         spec_freqs = spec_freqs[
-            (spec_freqs >= conf.det.freq_window[0])
-            & (spec_freqs <= conf.det.freq_window[1])
+            (spec_freqs >= conf.spec.freq_window[0])
+            & (spec_freqs <= conf.spec.freq_window[1])
         ]
 
         # normalize the spectrogram to be between 0 and 1
@@ -240,6 +243,45 @@ def detect_chirps(conf: Config, data: Dataset):
             outputs = model([img])
 
         plot_detections(img, outputs[0], conf.det.threshold, path, conf)
+
+        # put the boxes, scores and labels into the dataset
+        bboxes = outputs[0]["boxes"].detach().cpu().numpy()
+        scores = outputs[0]["scores"].detach().cpu().numpy()
+        labels = outputs[0]["labels"].detach().cpu().numpy()
+
+        bbox_df = pd.DataFrame(
+            data=bboxes,
+            columns=["x1", "y1", "x2", "y2"],
+        )
+        bbox_df["score"] = scores
+        bbox_df["label"] = labels
+
+        # convert x values to time on spec_times
+        bboxes[:, 0] = spec_times[bboxes[:, 0].astype(int)]
+        bboxes[:, 2] = spec_times[bboxes[:, 2].astype(int)]
+
+        # convert y values to frequency on spec_freqs
+        bboxes[:, 1] = spec_freqs[bboxes[:, 1].astype(int)]
+        bboxes[:, 3] = spec_freqs[bboxes[:, 3].astype(int)]
+
+        # add time and freq to the dataframe
+        bbox_df["t1"] = bboxes[:, 0]
+        bbox_df["f1"] = bboxes[:, 1]
+        bbox_df["t2"] = bboxes[:, 2]
+        bbox_df["f2"] = bboxes[:, 3]
+
+        # save df to list
+        bbox_dfs.append(bbox_df)
+
+    # concatenate all dataframes
+    bbox_df = pd.concat(bbox_dfs)
+    bbox_df.reset_index(inplace=True, drop=True)
+
+    # sort the dataframe by t1
+    bbox_df.sort_values(by="t1", inplace=True)
+
+    # save the dataframe
+    bbox_df.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
 
 
 def chirpdetector_cli():

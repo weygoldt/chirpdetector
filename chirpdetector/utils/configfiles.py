@@ -54,11 +54,13 @@ def load_config(path: str) -> ConfigDict:
     hy = Hyperparams(**file["hyperparameters"])
     tr = Training(**file["training"])
     det = Detection(**file["detection"])
+    spec = Spectrogram(**file["spectrogram"])
     config = Config(
         path=path,
         hyper=hy,
         train=tr,
         det=det,
+        spec=spec,
     )
     return config
 
@@ -83,11 +85,14 @@ class Training(BaseModel):
 
 class Detection(BaseModel):
     threshold: float
+
+
+class Spectrogram(BaseModel):
     time_window: float
     freq_window: List
-    spec_overlap: float
-    overlap_frac: float
     freq_res: float
+    overlap_frac: float
+    spec_overlap: float
 
 
 class Config(BaseModel):
@@ -96,3 +101,4 @@ class Config(BaseModel):
     hyper: Hyperparams
     train: Training
     det: Detection
+    spec: Spectrogram

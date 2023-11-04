@@ -47,15 +47,10 @@ def make_file_tree(path: pathlib.Path) -> None:
 
     path.mkdir(exist_ok=True, parents=True)
 
-    train_imgs = path / "train" / "images"
-    train_labels = path / "train" / "labels"
+    train_imgs = path / "images"
+    train_labels = path / "labels"
     train_imgs.mkdir(exist_ok=True, parents=True)
     train_labels.mkdir(exist_ok=True, parents=True)
-
-    val_imgs = path / "val" / "images"
-    val_labels = path / "val" / "labels"
-    val_imgs.mkdir(exist_ok=True, parents=True)
-    val_labels.mkdir(exist_ok=True, parents=True)
 
 
 def numpy_to_pil(img: np.ndarray) -> Image:
@@ -133,9 +128,89 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
     return df
 
 
-def make_spectrograms(
-    data: Dataset, dataroot: pathlib.Path, plot_boxes: bool = False
-) -> None:
+def synthetic_labels(
+    output: pathlib.Path,
+    chunk: Dataset,
+    nfft: int,
+    spec: np.ndarray,
+    spec_times: np.ndarray,
+    spec_freqs: np.ndarray,
+    imgname: str,
+    chunk_no: int,
+) -> pd.DataFrame:
+    # compute the bounding boxes for this chunk
+    bboxes = chirp_bounding_boxes(chunk, nfft)
+
+    # convert bounding box center coordinates to spectrogram coordinates
+    # find the indices on the spec_times corresponding to the center times
+    x = np.searchsorted(spec_times, bboxes.t_center)
+    y = np.searchsorted(spec_freqs, bboxes.f_center)
+    widths = np.searchsorted(spec_times - spec_times[0], bboxes.width)
+    heights = np.searchsorted(spec_freqs, bboxes.height)
+
+    # now we have center coordinates, widths and heights in indices. But PIL
+    # expects coordinates in pixels in the format
+    # (Upper left x coordinate, upper left y coordinate,
+    # lower right x coordinate, lower right y coordinate)
+    # In addiotion, an image starts in the top left corner so the bboxes
+    # need to be mirrored horizontally.
+
+    y = spec.shape[0] - y  # flip the y values to fit y=0 at the top
+    lxs, lys = x - widths / 2, y - heights / 2
+    rxs, rys = x + widths / 2, y + heights / 2
+
+    # add them to the bboxes dataframe
+    bboxes["upperleft_img_x"] = lxs
+    bboxes["upperleft_img_y"] = lys
+    bboxes["lowerright_img_x"] = rxs
+    bboxes["lowerright_img_y"] = rys
+
+    # most deep learning frameworks expect bounding box coordinates
+    # as relative to the image size. So we normalize the coordinates
+    # to the image size
+
+    rel_lxs = lxs / spec.shape[1]
+    rel_rxs = rxs / spec.shape[1]
+    rel_lys = lys / spec.shape[0]
+    rel_rys = rys / spec.shape[0]
+
+    # add them to the bboxes dataframe
+    bboxes["upperleft_img_x_norm"] = rel_lxs
+    bboxes["upperleft_img_y_norm"] = rel_lys
+    bboxes["lowerright_img_x_norm"] = rel_rxs
+    bboxes["lowerright_img_y_norm"] = rel_rys
+
+    # add chunk ID to the bboxes dataframe
+    bboxes["chunk_id"] = chunk_no
+
+    # put them into a dataframe to save for eahc spectrogram
+    df = pd.DataFrame(
+        {"lx": rel_lxs, "ly": rel_lys, "rx": rel_rxs, "ry": rel_rys}
+    )
+
+    # add as first colum instance id
+    df.insert(0, "instance_id", np.ones_like(lxs, dtype=int))
+
+    # draw the bounding boxes on the image
+    # for lx, ly, rx, ry in zip(lxs, lys, rxs, rys):
+    #     img = img.convert("RGB")
+    #     draw = ImageDraw.Draw(img)
+    #     draw.rectangle((lx, ly, rx, ry), outline="red", width=1)
+
+    # stash the bboxes dataframe for this chunk
+    bboxes["image"] = imgname
+
+    # save dataframe for every spec without headers as txt
+    df.to_csv(
+        output / "labels" / f"{chunk.path.name}_{chunk_no:06}.txt",
+        header=False,
+        index=False,
+        sep=" ",
+    )
+    return bboxes
+
+
+def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
     """
     Notes
     -----
@@ -146,6 +221,13 @@ def make_spectrograms(
     and a txt file into a labels directory.
     """
     assert hasattr(data, "grid"), "Dataset must have a grid attribute"
+    assert label_mode in [
+        "none",
+        "synthetic",
+        "detected",
+    ], "label_mode must be one of 'none', 'synthetic' or 'detected'"
+
+    dataroot = output
 
     n_electrodes = data.grid.rec.shape[1]
 
@@ -237,103 +319,40 @@ def make_spectrograms(
             & (spec_freqs <= spectrogram_freq_limits[1])
         ]
 
+        if label_mode == "synthetic":
+            bbox_df = synthetic_labels(
+                dataroot,
+                chunk,
+                nfft,
+                spec,
+                spec_times,
+                spec_freqs,
+                imgname,
+                chunk_no,
+            )
+            bbox_dfs.append(bbox_df)
+        elif label_mode == "detected":
+            print("Not implemented yet")
+
         # normalize the spectrogram to zero mean and unit variance
         # the spec is still a tensor
         spec = (spec - spec.mean()) / spec.std()
-
-        # compute the bounding boxes for this chunk
-        bboxes = chirp_bounding_boxes(chunk, nfft)
-
-        # convert bounding box center coordinates to spectrogram coordinates
-        # find the indices on the spec_times corresponding to the center times
-        x = np.searchsorted(spec_times, bboxes.t_center)
-        y = np.searchsorted(spec_freqs, bboxes.f_center)
-        widths = np.searchsorted(spec_times - spec_times[0], bboxes.width)
-        heights = np.searchsorted(spec_freqs, bboxes.height)
-
-        # now we have center coordinates, widths and heights in indices. But PIL
-        # expects coordinates in pixels in the format
-        # (Upper left x coordinate, upper left y coordinate,
-        # lower right x coordinate, lower right y coordinate)
-        # In addiotion, an image starts in the top left corner so the bboxes
-        # need to be mirrored horizontally.
-
-        y = spec.shape[0] - y  # flip the y values to fit y=0 at the top
-        lxs, lys = x - widths / 2, y - heights / 2
-        rxs, rys = x + widths / 2, y + heights / 2
-
-        # add them to the bboxes dataframe
-        bboxes["upperleft_img_x"] = lxs
-        bboxes["upperleft_img_y"] = lys
-        bboxes["lowerright_img_x"] = rxs
-        bboxes["lowerright_img_y"] = rys
-
-        # most deep learning frameworks expect bounding box coordinates
-        # as relative to the image size. So we normalize the coordinates
-        # to the image size
-
-        rel_lxs = lxs / spec.shape[1]
-        rel_rxs = rxs / spec.shape[1]
-        rel_lys = lys / spec.shape[0]
-        rel_rys = rys / spec.shape[0]
-
-        # add them to the bboxes dataframe
-        bboxes["upperleft_img_x_norm"] = rel_lxs
-        bboxes["upperleft_img_y_norm"] = rel_lys
-        bboxes["lowerright_img_x_norm"] = rel_rxs
-        bboxes["lowerright_img_y_norm"] = rel_rys
-
-        # add chunk ID to the bboxes dataframe
-        bboxes["chunk_id"] = chunk_no
-
-        # put them into a dataframe to save for eahc spectrogram
-        df = pd.DataFrame(
-            {"lx": rel_lxs, "ly": rel_lys, "rx": rel_rxs, "ry": rel_rys}
-        )
-
-        # add as first colum instance id
-        df.insert(0, "instance_id", np.ones_like(lxs, dtype=int))
-
         # convert the spectrogram to a PIL image
         spec = spec.detach().cpu().numpy()
         img = numpy_to_pil(spec)
 
-        # draw the bounding boxes on the image
-        if plot_boxes is True:
-            for lx, ly, rx, ry in zip(lxs, lys, rxs, rys):
-                img = img.convert("RGB")
-                draw = ImageDraw.Draw(img)
-                draw.rectangle((lx, ly, rx, ry), outline="red", width=1)
-
         # save image
+        imgpath = dataroot / "images"
         imgname = f"{data.path.name}_{chunk_no:06}.png"
-        img.save(dataroot / "train" / "images" / f"{imgname}")
+        img.save(dataroot / "images" / f"{imgname}")
 
-        # stash the bboxes dataframe for this chunk
-        bboxes["image"] = imgname
-        bbox_dfs.append(bboxes)
-
-        # save dataframe for every spec without headers as txt
-        df.to_csv(
-            dataroot
-            / "train"
-            / "labels"
-            / f"{data.path.name}_{chunk_no:06}.txt",
-            header=False,
-            index=False,
-            sep=" ",
-        )
-
-    # concat all the bboxes dataframes
-    bbox_df = pd.concat(bbox_dfs, ignore_index=True)
-    # save the bboxes dataframe
-    bbox_df.to_csv(
-        dataroot / "train" / f"{data.path.name}_bboxes.csv", index=False
-    )
+    if label_mode == "synthetic":
+        bbox_df = pd.concat(bbox_dfs, ignore_index=True)
+        bbox_df.to_csv(dataroot / f"{data.path.name}_bboxes.csv", index=False)
 
 
 def parse_datasets(
-    input: pathlib.Path, output: pathlib.Path, make_boxes
+    input: pathlib.Path, output: pathlib.Path, label_mode: str
 ) -> None:
     """
     Parse all datasets in a directory.
@@ -349,10 +368,9 @@ def parse_datasets(
     """
 
     make_file_tree(output)
-    for path in track(list(input.iterdir()), description="Building datasets"):
-        data = load(path, grid=True)
 
-        if make_boxes is True:
-            make_spectrograms(data, output, plot_boxes=False)
-        else:
-            print("Not implemented yet.")
+    for path in track(list(input.iterdir()), description="Building datasets"):
+        if path.is_file():
+            continue
+        data = load(path, grid=True)
+        convert(data, output, label_mode)
