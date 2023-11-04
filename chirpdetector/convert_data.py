@@ -342,7 +342,6 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
         img = numpy_to_pil(spec)
 
         # save image
-        imgpath = dataroot / "images"
         imgname = f"{data.path.name}_{chunk_no:06}.png"
         img.save(dataroot / "images" / f"{imgname}")
 

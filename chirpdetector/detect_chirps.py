@@ -3,7 +3,6 @@
 """
 Detect chirps on a spectrogram.
 """
-
 import argparse
 import pathlib
 
@@ -42,6 +41,44 @@ prog = Progress(
     MofNCompleteColumn(),
     TimeElapsedColumn(),
 )
+
+
+def float_index_interpolation(
+    values: np.ndarray, index_arr: np.ndarray, data_arr: np.ndarray
+) -> float:
+    """
+    Interpolate a value in the data dimension that is not necessarily on the data array.
+
+    Parameters
+    ----------
+    value : float
+        The value to be interpolated.
+    index_arr : numpy.ndarray
+        The array of indices.
+    data_arr : numpy.ndarray
+        The array of data.
+
+    Returns
+    -------
+    numpy.ndarray
+        The interpolated value.
+    """
+
+    for i, value in enumerate(values):
+        nextlower = np.floor(value).astype(int)
+        rest = value - nextlower
+
+        if nextlower > len(data_arr) - 2:
+            values[i] = data_arr[-1]
+            continue
+
+        nextlower_data = data_arr[index_arr == nextlower][0]
+        nexthigher_data = data_arr[index_arr == nextlower + 1][0]
+
+        newvalue = nextlower_data + rest * (nexthigher_data - nextlower_data)
+        values[i] = newvalue
+
+    return values
 
 
 def flip_boxes(boxes, img_height):
@@ -153,7 +190,7 @@ def detect_chirps(conf: Config, data: Dataset):
     # make spec config
     nfft = freqres_to_nfft(conf.spec.freq_res, data.grid.samplerate)  # samples
     hop_len = overlap_to_hoplen(conf.spec.overlap_frac, nfft)  # samples
-    chunksize = conf.det.time_window * data.grid.samplerate  # samples
+    chunksize = conf.spec.time_window * data.grid.samplerate  # samples
     nchunks = np.ceil(data.grid.rec.shape[0] / chunksize).astype(int)
     window_overlap_samples = int(conf.spec.spec_overlap * data.grid.samplerate)
 
@@ -257,12 +294,22 @@ def detect_chirps(conf: Config, data: Dataset):
         bbox_df["label"] = labels
 
         # convert x values to time on spec_times
-        bboxes[:, 0] = spec_times[bboxes[:, 0].astype(int)]
-        bboxes[:, 2] = spec_times[bboxes[:, 2].astype(int)]
+        spec_times_index = np.arange(0, len(spec_times))
+        bbox_df["t1"] = float_index_interpolation(
+            bbox_df["x1"].values, spec_times_index, spec_times
+        )
+        bbox_df["t2"] = float_index_interpolation(
+            bbox_df["x2"].values, spec_times_index, spec_times
+        )
 
         # convert y values to frequency on spec_freqs
-        bboxes[:, 1] = spec_freqs[bboxes[:, 1].astype(int)]
-        bboxes[:, 3] = spec_freqs[bboxes[:, 3].astype(int)]
+        spec_freqs_index = np.arange(0, len(spec_freqs))
+        bbox_df["f1"] = float_index_interpolation(
+            bbox_df["y1"].values, spec_freqs_index, spec_freqs
+        )
+        bbox_df["f2"] = float_index_interpolation(
+            bbox_df["y2"].values, spec_freqs_index, spec_freqs
+        )
 
         # add time and freq to the dataframe
         bbox_df["t1"] = bboxes[:, 0]
@@ -279,6 +326,11 @@ def detect_chirps(conf: Config, data: Dataset):
 
     # sort the dataframe by t1
     bbox_df.sort_values(by="t1", inplace=True)
+
+    # sort the columns
+    bbox_df = bbox_df[
+        ["label", "score", "x1", "y1", "x2", "y2", "t1", "f1", "t2", "f2"]
+    ]
 
     # save the dataframe
     bbox_df.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
@@ -314,14 +366,15 @@ def detect(args):
         )
 
     with prog:
-        task = prog.add_task("[green]Detecting chirps...", total=len(datasets))
+        task = prog.add_task("Detecting chirps...", total=len(datasets))
         for dataset in datasets:
             msg = f"Detecting chirps in {dataset.name}..."
-            prog.console.log(msg), logger.info(msg)
+            prog.console.log(msg)
+            logger.info(msg)
 
             data = load(dataset, grid=True)
             detect_chirps(config, data)
-            prog.advance(task, 1)
+            prog.update(task, advance=1)
         prog.update(task, completed=len(datasets))
 
 

@@ -15,3 +15,4 @@
 - [ ] Supply scripts to convert completely unannotated or partially annotated data to the label-studio format to make manual labeling easier
 - [ ] Make possible to output detections as a yolo dataset 
 - [ ] Look up how to convert a yolo dataset to a label-studio input so we can label pre-annotated data, facilitating a full human-in-the-loop approach
+- [ ] Add augmentation transforms to the dataset class and add augmentations to the simulation in `gridtools`
