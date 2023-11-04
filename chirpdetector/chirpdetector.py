@@ -5,6 +5,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich_argparse import RichHelpFormatter
 
+from .dataconverter import parse_datasets
 from .detect_chirps import detect
 from .train_model import train
 from .utils.configfiles import copy_config, load_config
@@ -18,9 +19,15 @@ A valid dataset needs to be tracked using the `wavetracker` package to
 correctly assign chirps after detection.
 
 To get started, run `chirpdetector copyconfig` to copy the default config file
-into the root directory of your dataset. Then, change the configuration file
-to provide paths to training data and to directories where the model weights
-and loss plots are saved. 
+into the root directory of the dataset on which you want to detect chirps. Then, 
+change the configuration file to provide paths to training data and to 
+directories where the model weights and loss plots are saved. 
+
+If you want to create a training dataset from a wavetracker dataset, run
+`chirpdetector convert`. This will create a new dataset with spectrogram images
+into a specified directory. If the dataset is synthetic, you can also infer
+the bounding boxes from the chirp parameters. Otherwise, you need to label the
+bounding boxes manually. I recommend using the `label-studio` package for this.
 
 Run `chirpdetector train` to train the model. If you want to use a pretrained
 model, you can download one from the GitHub repository and specify the path
@@ -84,6 +91,32 @@ def parse_args():
         required=True,
     )
 
+    convert = subparser.add_parser(
+        "convert",
+        help="Convert a wavetracker dataset to labeled or unlabeled spectrogram images to train the model.",
+        formatter_class=parser.formatter_class,
+    )
+    convert.add_argument(
+        "--input",
+        "-i",
+        type=pathlib.Path,
+        help="Path to the input dataset.",
+        required=True,
+    )
+    convert.add_argument(
+        "--output",
+        "-o",
+        type=pathlib.Path,
+        help="Path to the output dataset.",
+        required=True,
+    )
+    convert.add_argument(
+        "--estimate_labels",
+        "-e",
+        action="store_true",
+        help="Whether to infer the labeled bounding boxes from chirp parameters of the dataset. Only works if the dataset is synthetic.",
+    )
+
     return parser.parse_args()
 
 
@@ -99,6 +132,9 @@ def chirpdetector_cli():
 
     elif args.command == "detect":
         detect(args)
+
+    elif args.command == "convert":
+        parse_datasets(args.input, args.output, args.estimate_labels)
 
     else:
         raise ValueError("Unknown command. See --help for more information.")

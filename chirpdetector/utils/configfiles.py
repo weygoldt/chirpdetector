@@ -12,6 +12,8 @@ from typing import List
 import toml
 from pydantic import BaseModel, ConfigDict
 
+from .logging import make_logger
+
 
 def copy_config(path: str) -> None:
     """
@@ -39,7 +41,15 @@ def copy_config(path: str) -> None:
 
 
 def load_config(path: str) -> ConfigDict:
-    path = path
+    global logger
+    logger = make_logger(
+        __name__, pathlib.Path(path).parent / "chirpdetector.log"
+    )
+
+    logger.info(
+        f"Moving default configuration file to {pathlib.Path(path).parent}"
+    )
+
     file = toml.load(path)
     hy = Hyperparams(**file["hyperparameters"])
     tr = Training(**file["training"])

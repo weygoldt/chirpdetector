@@ -31,6 +31,7 @@ from gridtools.utils.spectrograms import (
 
 from .models.helpers import get_device, load_fasterrcnn
 from .utils.configfiles import Config, copy_config, load_config
+from .utils.logging import make_logger
 
 matplotlib.use("Agg")
 
@@ -256,6 +257,8 @@ def chirpdetector_cli():
 
 
 def detect(args):
+    global logger
+    logger = make_logger(__name__, args.path / "chirpdetector.log")
     datasets = [dir for dir in args.path.iterdir() if dir.is_dir()]
     confpath = args.path / "chirpdetector.toml"
 
@@ -271,7 +274,9 @@ def detect(args):
     with prog:
         task = prog.add_task("[green]Detecting chirps...", total=len(datasets))
         for dataset in datasets:
-            prog.console.log(f"Processing {dataset.name}...")
+            msg = f"Detecting chirps in {dataset.name}..."
+            prog.console.log(msg), logger.info(msg)
+
             data = load(dataset, grid=True)
             detect_chirps(config, data)
             prog.advance(task, 1)

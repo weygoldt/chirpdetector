@@ -3,7 +3,6 @@
 """
 Train and test the neural network specified in the config file.
 """
-import argparse
 import pathlib
 from typing import List
 
@@ -11,34 +10,33 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from IPython import embed
+from rich.console import Console
 from rich.progress import (
+    BarColumn,
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
+    TextColumn,
     TimeElapsedColumn,
 )
-from sklearn.metrics import roc_curve
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader
 
 from .models.datasets import CustomDataset
-from .models.helpers import (
-    collate_fn,
-    get_device,
-    get_transforms,
-    load_fasterrcnn,
-)
-from .utils.configfiles import Config, load_config
+from .models.helpers import collate_fn, get_device, load_fasterrcnn
+from .utils.configfiles import Config
+from .utils.logging import make_logger
 
 matplotlib.use("Agg")
 
-prog = Progress(
+con = Console()
+progress = Progress(
     SpinnerColumn(),
-    *Progress.get_default_columns(),
+    TextColumn("[progress.description]{task.description}"),
+    BarColumn(),
     MofNCompleteColumn(),
     TimeElapsedColumn(),
-    transient=True,
+    console=con,
 )
 
 
@@ -63,60 +61,79 @@ def save_model(
     )
 
 
-def plot_avg_losses(
+def plot_epochs(
+    epoch_train_loss: np.ndarray,
+    epoch_val_loss: np.ndarray,
+    epoch_avg_train_loss: np.ndarray,
+    epoch_avg_val_loss: np.ndarray,
     path: str,
-    train_loss: np.ndarray,
-    val_loss: np.ndarray,
-    checkpoint: bool = False,
 ) -> None:
-    """
-    Plot the training and validation losses.
-    """
-    _, ax = plt.subplots(figsize=(15, 10), constrained_layout=True)
-    x = np.arange(len(train_loss))
+    _, ax = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
 
-    ax.plot(x, train_loss, label="Training Loss")
-    ax.plot(val_loss, label="Validation Loss")
-    if checkpoint:
-        ax.axvline(
-            x[-1], color="gray", linestyle="--", lw=1, label="Checkpoint"
-        )
+    x_train = np.arange(len(epoch_train_loss[0])) + 1
+    x_val = np.arange(len(epoch_val_loss[0])) + len(epoch_train_loss[0]) + 1
 
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Loss")
-    ax.legend()
-    ax.set_ylim(bottom=0)
+    for train_loss, val_loss in zip(epoch_train_loss, epoch_val_loss):
+        ax[0].plot(x_train, train_loss, c="tab:blue", label="_")
+        ax[0].plot(x_val, val_loss, c="tab:orange", label="_")
+        x_train = np.arange(len(epoch_train_loss[0])) + x_val[-1]
+        x_val = np.arange(len(epoch_val_loss[0])) + x_train[-1]
 
-    savepath = pathlib.Path(path) / "avg_losses.png"
-    plt.savefig(savepath)
+    x_avg = np.arange(len(epoch_avg_train_loss)) + 1
+    ax[1].plot(x_avg, epoch_avg_train_loss, label="Training Loss", c="tab:blue")
+    ax[1].plot(
+        x_avg, epoch_avg_val_loss, label="Validation Loss", c="tab:orange"
+    )
+
+    ax[0].set_ylabel("Loss")
+    ax[0].set_xlabel("Batch")
+    ax[0].set_ylim(bottom=0)
+    ax[0].set_title("Loss per batch")
+
+    ax[1].set_ylabel("Loss")
+    ax[1].set_xlabel("Epoch")
+    ax[1].legend()
+    ax[1].set_ylim(bottom=0)
+    ax[1].set_title("Avg loss per epoch")
+
+    plt.savefig(path)
     plt.close()
 
 
-def plot_all_losses(
+def plot_folds(
+    fold_avg_train_loss: np.ndarray,
+    fold_avg_val_loss: np.ndarray,
     path: str,
-    train_loss: np.ndarray,
-    val_loss: np.ndarray,
 ) -> None:
-    """
-    Plot the training and validation losses.
-    """
-    _, ax = plt.subplots(figsize=(15, 10), constrained_layout=True)
+    _, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
 
-    x_train = np.arange(len(train_loss[0]))
-    x_val = np.arange(len(val_loss[0])) + len(train_loss[0])
-    for train_epoch_loss, val_epoch_loss in zip(train_loss, val_loss):
-        ax.plot(x_train, train_epoch_loss, label="Training Loss", c="tab:blue")
-        ax.plot(x_val, val_epoch_loss, label="Validation Loss", c="tab:orange")
-        x_train += len(train_loss[0])
-        x_val += len(train_loss[0])
+    for train_loss, val_loss in zip(fold_avg_train_loss, fold_avg_val_loss):
+        x = np.arange(len(train_loss)) + 1
+        ax.plot(x, train_loss, c="tab:blue", alpha=0.3, label="_")
+        ax.plot(x, val_loss, c="tab:orange", alpha=0.3, label="_")
+
+    avg_train = np.mean(fold_avg_train_loss, axis=0)
+    avg_val = np.mean(fold_avg_val_loss, axis=0)
+    x = np.arange(len(avg_train)) + 1
+    ax.plot(
+        x,
+        avg_train,
+        label="Training Loss",
+        c="tab:blue",
+    )
+    ax.plot(
+        x,
+        avg_val,
+        label="Validation Loss",
+        c="tab:orange",
+    )
 
     ax.set_ylabel("Loss")
-    ax.set_xlabel("Batch")
+    ax.set_xlabel("Epoch")
     ax.legend()
     ax.set_ylim(bottom=0)
 
-    savepath = pathlib.Path(path) / "all_losses.png"
-    plt.savefig(savepath)
+    plt.savefig(path)
     plt.close()
 
 
@@ -179,12 +196,17 @@ def train(config: Config) -> None:
     """
     Train the model.
     """
-    device = get_device()
-    prog.console.log(f"Using device: [bold blue]{device}[reset]")
-    prog.console.log(f"Using config file: [bold blue]{config.path}[reset]")
-    prog.console.log(
-        "[bold magenta] ------------------ Starting Training ------------------ [reset]"
+    global logger
+    logger = make_logger(
+        __name__, pathlib.Path(config.path).parent / "chirpdetector.log"
     )
+    device = get_device()
+
+    con.rule("Starting training")
+    msg = f"Device: {device}, Config: {config.path}"
+    con.log(msg)
+    logger.info(msg)
+
     data = CustomDataset(
         path=config.train.datapath,
         classes=config.hyper.classes,
@@ -192,30 +214,40 @@ def train(config: Config) -> None:
         height=config.hyper.height,
     )
 
-    # initialize the model and optimizer and kfolds
-    model = load_fasterrcnn(len(config.hyper.classes)).to(device).train()
+    # initialize the k-fold cross-validation
     splits = KFold(n_splits=config.hyper.kfolds, shuffle=True, random_state=42)
-    params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(
-        params, lr=config.hyper.learning_rate, momentum=0.9, weight_decay=0.0005
-    )
 
     # initialize the best validation loss to a large number
     best_val_loss = float("inf")
-    fold_val_loss = []
 
     # iterate over the folds for k-fold cross-validation
-    with prog:
+    with progress:
         # save loss across all epochs and folds
-        all_train_loss = []
-        all_val_loss = []
-        epoch_train_loss = []
-        epoch_val_loss = []
+        fold_train_loss = []
+        fold_val_loss = []
+        fold_avg_train_loss = []
+        fold_avg_val_loss = []
 
-        task_folds = prog.add_task("[blue]Crossval", total=config.hyper.kfolds)
+        task_folds = progress.add_task(
+            f"[blue]{config.hyper.kfolds}-Fold Crossvalidation",
+            total=config.hyper.kfolds,
+        )
         for fold, (train_idx, val_idx) in enumerate(
             splits.split(np.arange(len(data)))
         ):
+            # initialize the model and optimizer
+            model = load_fasterrcnn(num_classes=len(config.hyper.classes)).to(
+                device
+            )
+            params = [p for p in model.parameters() if p.requires_grad]
+            optimizer = torch.optim.SGD(
+                params,
+                lr=config.hyper.learning_rate,
+                momentum=config.hyper.momentum,
+                weight_decay=config.hyper.weight_decay,
+            )
+
+            # make train and validation dataloaders for the current fold
             train_data = torch.utils.data.Subset(data, train_idx)
             val_data = torch.utils.data.Subset(data, val_idx)
 
@@ -234,14 +266,24 @@ def train(config: Config) -> None:
                 collate_fn=collate_fn,
             )
 
+            epoch_avg_train_loss = []
+            epoch_avg_val_loss = []
+            epoch_train_loss = []
+            epoch_val_loss = []
+
             # train the model for the specified number of epochs
-            task_epochs = prog.add_task(
-                f"Epochs k={fold + 1}", total=config.hyper.num_epochs
+            task_epochs = progress.add_task(
+                f"{config.hyper.num_epochs} Epochs for fold k={fold + 1}",
+                total=config.hyper.num_epochs,
             )
             for epoch in range(config.hyper.num_epochs):
-                prog.console.log(
-                    f"Training epoch {epoch + 1} of {config.hyper.num_epochs} for fold {fold + 1} of {config.hyper.kfolds}"
+                msg = (
+                    f"Training epoch {epoch + 1} of {config.hyper.num_epochs} "
+                    f"for fold {fold + 1} of {config.hyper.kfolds}"
                 )
+                con.log(msg)
+                logger.info(msg)
+
                 train_loss = train_epoch(
                     dataloader=train_loader,
                     device=device,
@@ -255,25 +297,17 @@ def train(config: Config) -> None:
                     model=model,
                 )
 
-                all_train_loss.append(train_loss)
-                all_val_loss.append(val_loss)
+                epoch_train_loss.append(train_loss)
+                epoch_val_loss.append(val_loss)
 
-                epoch_train_loss.append(np.median(train_loss))
-                epoch_val_loss.append(np.median(val_loss))
-
-                plot_all_losses(
-                    path=config.hyper.modelpath,
-                    train_loss=np.array(all_train_loss),
-                    val_loss=np.array(all_val_loss),
-                )
+                epoch_avg_train_loss.append(np.median(train_loss))
+                epoch_avg_val_loss.append(np.median(val_loss))
 
                 # save the model if it is the best so far
-                checkpoint = False
                 if np.mean(val_loss) < best_val_loss:
-                    checkpoint = True
                     best_val_loss = sum(val_loss) / len(val_loss)
 
-                    prog.console.log(
+                    con.log(
                         f"New best validation loss: {best_val_loss:.4f}, saving model..."
                     )
 
@@ -284,55 +318,46 @@ def train(config: Config) -> None:
                         path=config.hyper.modelpath,
                     )
 
-                plot_avg_losses(
-                    path=config.hyper.modelpath,
-                    train_loss=np.array(epoch_train_loss),
-                    val_loss=np.array(epoch_val_loss),
-                    checkpoint=True,
+                plot_epochs(
+                    epoch_train_loss=epoch_train_loss,
+                    epoch_val_loss=epoch_val_loss,
+                    epoch_avg_train_loss=epoch_avg_train_loss,
+                    epoch_avg_val_loss=epoch_avg_val_loss,
+                    path=pathlib.Path(config.hyper.modelpath)
+                    / f"fold{fold + 1}.png",
                 )
 
-                prog.update(task_epochs, advance=1)
+                progress.update(task_epochs, advance=1)
+
+            plot_folds(
+                fold_avg_train_loss=fold_avg_train_loss,
+                fold_avg_val_loss=fold_avg_val_loss,
+                path=pathlib.Path(config.hyper.modelpath) / "losses.png",
+            )
+
+            progress.update(task_epochs, visible=False)
+
+            fold_train_loss.append(epoch_train_loss)
+            fold_val_loss.append(epoch_val_loss)
+            fold_avg_train_loss.append(epoch_avg_train_loss)
+            fold_avg_val_loss.append(epoch_avg_val_loss)
 
             fold_val_loss.append(np.mean(val_loss))
+            progress.update(task_folds, advance=1)
 
-            epoch_train_loss = np.array(epoch_train_loss)
-            epoch_train_loss_spread = np.array(epoch_train_loss_spread)
-            epoch_val_loss = np.array(epoch_val_loss)
-            epoch_val_loss_spread = np.array(epoch_val_loss_spread)
+        progress.update(task_folds, visible=False)
 
-            plot_losses(
-                path=config.hyper.modelpath,
-                filename=f"fold_{fold + 1}_losses.png",
-                train_loss=epoch_train_loss,
-                val_loss=epoch_val_loss,
-            )
-            prog.update(task_folds, advance=1)
-
-        prog.console.log(
-            "[bold magenta] ------------------ Training Complete ------------------ [reset]"
-        )
-        prog.console.log(
-            f"Average validation loss of last epoch: {np.mean(fold_val_loss)}"
-        )
-
-
-def train_cli() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config",
-        "-c",
-        type=str,
-        help="Path to config file.",
-    )
-    config = load_config(parser.parse_args().config)
-    train(config)
+        msg = f"Average validation loss of last epoch across folds: {np.mean(fold_val_loss):.4f}"
+        con.log(msg)
+        logger.info(msg)
+        con.rule("[bold blue]Finished training")
 
 
 def verify_detections(
     image: torch.Tensor, target: dict, output: dict, path: str
 ) -> None:
     """
-    Verify the detections.
+    Verify the detections by plotting them on the image.
     """
 
     _, ax = plt.subplots()
@@ -379,9 +404,9 @@ def inference_on_trainingdata(conf: Config, path) -> None:
     Perform inference on the training data.
     """
     device = get_device()
-    prog.console.log(f"Using device: [bold blue]{device}[reset]")
-    prog.console.log(f"Using config file: [bold blue]{conf.path}[reset]")
-    prog.console.log(
+    con.log(f"Using device: [bold blue]{device}[reset]")
+    con.log(f"Using config file: [bold blue]{conf.path}[reset]")
+    con.log(
         "[bold magenta] ------------------ Starting Inference ------------------ [reset]"
     )
     data = CustomDataset(
@@ -416,24 +441,3 @@ def inference_on_trainingdata(conf: Config, path) -> None:
             output=output[0],
             path=path,
         )
-
-
-def inference_cli():
-    parser = argparse.ArgumentParser(
-        description="Perform inference on the training data."
-    )
-    parser.add_argument(
-        "--config",
-        "-c",
-        type=str,
-        help="Path to config file.",
-    )
-    parser.add_argument(
-        "--input",
-        "-i",
-        type=str,
-        help="Path to the data.",
-    )
-    config = load_config(parser.parse_args().config)
-    path = pathlib.Path(parser.parse_args().input)
-    inference_on_trainingdata(config, path)

@@ -2,7 +2,7 @@
 width = 1076
 height = 430
 classes = ["__background__", "chirp"]
-num_epochs = 5 
+num_epochs = 10
 batch_size = 2 
 kfolds = 5
 learning_rate = 0.001 
