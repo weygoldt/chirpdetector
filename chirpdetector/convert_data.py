@@ -240,7 +240,7 @@ def detected_labels(
 
     # save dataframe for every spec without headers as txt
     bboxes_xy.to_csv(
-        output / "labels" / f"{imgname}.txt",
+        output / "labels" / f"{imgname[:-4]}.txt",
         header=False,
         index=False,
         sep=" ",
@@ -385,6 +385,11 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
     if label_mode == "synthetic":
         bbox_df = pd.concat(bbox_dfs, ignore_index=True)
         bbox_df.to_csv(dataroot / f"{data.path.name}_bboxes.csv", index=False)
+
+    # save the classes.txt file
+    classes = ["__background__", "chirp"]
+    with open(dataroot / "classes.txt", "w") as f:
+        f.write("\n".join(classes))
 
 
 def parse_datasets(

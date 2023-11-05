@@ -9,10 +9,10 @@ learning_rate = 0.001  # learning rate for SGD
 momentum = 0.9 # momentum for SGD
 weight_decay = 0.0005 # regularization parameter
 num_workers = 4 # number of workers for the data loader
-modelpath = "/home/weygoldt/Projects/mscthesis/models"  # path to save and load models from
+modelpath = "~./Projects/mscthesis/models"  # path to save and load models from
 
 [training] 
-datapath = "/home/weygoldt/Projects/mscthesis/data/processed/deepnn/train" # path to training data
+datapath = "~./Projects/mscthesis/data/interrim/train" # path to training data
 
 [detection]
 threshold = 0.5 # threshold for the detection

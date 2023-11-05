@@ -1,0 +1,57 @@
+site_name: gridtools
+
+theme:
+  name: material
+  logo: 
+  palette: 
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: orange
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: orange
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tabs
+    - navigation.expand
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - content.code.copy
+
+  icon:
+    repo: fontawesome/brands/github
+  
+extra:
+  generator: false
+
+nav:
+    - Home: 'index.md'
+    - 'User guide':
+        - 'Datasets': 'datasets.md'
+        - 'Preprocessing': 'preprocessing.md'
+        - 'Simulations': 'simulations.md'
+    - API reference: 'api/index.html'
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+repo_url: https://github.com/weygoldt/gridtools
+repo_name: weygoldt/gridtools
