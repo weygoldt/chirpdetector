@@ -16,4 +16,4 @@
 - [x] Make possible to output detections as a yolo dataset 
 - [ ] Look up how to convert a yolo dataset to a label-studio input so we can label pre-annotated data, facilitating a full human-in-the-loop approach
 - [ ] Add augmentation transforms to the dataset class and add augmentations to the simulation in `gridtools`
-- [ ] Change bbox to actual yolo format, not the weird one I made up (which is x1, y1, x2, y2 instead of x1, y1, w, h). This is why the label-studio export is not working.
+- [x] Change bbox to actual yolo format, not the weird one I made up (which is x1, y1, x2, y2 instead of x1, y1, w, h). This is why the label-studio export is not working.

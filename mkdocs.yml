@@ -36,13 +36,6 @@ theme:
 extra:
   generator: false
 
-nav:
-    - Home: 'index.md'
-    - 'User guide':
-        - 'Datasets': 'datasets.md'
-        - 'Preprocessing': 'preprocessing.md'
-        - 'Simulations': 'simulations.md'
-    - API reference: 'api/index.html'
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -55,3 +48,21 @@ markdown_extensions:
 
 repo_url: https://github.com/weygoldt/gridtools
 repo_name: weygoldt/gridtools
+
+nav:
+    - Home: 'index.md'
+    - 'User guide':
+        - 'Installation': 'installation.md'
+        - 'Getting started': 'getting_started.md'
+        - 'Datasets': 'datasets.md'
+        - 'Preprocessing': 'preprocessing.md'
+        - 'Visualization': 'visualization.md'
+        - 'Simulations': 'simulations.md'
+    - 'Example workflows':
+        - 'Example 1': 'example1.md'
+        - 'Example 2': 'example2.md'
+        - 'Example 3': 'example3.md'
+    - 'Contributing':
+        - 'Code of conduct': 'code_of_conduct.md'
+        - 'Contributing guide': 'contributing.md'
+    - API reference: 'api/index.html'
