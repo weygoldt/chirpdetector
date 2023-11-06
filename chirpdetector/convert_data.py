@@ -229,17 +229,19 @@ def detected_labels(
     # get the x and y coordinates of the bboxes in pixels as dataframe
     bboxes_xy = bboxes[["x1", "y1", "x2", "y2"]]
 
-    # convert the bboxes to relative coordinates from spec shape
-    bboxes_xy.loc[:, "x1"] /= spec.shape[1]
-    bboxes_xy.loc[:, "x2"] /= spec.shape[1]
-    bboxes_xy.loc[:, "y1"] /= spec.shape[0]
-    bboxes_xy.loc[:, "y2"] /= spec.shape[0]
+    # convert the bbox from x1, y1, x2, y2 to x, y, width, height and make
+    # them relative to the image size
+    x = (np.array(bboxes_xy["x1"] + bboxes_xy["x2"]) / 2) / spec.shape[1]
+    y = (np.array(bboxes_xy["y1"] + bboxes_xy["y2"]) / 2) / spec.shape[0]
+    w = np.array(bboxes_xy["x2"] - bboxes_xy["x1"]) / spec.shape[1]
+    h = np.array(bboxes_xy["y2"] - bboxes_xy["y1"]) / spec.shape[0]
+    labels = np.ones_like(x, dtype=int)
 
-    # add as first colum instance id
-    bboxes_xy.insert(0, "instance_id", np.ones(len(bboxes_xy), dtype=int))
+    # make a new dataframe with the relative coordinates
+    new_bboxes = pd.DataFrame({"l": labels, "x": x, "y": y, "w": w, "h": h})
 
     # save dataframe for every spec without headers as txt
-    bboxes_xy.to_csv(
+    new_bboxes.to_csv(
         output / "labels" / f"{imgname[:-4]}.txt",
         header=False,
         index=False,
@@ -375,6 +377,7 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
         # normalize the spectrogram to zero mean and unit variance
         # the spec is still a tensor
         spec = (spec - spec.mean()) / spec.std()
+
         # convert the spectrogram to a PIL image
         spec = spec.detach().cpu().numpy()
         img = numpy_to_pil(spec)

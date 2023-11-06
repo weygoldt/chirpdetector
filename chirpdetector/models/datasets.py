@@ -61,14 +61,20 @@ class CustomDataset(set):
         labels = []
 
         for annot in annotations:
+            # save the label
             labels.append(int(annot[0]))
 
             # resize the normed bounding boxes according to the image width
             # and height
-            x1 = annot[1] * img_width
-            y1 = annot[2] * img_height
-            x2 = annot[3] * img_width
-            y2 = annot[4] * img_height
+
+            # convert center coordinates to top left coordinates
+            x1 = (annot[1] - annot[3] / 2) * img_width
+            y1 = (annot[2] - annot[4] / 2) * img_height
+
+            # convert width and height to lower right coordinates
+            x2 = x1 + (annot[3] * img_width)
+            y2 = y1 + (annot[4] * img_height)
+
             boxes.append([x1, y1, x2, y2])
 
         # bounding box to tensor
