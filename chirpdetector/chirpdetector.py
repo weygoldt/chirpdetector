@@ -76,6 +76,15 @@ def parse_args():
         help="Path to the configuration file.",
         required=True,
     )
+    train.add_argument(
+        "--mode",
+        "-m",
+        type=str,
+        choices=["pretrain", "finetune"],
+        required=True,
+        help="""Whether to train the model with synthetic data or to finetune a 
+            model with real data.""",
+    )
 
     # Detect chirps on a spectrogram.
     detect = subparser.add_parser(
@@ -133,7 +142,8 @@ def chirpdetector_cli():
 
     elif args.command == "train":
         conf = load_config(str(args.config))
-        train(conf)
+        mode = args.mode
+        train(conf, mode)
 
     elif args.command == "detect":
         detect(args)

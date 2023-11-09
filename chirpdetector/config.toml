@@ -1,6 +1,4 @@
 [hyperparameters]
-width = 1076 # image width
-height = 430 # image height
 classes = ["__background__", "chirp"] # classes for the detection
 num_epochs = 10 # number of epochs to train for
 batch_size = 2  # batch size for training
@@ -9,17 +7,20 @@ learning_rate = 0.001  # learning rate for SGD
 momentum = 0.9 # momentum for SGD
 weight_decay = 0.0005 # regularization parameter
 num_workers = 4 # number of workers for the data loader
-modelpath = "~./Projects/mscthesis/models"  # path to save and load models from
+modelpath = "/home/weygoldt/Projects/mscthesis/models"  # path to save and load models from
 
 [training] 
-datapath = "~./Projects/mscthesis/data/interrim/train" # path to training data
+datapath = "/home/weygoldt/Projects/mscthesis/data/interrim/train" # path to training data
+
+[finetuning]
+datapath = "/home/weygoldt/Projects/mscthesis/data/interrim/finetune" # path to finetuning data
 
 [detection]
 threshold = 0.5 # threshold for the detection
 
 [spectrogram]
-time_window = 20  # time window in seconds, determines size of the images
-freq_window = [100, 2200] # remove everything outside this frequency range
+time_window = 30  # time window in seconds, determines size of the images
+freq_window = [300, 2000] # remove everything outside this frequency range
 freq_res = 6 # target frequency resolution of the spectrograms in Hz
 overlap_frac = 0.9 # overlap of the fft windows in % 
 spec_overlap = 1 # overlap of the whole spectrogram in seconds

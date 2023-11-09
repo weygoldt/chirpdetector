@@ -39,6 +39,9 @@ def copy_config(path: str) -> None:
             "Please specify a directory or a non-existing path."
         )
 
+    elif not destination.exists():
+        raise FileNotFoundError("Please specify an existing directory.")
+
 
 def load_config(path: str) -> ConfigDict:
     global logger
@@ -66,8 +69,6 @@ def load_config(path: str) -> ConfigDict:
 
 
 class Hyperparams(BaseModel):
-    width: int
-    height: int
     classes: List
     num_epochs: int
     batch_size: int
@@ -80,6 +81,10 @@ class Hyperparams(BaseModel):
 
 
 class Training(BaseModel):
+    datapath: str
+
+
+class Finetune(BaseModel):
     datapath: str
 
 

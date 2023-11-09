@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
+from rich import print as rprint
 from rich.console import Console
 from rich.progress import track
 
@@ -29,7 +30,7 @@ con = Console()
 
 freq_resolution = 6
 overlap_fraction = 0.9
-spectrogram_freq_limits = (100, 2200)
+# spectrogram_freq_limits = (100, 2200)
 
 
 def make_file_tree(path: pathlib.Path) -> None:
@@ -137,6 +138,7 @@ def synthetic_labels(
     spec_freqs: np.ndarray,
     imgname: str,
     chunk_no: int,
+    img: Image = None,
 ) -> pd.DataFrame:
     # compute the bounding boxes for this chunk
     bboxes = chirp_bounding_boxes(chunk, nfft)
@@ -165,27 +167,38 @@ def synthetic_labels(
     bboxes["lowerright_img_x"] = rxs
     bboxes["lowerright_img_y"] = rys
 
+    # yolo format is centerx, centery, width, height
+    # convert xmin, ymin, xmax, ymax to centerx, centery, width, height
+    centerx = (lxs + rxs) / 2
+    centery = (lys + rys) / 2
+    width = rxs - lxs
+    height = rys - lys
+
     # most deep learning frameworks expect bounding box coordinates
     # as relative to the image size. So we normalize the coordinates
     # to the image size
-
-    rel_lxs = lxs / spec.shape[1]
-    rel_rxs = rxs / spec.shape[1]
-    rel_lys = lys / spec.shape[0]
-    rel_rys = rys / spec.shape[0]
+    centerx_norm = centerx / spec.shape[1]
+    centery_norm = centery / spec.shape[0]
+    width_norm = width / spec.shape[1]
+    height_norm = height / spec.shape[0]
 
     # add them to the bboxes dataframe
-    bboxes["upperleft_img_x_norm"] = rel_lxs
-    bboxes["upperleft_img_y_norm"] = rel_lys
-    bboxes["lowerright_img_x_norm"] = rel_rxs
-    bboxes["lowerright_img_y_norm"] = rel_rys
+    bboxes["centerx_norm"] = centerx_norm
+    bboxes["centery_norm"] = centery_norm
+    bboxes["width_norm"] = width_norm
+    bboxes["height_norm"] = height_norm
 
     # add chunk ID to the bboxes dataframe
     bboxes["chunk_id"] = chunk_no
 
     # put them into a dataframe to save for eahc spectrogram
     df = pd.DataFrame(
-        {"lx": rel_lxs, "ly": rel_lys, "rx": rel_rxs, "ry": rel_rys}
+        {
+            "cx": centerx_norm,
+            "cy": centery_norm,
+            "w": width_norm,
+            "h": height_norm,
+        }
     )
 
     # add as first colum instance id
@@ -202,12 +215,12 @@ def synthetic_labels(
 
     # save dataframe for every spec without headers as txt
     df.to_csv(
-        output / "labels" / f"{chunk.path.name}_{chunk_no:06}.txt",
+        output / "labels" / f"{chunk.path.name}.txt",
         header=False,
         index=False,
         sep=" ",
     )
-    return bboxes
+    return bboxes, img
 
 
 def detected_labels(
@@ -271,7 +284,7 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
     n_electrodes = data.grid.rec.shape[1]
 
     # How much time to put into each spectrogram
-    time_window = 20  # seconds
+    time_window = 30  # seconds
     window_overlap = 1  # seconds
     window_overlap_samples = window_overlap * data.grid.samplerate  # samples
 
@@ -281,7 +294,16 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
     chunksize = time_window * data.grid.samplerate  # samples
     n_chunks = np.ceil(data.grid.rec.shape[0] / chunksize).astype(int)
 
+    rprint(
+        f"Dividing recording of duration {data.grid.rec.shape[0] / data.grid.samplerate} into {n_chunks} chunks of {time_window} seconds each."
+    )
+
     bbox_dfs = []
+
+    # shift the time of the tracks to start at 0
+    # TODO: this is a hack. I should probably do this in the dataset
+    # creation step
+    data.track.times -= data.track.times[0]
 
     for chunk_no in range(n_chunks):
         # get start and stop indices for the current chunk
@@ -314,10 +336,6 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
 
         chunk = subset(data, idx1, idx2, mode="index")
 
-        # skip if no chirps in this chunk
-        if len(chunk.com.chirp.times) == 0:
-            continue
-
         # compute the spectrogram for each electrode of the current chunk
         for el in range(n_electrodes):
             # get the signal for the current electrode
@@ -348,6 +366,15 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
 
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
+
+        if label_mode == "none":
+            spectrogram_freq_limits = (
+                np.min(chunk.track.freqs) - 500,
+                np.max(chunk.track.freqs) + 500,
+            )
+        else:
+            spectrogram_freq_limits = (100, 2200)
+
         spec = spec[
             (spec_freqs >= spectrogram_freq_limits[0])
             & (spec_freqs <= spectrogram_freq_limits[1]),
@@ -358,9 +385,17 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
             & (spec_freqs <= spectrogram_freq_limits[1])
         ]
 
-        imgname = f"{data.path.name}_{chunk_no:06}.png"
+        # normalize the spectrogram to zero mean and unit variance
+        # the spec is still a tensor
+        spec = (spec - spec.mean()) / spec.std()
+
+        # convert the spectrogram to a PIL image
+        spec = spec.detach().cpu().numpy()
+        img = numpy_to_pil(spec)
+
+        imgname = f"{chunk.path.name}.png"
         if label_mode == "synthetic":
-            bbox_df = synthetic_labels(
+            bbox_df, img = synthetic_labels(
                 dataroot,
                 chunk,
                 nfft,
@@ -369,18 +404,11 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
                 spec_freqs,
                 imgname,
                 chunk_no,
+                img,
             )
             bbox_dfs.append(bbox_df)
         elif label_mode == "detected":
             detected_labels(dataroot, chunk, imgname, spec, spec_times)
-
-        # normalize the spectrogram to zero mean and unit variance
-        # the spec is still a tensor
-        spec = (spec - spec.mean()) / spec.std()
-
-        # convert the spectrogram to a PIL image
-        spec = spec.detach().cpu().numpy()
-        img = numpy_to_pil(spec)
 
         # save image
         img.save(dataroot / "images" / f"{imgname}")

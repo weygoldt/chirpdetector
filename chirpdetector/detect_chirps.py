@@ -112,6 +112,10 @@ def corner_coords_to_center_coords(boxes):
 def plot_detections(img_tensor, output, threshold, save_path, conf):
     img = img_tensor.detach().cpu().numpy().transpose(1, 2, 0)[..., 0]
     boxes = output["boxes"].detach().cpu().numpy()
+
+    print(img.shape)
+    print(boxes[0])
+
     boxes = corner_coords_to_center_coords(boxes)
     scores = output["scores"].detach().cpu().numpy()
     labels = output["labels"].detach().cpu().numpy()
@@ -177,6 +181,9 @@ def spec_to_image(spec):
 
 def detect_chirps(conf: Config, data: Dataset):
     n_electrodes = data.grid.rec.shape[1]
+
+    # TODO: fix this ugly workaround
+    data.track.times -= data.track.times[0]
 
     # load the model and the checkpoint, and set it to evaluation mode
     device = get_device()

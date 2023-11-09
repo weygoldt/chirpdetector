@@ -29,16 +29,16 @@ class CustomDataset(set):
         self,
         path: str,
         classes: List[str],
-        width: int = None,
-        height: int = None,
+        # width: int = None,
+        # height: int = None,
         transforms: torchvision.transforms.Compose = None,
     ):
         self.transforms = transforms
         self.path = pathlib.Path(path)
         self.image_dir = pathlib.Path(path) / "images"
         self.label_dir = pathlib.Path(path) / "labels"
-        self.height = height
-        self.width = width
+        # self.height = height
+        # self.width = width
         self.classes = classes
 
         # get all the image paths in sorted order
@@ -122,8 +122,8 @@ def main():
     )
     dataset = CustomDataset(
         config.train.datapath,
-        config.hyper.width,
-        config.hyper.height,
+        # config.hyper.width,
+        # config.hyper.height,
         config.hyper.classes,
     )
     loader = DataLoader(

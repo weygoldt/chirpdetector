@@ -192,10 +192,22 @@ def val_epoch(
     return loss_dict, val_loss
 
 
-def train(config: Config) -> None:
+def train(config: Config, mode: str = "pretrain") -> None:
     """
     Train the model.
     """
+
+    assert mode in ["pretrain", "finetune"]
+    if mode == "pretrain":
+        assert config.train.datapath is not None
+        datapath = config.train.datapath
+    elif mode == "finetune":
+        assert config.hyper.modelpath is not None
+        datapath = config.hyper.modelpath
+
+    if not pathlib.Path(datapath).exists():
+        raise FileNotFoundError(f"Path {datapath} does not exist.")
+
     global logger
     logger = make_logger(
         __name__, pathlib.Path(config.path).parent / "chirpdetector.log"
@@ -203,15 +215,15 @@ def train(config: Config) -> None:
     device = get_device()
 
     progress.console.rule("Starting training")
-    msg = f"Device: {device}, Config: {config.path}"
+    msg = f"Device: {device}, Config: {config.path}, Mode: {mode}, Data: {datapath}"
     progress.console.log(msg)
     logger.info(msg)
 
     data = CustomDataset(
-        path=config.train.datapath,
+        path=datapath,
         classes=config.hyper.classes,
-        width=config.hyper.width,
-        height=config.hyper.height,
+        # width=config.hyper.width,
+        # height=config.hyper.height,
     )
 
     # initialize the k-fold cross-validation
@@ -239,6 +251,12 @@ def train(config: Config) -> None:
             model = load_fasterrcnn(num_classes=len(config.hyper.classes)).to(
                 device
             )
+
+            if mode == "finetune":
+                modelpath = pathlib.Path(config.hyper.modelpath) / "model.pt"
+                checkpoint = torch.load(modelpath, map_location=device)
+                model.load_state_dict(checkpoint["model_state_dict"])
+
             params = [p for p in model.parameters() if p.requires_grad]
             optimizer = torch.optim.SGD(
                 params,
@@ -414,8 +432,8 @@ def inference_on_trainingdata(conf: Config, path) -> None:
     data = CustomDataset(
         path=path,
         classes=conf.hyper.classes,
-        width=conf.hyper.width,
-        height=conf.hyper.height,
+        # width=conf.hyper.width,
+        # height=conf.hyper.height,
     )
 
     modelpath = pathlib.Path(conf.hyper.modelpath) / "model.pt"
