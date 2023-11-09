@@ -264,14 +264,13 @@ def detect_chirps(conf: Config, data: Dataset):
 
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
-        spec = spec[
-            (spec_freqs >= conf.spec.freq_window[0])
-            & (spec_freqs <= conf.spec.freq_window[1]),
-            :,
-        ]
+        flims = (
+            np.min(chunk.track.freqs) - 500,
+            np.max(chunk.track.freqs) + 500,
+        )
+        spec = spec[(spec_freqs >= flims[0]) & (spec_freqs <= flims[1]), :]
         spec_freqs = spec_freqs[
-            (spec_freqs >= conf.spec.freq_window[0])
-            & (spec_freqs <= conf.spec.freq_window[1])
+            (spec_freqs >= flims[0]) & (spec_freqs <= flims[1])
         ]
 
         # normalize the spectrogram to be between 0 and 1
