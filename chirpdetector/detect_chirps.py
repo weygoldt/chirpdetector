@@ -113,9 +113,6 @@ def plot_detections(img_tensor, output, threshold, save_path, conf):
     img = img_tensor.detach().cpu().numpy().transpose(1, 2, 0)[..., 0]
     boxes = output["boxes"].detach().cpu().numpy()
 
-    print(img.shape)
-    print(boxes[0])
-
     boxes = corner_coords_to_center_coords(boxes)
     scores = output["scores"].detach().cpu().numpy()
     labels = output["labels"].detach().cpu().numpy()
@@ -264,9 +261,12 @@ def detect_chirps(conf: Config, data: Dataset):
 
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
+        # TODO: THIS IS SKETCHY AS HELL! As a result, only time and frequency
+        # bounding boxes can be used later! The spectrogram limits change for every
+        # window!
         flims = (
-            np.min(chunk.track.freqs) - 500,
-            np.max(chunk.track.freqs) + 500,
+            np.min(chunk.track.freqs) - conf.spec.freq_pad,
+            np.max(chunk.track.freqs) + conf.spec.freq_pad,
         )
         spec = spec[(spec_freqs >= flims[0]) & (spec_freqs <= flims[1]), :]
         spec_freqs = spec_freqs[

@@ -19,8 +19,9 @@ datapath = "/home/weygoldt/Projects/mscthesis/data/interrim/finetune" # path to 
 threshold = 0.5 # threshold for the detection
 
 [spectrogram]
-time_window = 30  # time window in seconds, determines size of the images
-freq_window = [300, 2000] # remove everything outside this frequency range
+time_window = 15  # time window in seconds, determines size of the images
+# freq_window = [300, 2000] # remove everything outside this frequency range
+freq_pad = 600 # padding in Hz so that limits are (lowest fish - padding, highest fish + padding)
 freq_res = 6 # target frequency resolution of the spectrograms in Hz
 overlap_frac = 0.9 # overlap of the fft windows in % 
 spec_overlap = 1 # overlap of the whole spectrogram in seconds

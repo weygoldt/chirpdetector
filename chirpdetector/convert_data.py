@@ -26,6 +26,8 @@ from gridtools.utils.spectrograms import (
     spectrogram,
 )
 
+from .utils.configfiles import Config, load_config
+
 con = Console()
 
 freq_resolution = 6
@@ -143,12 +145,15 @@ def synthetic_labels(
     # compute the bounding boxes for this chunk
     bboxes = chirp_bounding_boxes(chunk, nfft)
 
+    if len(bboxes) == 0:
+        return None, None
+
     # convert bounding box center coordinates to spectrogram coordinates
     # find the indices on the spec_times corresponding to the center times
     x = np.searchsorted(spec_times, bboxes.t_center)
     y = np.searchsorted(spec_freqs, bboxes.f_center)
     widths = np.searchsorted(spec_times - spec_times[0], bboxes.width)
-    heights = np.searchsorted(spec_freqs, bboxes.height)
+    heights = np.searchsorted(spec_freqs - spec_freqs[0], bboxes.height)
 
     # now we have center coordinates, widths and heights in indices. But PIL
     # expects coordinates in pixels in the format
@@ -231,7 +236,12 @@ def detected_labels(
     spec_times: np.ndarray,
 ) -> None:
     # load the detected bboxes csv
-    df = pd.read_csv(chunk.path / "chirpdetector_bboxes.csv")
+    # TODO: This is a workaround. Instead improve the subset naming convention in gridtools
+    source_dataset = chunk.path.name.split("_")[1:-4]
+    source_dataset = "_".join(source_dataset)
+    source_dataset = chunk.path.parent / source_dataset
+
+    df = pd.read_csv(source_dataset / "chirpdetector_bboxes.csv")
 
     # get chunk start and stop time
     start, stop = spec_times[0], spec_times[-1]
@@ -242,16 +252,26 @@ def detected_labels(
     # get the x and y coordinates of the bboxes in pixels as dataframe
     bboxes_xy = bboxes[["x1", "y1", "x2", "y2"]]
 
-    # convert the bbox from x1, y1, x2, y2 to x, y, width, height and make
-    # them relative to the image size
-    x = (np.array(bboxes_xy["x1"] + bboxes_xy["x2"]) / 2) / spec.shape[1]
-    y = (np.array(bboxes_xy["y1"] + bboxes_xy["y2"]) / 2) / spec.shape[0]
-    w = np.array(bboxes_xy["x2"] - bboxes_xy["x1"]) / spec.shape[1]
-    h = np.array(bboxes_xy["y2"] - bboxes_xy["y1"]) / spec.shape[0]
-    labels = np.ones_like(x, dtype=int)
+    # convert from x1, y1, x2, y2 to centerx, centery, width, height
+    centerx = np.array((bboxes_xy["x1"] + bboxes_xy["x2"]) / 2)
+    centery = np.array((bboxes_xy["y1"] + bboxes_xy["y2"]) / 2)
+    width = np.array(bboxes_xy["x2"] - bboxes_xy["x1"])
+    height = np.array(bboxes_xy["y2"] - bboxes_xy["y1"])
+
+    # flip centery because origin is top left
+    centery = spec.shape[0] - centery
+
+    # make relative to image size
+    centerx = centerx / spec.shape[1]
+    centery = centery / spec.shape[0]
+    width = width / spec.shape[1]
+    height = height / spec.shape[0]
+    labels = np.ones_like(centerx, dtype=int)
 
     # make a new dataframe with the relative coordinates
-    new_bboxes = pd.DataFrame({"l": labels, "x": x, "y": y, "w": w, "h": h})
+    new_bboxes = pd.DataFrame(
+        {"l": labels, "x": centerx, "y": centery, "w": width, "h": height}
+    )
 
     # save dataframe for every spec without headers as txt
     new_bboxes.to_csv(
@@ -262,7 +282,9 @@ def detected_labels(
     )
 
 
-def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
+def convert(
+    data: Dataset, conf: Config, output: pathlib.Path, label_mode: str
+) -> None:
     """
     Notes
     -----
@@ -284,8 +306,9 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
     n_electrodes = data.grid.rec.shape[1]
 
     # How much time to put into each spectrogram
-    time_window = 30  # seconds
-    window_overlap = 1  # seconds
+    time_window = conf.spec.time_window  # seconds
+    window_overlap = conf.spec.spec_overlap  # seconds
+    freq_pad = conf.spec.freq_pad  # Hz
     window_overlap_samples = window_overlap * data.grid.samplerate  # samples
 
     # Spectrogram computation parameters
@@ -367,13 +390,13 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
 
-        if label_mode == "none":
-            spectrogram_freq_limits = (
-                np.min(chunk.track.freqs) - 500,
-                np.max(chunk.track.freqs) + 500,
-            )
-        else:
-            spectrogram_freq_limits = (100, 2200)
+        # if label_mode == "none":
+        spectrogram_freq_limits = (
+            np.min(chunk.track.freqs) - freq_pad,
+            np.max(chunk.track.freqs) + freq_pad,
+        )
+        # else:
+        #     spectrogram_freq_limits = (100, 2200)
 
         spec = spec[
             (spec_freqs >= spectrogram_freq_limits[0])
@@ -406,6 +429,8 @@ def convert(data: Dataset, output: pathlib.Path, label_mode: str) -> None:
                 chunk_no,
                 img,
             )
+            if bbox_df is None:
+                continue
             bbox_dfs.append(bbox_df)
         elif label_mode == "detected":
             detected_labels(dataroot, chunk, imgname, spec, spec_times)
@@ -440,9 +465,10 @@ def parse_datasets(
     """
 
     make_file_tree(output)
+    config = load_config(str(input / "chirpdetector.toml"))
 
     for path in track(list(input.iterdir()), description="Building datasets"):
         if path.is_file():
             continue
         data = load(path, grid=True)
-        convert(data, output, label_mode)
+        convert(data, config, output, label_mode)

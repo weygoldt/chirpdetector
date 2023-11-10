@@ -94,8 +94,9 @@ class Detection(BaseModel):
 
 class Spectrogram(BaseModel):
     time_window: float
-    freq_window: List
+    # freq_window: List
     freq_res: float
+    freq_pad: float
     overlap_frac: float
     spec_overlap: float
 
