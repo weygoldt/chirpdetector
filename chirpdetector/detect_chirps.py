@@ -5,6 +5,7 @@ Detect chirps on a spectrogram.
 """
 import argparse
 import pathlib
+import shutil
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -201,6 +202,7 @@ def detect_chirps(conf: Config, data: Dataset):
     bbox_dfs = []
 
     # iterate over the chunks
+    overwritten = False
     for chunk_no in range(nchunks):
         # get start and stop indices for the current chunk
         # including some overlap to compensate for edge effects
@@ -273,8 +275,11 @@ def detect_chirps(conf: Config, data: Dataset):
             (spec_freqs >= flims[0]) & (spec_freqs <= flims[1])
         ]
 
-        # normalize the spectrogram to be between 0 and 1
+        # make a path to save the spectrogram
         path = data.path / "chirpdetections"
+        if path.exists() and overwritten is False:
+            shutil.rmtree(path)
+            overwritten = True
         path.mkdir(exist_ok=True)
         path /= f"chunk{chunk_no:05d}.png"
 
@@ -291,6 +296,11 @@ def detect_chirps(conf: Config, data: Dataset):
         bboxes = outputs[0]["boxes"].detach().cpu().numpy()
         scores = outputs[0]["scores"].detach().cpu().numpy()
         labels = outputs[0]["labels"].detach().cpu().numpy()
+
+        # remove all boxes with a score below the threshold
+        bboxes = bboxes[scores > conf.det.threshold]
+        labels = labels[scores > conf.det.threshold]
+        scores = scores[scores > conf.det.threshold]
 
         bbox_df = pd.DataFrame(
             data=bboxes,
