@@ -25,7 +25,8 @@ black = "^23.10.1"
 pre-commit = "^3.5.0"
 
 [tool.poetry.scripts]
-chirpdetector = "chirpdetector.chirpdetector:chirpdetector_cli"
+chirpdetector = "chirpdetector.chirpdetector:cli"
+cpd = "chirpdetector.chirpdetector:cli"
 
 [build-system]
 requires = ["poetry-core"]

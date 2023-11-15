@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader
 
 from .models.datasets import CustomDataset
 from .models.utils import collate_fn, get_device, load_fasterrcnn
-from .utils.configfiles import Config
+from .utils.configfiles import Config, load_config
 from .utils.logging import make_logger
 
 matplotlib.use("Agg")
@@ -371,6 +371,14 @@ def train(config: Config, mode: str = "pretrain") -> None:
         progress.console.log(msg)
         logger.info(msg)
         progress.console.rule("[bold blue]Finished training")
+
+
+def train_cli(config_path: pathlib.Path, mode: str) -> None:
+    """
+    Train the model.
+    """
+    config = load_config(config_path)
+    train(config, mode=mode)
 
 
 def verify_detections(
