@@ -3,7 +3,7 @@
 """
 Detect chirps on a spectrogram.
 """
-import argparse
+
 import pathlib
 import shutil
 
@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torchvision.transforms.functional as F
-from IPython import embed
 from matplotlib.patches import Rectangle
 from rich.progress import (
     MofNCompleteColumn,
@@ -180,7 +179,8 @@ def spec_to_image(spec):
 def detect_chirps(conf: Config, data: Dataset):
     n_electrodes = data.grid.rec.shape[1]
 
-    # TODO: fix this ugly workaround
+    # TODO: fix this ugly workaround mainly because detections
+    # in time will be wrong!
     data.track.times -= data.track.times[0]
 
     # load the model and the checkpoint, and set it to evaluation mode
@@ -346,25 +346,12 @@ def detect_chirps(conf: Config, data: Dataset):
     bbox_df.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
 
 
-def chirpdetector_cli():
-    parser = argparse.ArgumentParser(
-        description="Detect chirps on a spectrogram."
-    )
-    parser.add_argument(
-        "--path",
-        "-p",
-        type=pathlib.Path,
-        help="Path to the datasets.",
-        required=True,
-    )
-    return parser.parse_args()
-
-
-def detect(args):
-    global logger
-    logger = make_logger(__name__, args.path / "chirpdetector.log")
-    datasets = [dir for dir in args.path.iterdir() if dir.is_dir()]
-    confpath = args.path / "chirpdetector.toml"
+def detect_cli(path):
+    global logger  # pylint: disable=global-statement
+    path = pathlib.Path(path)
+    logger = make_logger(__name__, path / "chirpdetector.log")
+    datasets = [dir for dir in path.iterdir() if dir.is_dir()]
+    confpath = path / "chirpdetector.toml"
 
     if confpath.exists():
         config = load_config(str(confpath))
@@ -386,8 +373,3 @@ def detect(args):
             detect_chirps(config, data)
             prog.update(task, advance=1)
         prog.update(task, completed=len(datasets))
-
-
-def main():
-    args = chirpdetector_cli()
-    detect(args)

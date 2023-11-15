@@ -11,9 +11,10 @@ import rich_click as click
 import toml
 
 from .convert_data import parse_datasets
-from .detect_chirps import detect
+from .detect_chirps import detect_cli
+from .plot_dataset import plot_yolo_dataset_cli
 from .train_model import train_cli
-from .utils.configfiles import copy_config, load_config
+from .utils.configfiles import copy_config
 
 click.rich_click.USE_RICH_MARKUP = True
 click.rich_click.USE_MARKDOWN = True
@@ -47,6 +48,13 @@ def cli():
     fish on a spectrogram. It provides a set of managing functions e.g.
     to copy the default config file to your dataset as well as a suite to
     train, test and use a faster-R-CNN to detect chirps.
+
+    The usual workflow is: (1) copyconfig (2) convert (3) label, e.g. in label-studio (4) train (5) detect.
+    Repeat this cycle from (2) to (5) until you are satisfied with the
+    detection performance.
+
+    For more information including a tutorial, see the documentation at
+    https://weygoldt.com/chirpdetector
 
     Happy chirp detecting :fish::zap:
     """
@@ -95,19 +103,6 @@ def convert(input_path, output_path, labels):
 
 @cli.command()
 @click.option(
-    "--path",
-    "-p",
-    type=click.Path(exists=True),
-    required=True,
-    help="Path to the dataset.",
-)
-def detect():
-    """Detect chirps on a spectrogram."""
-    detect(path)
-
-
-@cli.command()
-@click.option(
     "--config_path",
     "-c",
     type=click.Path(exists=True),
@@ -125,6 +120,44 @@ def detect():
 def train(config_path, mode):
     """Train the model."""
     train_cli(config_path, mode)
+
+
+@cli.command()
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(exists=True),
+    required=True,
+    help="Path to the dataset.",
+)
+def detect(path):
+    """Detect chirps on a spectrogram."""
+    detect_cli(path)
+
+
+@cli.command()
+@click.argument("mode", type=click.Choice(["train", "detected"]))
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(exists=True),
+    required=True,
+    help="Path to the dataset.",
+)
+@click.option(
+    "--n_images",
+    "-n",
+    type=int,
+    required=True,
+    help="Number of images to show.",
+)
+def show(mode, path, n_images):
+    """
+    Visualize chirps on spectrograms for the training dataset
+    or detected chirps on wavetracker datasets.
+    """
+    if mode == "train":
+        plot_yolo_dataset_cli(path, n_images)
 
 
 if __name__ == "__main__":
