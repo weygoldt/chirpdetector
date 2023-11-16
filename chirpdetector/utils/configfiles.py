@@ -56,12 +56,14 @@ def load_config(path: str) -> ConfigDict:
     file = toml.load(path)
     hy = Hyperparams(**file["hyperparameters"])
     tr = Training(**file["training"])
+    fi = Finetune(**file["finetuning"])
     det = Detection(**file["detection"])
     spec = Spectrogram(**file["spectrogram"])
     config = Config(
         path=path,
         hyper=hy,
         train=tr,
+        finetune=fi,
         det=det,
         spec=spec,
     )
@@ -106,5 +108,6 @@ class Config(BaseModel):
     path: str
     hyper: Hyperparams
     train: Training
+    finetune: Finetune
     det: Detection
     spec: Spectrogram

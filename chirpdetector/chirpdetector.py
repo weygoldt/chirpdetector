@@ -49,7 +49,13 @@ def cli():
     to copy the default config file to your dataset as well as a suite to
     train, test and use a faster-R-CNN to detect chirps.
 
-    The usual workflow is: (1) copyconfig (2) convert (3) label, e.g. in label-studio (4) train (5) detect.
+    The usual workflow is:
+    1. `copyconfig` to copy the configfile to your dataset.
+    2. `convert` to convert your dataset to training data.
+    3. label your data, e.g. in label-studio.
+    4. `train` to train the detector.
+    5. `detect` to detect chirps on your dataset.
+
     Repeat this cycle from (2) to (5) until you are satisfied with the
     detection performance.
 

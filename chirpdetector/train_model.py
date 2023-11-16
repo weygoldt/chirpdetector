@@ -202,8 +202,8 @@ def train(config: Config, mode: str = "pretrain") -> None:
         assert config.train.datapath is not None
         datapath = config.train.datapath
     elif mode == "finetune":
-        assert config.hyper.modelpath is not None
-        datapath = config.hyper.modelpath
+        assert config.finetune.datapath is not None
+        datapath = config.finetune.datapath
 
     if not pathlib.Path(datapath).exists():
         raise FileNotFoundError(f"Path {datapath} does not exist.")
