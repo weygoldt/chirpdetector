@@ -6,6 +6,7 @@ Detect chirps on a spectrogram.
 
 import pathlib
 import shutil
+from IPython import embed
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -233,6 +234,7 @@ def detect_chirps(conf: Config, data: Dataset):
         chunk = subset(data, idx1, idx2, mode="index")
 
         # compute the spectrogram for each electrode of the current chunk
+        spec = torch.zeros((len(spec_freqs), len(spec_times)))
         for el in range(n_electrodes):
             # get the signal for the current electrode
             sig = chunk.grid.rec[:, el]
@@ -301,6 +303,41 @@ def detect_chirps(conf: Config, data: Dataset):
         labels = labels[scores > conf.det.threshold]
         scores = scores[scores > conf.det.threshold]
 
+        # from scipy.signal import find_peaks
+        # for bbox in bboxes:
+        #     print(bbox)
+        #     matplotlib.use("TkAgg")
+        #     # cut out spec region of bbox
+        #     bbox_spec = spec[
+        #         int(bbox[1]) : int(bbox[3]),
+        #         int(bbox[0]) : int(bbox[2]),
+        #     ]
+        #     bbox_spec_times = spec_times[int(bbox[0]) : int(bbox[2])]
+        #     bbox_spec_freqs = spec_freqs[int(bbox[1]) : int(bbox[3])]
+        #
+        #     avg_spec = np.mean(bbox_spec.cpu().numpy(), axis=1)
+        #     peaks, _ = find_peaks(avg_spec, prominence=5)
+        #
+        #     _, ax = plt.subplots(1,2, sharey=True, figsize=(20, 10))
+        #     ax[0].imshow(bbox_spec.detach().cpu().numpy(), cmap="magma", origin="lower", extent = [bbox_spec_times[0], bbox_spec_times[-1], bbox_spec_freqs[0], bbox_spec_freqs[-1]], aspect = 'auto')
+        #     ax[1].plot(avg_spec, bbox_spec_freqs)
+        #     ax[1].scatter(avg_spec[peaks], bbox_spec_freqs[peaks], color="red")
+        #
+        #     for fish_id in chunk.track.ids:
+        #         track = chunk.track.freqs[chunk.track.idents == fish_id]
+        #         times = chunk.track.times[chunk.track.indices[chunk.track.idents == fish_id]]
+        #         track = track[(times >= bbox_spec_times[0]) & (times <= bbox_spec_times[-1])]
+        #         times = times[(times >= bbox_spec_times[0]) & (times <= bbox_spec_times[-1])]
+        #         ax[0].plot(
+        #             times,
+        #             track,
+        #             color="black",
+        #             linewidth=1,
+        #         )
+        #
+        #     plt.show()
+        # exit()
+        #
         bbox_df = pd.DataFrame(
             data=bboxes,
             columns=["x1", "y1", "x2", "y2"],
