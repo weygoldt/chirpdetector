@@ -18,7 +18,6 @@ from .dataset_utils import (
     subset_yolo_dataset,
 )
 from .detect_chirps import detect_cli
-from .plot_dataset import plot_yolo_dataset_cli
 from .train_model import train_cli
 from .utils.configfiles import copy_config
 
@@ -77,7 +76,13 @@ def cli():
 @click.option(
     "--path",
     "-p",
-    type=click.Path(exists=True),
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        path_type=pathlib.Path,
+    ),
     required=True,
     help="Path to the dataset.",
 )
@@ -94,7 +99,7 @@ def show(mode, path, n_images):
     or detected chirps on wavetracker datasets.
     """
     if mode == "train":
-        plot_yolo_dataset_cli(path, n_images)
+        plot_yolo_dataset(path, n_images)
 
 
 @cli.command()
