@@ -13,20 +13,19 @@ import numpy as np
 import pandas as pd
 import torch
 import torchvision.transforms.functional as F
-from matplotlib.patches import Rectangle
-from rich.progress import (
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TimeElapsedColumn,
-)
-
 from gridtools.datasets import Dataset, load, subset
 from gridtools.utils.spectrograms import (
     decibel,
     freqres_to_nfft,
     overlap_to_hoplen,
     spectrogram,
+)
+from matplotlib.patches import Rectangle
+from rich.progress import (
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
 )
 
 from .models.utils import get_device, load_fasterrcnn
