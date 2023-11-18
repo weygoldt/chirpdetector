@@ -1,5 +1,9 @@
-# chirpdetector 
-... detects brief communication signals of weakly electric fish.
+# Chirpdetector 
+Detect brief communication signals of wave-type weakly electric fish using deep neural networks.
+
+Chirps are the most thoroughly researched communication signal of weakly electric fish. But they are rarely analized in a natural setting, i.e. where multiple fish can actually communicate with each other. The reason for this is, that detecting chirps in these kinds of recordings is very hard. This project aims to break this barrier and enable chirp detection in recordings of multiple fish. 
+
+This project is still work in progress.
 
 ## Todo
 

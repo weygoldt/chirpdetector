@@ -51,16 +51,16 @@ def float_index_interpolation(
 
     Parameters
     ----------
-    value : float
+    - `value` : `float`
         The value to be interpolated.
-    index_arr : numpy.ndarray
+    - `index_arr` : `numpy.ndarray`
         The array of indices.
-    data_arr : numpy.ndarray
+    - `data_arr` : `numpy.ndarray`
         The array of data.
 
     Returns
     -------
-    numpy.ndarray
+    `numpy.ndarray`
         The interpolated value.
     """
     newvalues = np.zeros_like(values)

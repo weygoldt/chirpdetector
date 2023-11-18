@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-This file contains utility functions for training dataset in the YOLO format.
+This file contains utility functions for training datasets in the YOLO format.
 """
 
 import pathlib

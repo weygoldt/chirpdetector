@@ -1,4 +1,4 @@
-site_name: gridtools
+site_name: Chirpdetector
 
 theme:
   name: material
@@ -7,7 +7,7 @@ theme:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: orange
+      primary: black
       toggle:
         icon: material/toggle-switch
         name: Switch to dark mode
@@ -15,7 +15,7 @@ theme:
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: orange
+      primary: black
       toggle:
         icon: material/toggle-switch-off-outline
         name: Switch to light mode
@@ -32,10 +32,15 @@ theme:
 
   icon:
     repo: fontawesome/brands/github
+
+
+plugins:
+  - mkdocstrings:
+      default_handler: python
+  - search
   
 extra:
   generator: false
-
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -45,24 +50,19 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
 
-repo_url: https://github.com/weygoldt/gridtools
-repo_name: weygoldt/gridtools
+repo_url: https://github.com/weygoldt/chirpdetector
+repo_name: weygoldt/chirpdetector
 
 nav:
     - Home: 'index.md'
     - 'User guide':
-        - 'Installation': 'installation.md'
-        - 'Getting started': 'getting_started.md'
-        - 'Datasets': 'datasets.md'
-        - 'Preprocessing': 'preprocessing.md'
-        - 'Visualization': 'visualization.md'
-        - 'Simulations': 'simulations.md'
+        - 'Detection': 'detection.md'
     - 'Example workflows':
         - 'Example 1': 'example1.md'
-        - 'Example 2': 'example2.md'
-        - 'Example 3': 'example3.md'
-    - 'Contributing':
-        - 'Code of conduct': 'code_of_conduct.md'
-        - 'Contributing guide': 'contributing.md'
+    - 'Contributing': 'contributing.md'
     - API reference: 'api/index.html'
+
