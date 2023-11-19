@@ -21,6 +21,7 @@ pydantic = "^2.4.2"
 rich-argparse = "^1.4.0"
 click = "^8.1.7"
 rich-click = "^1.7.1"
+pytest = "^7.4.3"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.10.1"

@@ -3,6 +3,7 @@
 """
 Load, save and handle models.
 """
+
 import albumentations as A
 import torch
 import torch.nn
@@ -16,7 +17,7 @@ def get_device():
 
     Returns
     -------
-    device : torch.device
+    - `device`: `torch.device`
         The device to use for PyTorch computations. If a CUDA-enabled GPU is available, returns a device object
         representing that GPU. If an Apple M1 GPU is available, returns a device object representing that GPU.
         Otherwise, returns a device object representing the CPU.
@@ -57,6 +58,11 @@ def collate_fn(batch):
     """
     Since each image may have a different number of objects, we need a collate
     function (to be passed to the DataLoader).
+
+    Parameters
+    ----------
+    - `batch`: `list`
+        A list of the data loaded from the dataset.
     """
     return tuple(zip(*batch))
 
@@ -68,13 +74,13 @@ def load_fasterrcnn(num_classes: int) -> torch.nn.Module:
 
     Parameters
     ----------
-    num_classes: int
+    - `num_classes`: `int`
         Number of classes (+1) that shall be detected with the model.
         One more class is required because of background.
 
     Returns
     -------
-    model: torch.nn.Module
+    - `model`: `torch.nn.Module`
         Adapted FasterRCNN Model
     """
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(

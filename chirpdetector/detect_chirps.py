@@ -12,19 +12,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from gridtools.datasets import Dataset, load, subset
-from gridtools.utils.spectrograms import (
-    decibel,
-    freqres_to_nfft,
-    overlap_to_hoplen,
-    spectrogram,
-)
 from matplotlib.patches import Rectangle
 from rich.progress import (
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
     TimeElapsedColumn,
+)
+
+from gridtools.datasets import Dataset, load, subset
+from gridtools.utils.spectrograms import (
+    decibel,
+    freqres_to_nfft,
+    overlap_to_hoplen,
+    spectrogram,
 )
 
 from .models.utils import get_device, load_fasterrcnn
@@ -50,9 +51,14 @@ def float_index_interpolation(
     """
     Interpolate a value in the data dimension that is not necessarily on the data array.
 
+    Interpolates a float index in the index array to the corresponding value in the data
+    array. If the index is outside of the index array, the value is set to NaN.
+
+    Uses linear interpolation.
+
     Parameters
     ----------
-    - `value` : `float`
+    - `values` : `np.ndarray`
         The value to be interpolated.
     - `index_arr` : `numpy.ndarray`
         The array of indices.
@@ -70,8 +76,21 @@ def float_index_interpolation(
         nextlower = np.floor(value).astype(int)
         rest = value - nextlower
 
+        # Check if the value is before the first index
+        if value < index_arr[0]:
+            newvalues[i] = np.nan
+            continue
+
+        # Check if the next lower index is outside of the index array
+        if value > index_arr[-1]:
+            newvalues[i] = np.nan
+            continue
+
+        # Check if the next higher index is outside of the index array
         if nextlower > len(data_arr) - 2:
-            newvalues[i] = data_arr[-1]
+            newvalues[i] = data_arr[nextlower] + rest * (
+                data_arr[nextlower] - data_arr[nextlower - 1]
+            )
             continue
 
         nextlower_data = data_arr[index_arr == nextlower][0]
