@@ -1,11 +1,37 @@
-# Chirpdetector 
-Detect brief communication signals of wave-type weakly electric fish using deep neural networks.
+<!-- PROJECT LOGO -->
+<div align="center">
+  <a href="https://github.com/weygoldt/chirpdetector">
+    <img src="assets/logowide.png" alt="Logo" width="800" height="400">
+  </a>
 
-Chirps are the most thoroughly researched communication signal of weakly electric fish. But they are rarely analized in a natural setting, i.e. where multiple fish can actually communicate with each other. The reason for this is, that detecting chirps in these kinds of recordings is very hard. This project aims to break this barrier and enable chirp detection in recordings of multiple fish. 
+<!-- <br /> -->
+<!-- <h1 align="center">Chirpdetector</h1> -->
 
-This project is still work in progress.
+  <p align="center">
+    Detect brief communication signals of wave-type weakly electric fish using deep neural networks.
+    <br />
+    <a href="https://weygoldt.com/chirpdetector"><strong>Explore the docs »</strong></a>
+    <br />
+    <br />
+    <a href="https://weygoldt.com/chirpdetector">View Demo</a>
+    |
+    <a href="https://github.com/weygoldt/chirpdetector/issues">Report Bug</a>
+    |
+    <a href="https://github.com/weygoldt/chirpdetector/issues">Request Feature</a>
+  </p>
+</div>
 
-## Todo
+## The Problem
+
+Chirps are by far the most thoroughly studied communication signal of weakly electric, if not all fish. But as soon as the electric fields of more than one fish is recorded on the same electrode, detecting chirps becomes so hard, that most of the research to date analyzes this signal in isolated individuals. This is not particularly advantageous if the focus lies on the communication aspect of this signal. 
+
+## The Solution
+
+To tackle this isse, this package provides an interface to detect chirps of multiple fish on spectrogram images. This enables the quantitative analysis of chirping between freely interacting fish for the first time.
+
+This project is still work in progress and will approximately be released in spring of 2024.
+
+## TODO
 
 - [x] Move the dataconverter from `gridtools` to `chirpdetector`
 - [x] Extend the dataconverter to just output the spectrograms so that hand-labelling can be done in a separate step

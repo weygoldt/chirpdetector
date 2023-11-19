@@ -31,10 +31,10 @@ def make_signal():
         samplerate=20000,
         duration=5,
         chirp_freq=0.2,
-        chirp_size=100,
+        chirp_size=150,
         chirp_width=0.03,
-        chirp_kurtosis=1,
-        chirp_contrast=0.5,
+        chirp_kurtosis=2,
+        chirp_contrast=0.8,
     )
 
     sig = wavefish_eods(
@@ -47,7 +47,7 @@ def make_signal():
     )
 
     sig *= a
-    return sig
+    return sig, f
 
 
 def make_spectrogram(sig):
@@ -85,7 +85,7 @@ def make_spectrogram(sig):
     return spec, freq, time
 
 
-def plot_logo(spec, freq, time):
+def plot_logo(spec, freq, time, f):
     """
     Plot the logo.
 
@@ -99,14 +99,22 @@ def plot_logo(spec, freq, time):
         The times.
     """
 
-    plt.figure(figsize=(10, 10))
-    plt.imshow(spec, aspect="auto", cmap="inferno", origin="lower")
-    plt.xticks([])
-    plt.yticks([])
-    plt.xlabel("Time (s)")
-    plt.ylabel("Frequency (Hz)")
-    plt.tight_layout()
-    plt.show()
+    ftime = np.linspace(0, 5, len(f))
+    print(f)
+
+    fig, ax = plt.subplots(figsize=(6, 2))
+    ax.imshow(
+        spec,
+        aspect="auto",
+        cmap="magma",
+        origin="lower",
+        extent=[freq[0], freq[-1], time[0], time[-1]],
+        interpolation="gaussian",
+    )
+    ax.plot(ftime, f, color="black", lw=1.5, zorder=1000)
+    ax.set_xlim(1.5, 3.5)
+    ax.set_ylim(350, 750)
+    plt.savefig("logo.svg", dpi=300, bbox_inches="tight", transparent=True)
 
 
 def main():
@@ -114,9 +122,9 @@ def main():
     Main function.
     """
 
-    sig = make_signal()
+    sig, f = make_signal()
     spec, freq, time = make_spectrogram(sig)
-    plot_logo(spec, freq, time)
+    plot_logo(spec, freq, time, f)
 
 
 if __name__ == "__main__":
