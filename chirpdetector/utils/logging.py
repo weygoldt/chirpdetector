@@ -8,7 +8,22 @@ import logging
 import pathlib
 
 
-def make_logger(name: str, logfile: pathlib.Path):
+def make_logger(name: str, logfile: pathlib.Path) -> logging.Logger:
+    """Create a logger for the script.
+
+    Parameters
+    ----------
+    - `name`: `str`
+        Name of the logger.
+    - `logfile`: `pathlib.Path`
+        Path to the log file.
+
+    Returns
+    -------
+    - `logging.Logger`
+        Logger object.
+    """
+
     # create logger formats for file and terminal
     file_formatter = logging.Formatter(
         "[ %(levelname)s ] ~ %(asctime)s ~ %(name)s.%(funcName)s:%(lineno)d: %(message)s"
@@ -33,15 +48,3 @@ def make_logger(name: str, logfile: pathlib.Path):
     logger.setLevel(logging.INFO)
 
     return logger
-
-
-if __name__ == "__main__":
-    # initiate logger
-    mylogger = make_logger(__name__)
-
-    # test logger levels
-    mylogger.debug("This is for debugging!")
-    mylogger.info("This is an info.")
-    mylogger.warning("This is a warning.")
-    mylogger.error("This is an error.")
-    mylogger.critical("This is a critical error!")
