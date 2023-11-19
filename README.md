@@ -1,7 +1,7 @@
 <!-- PROJECT LOGO -->
 <div align="center">
   <a href="https://github.com/weygoldt/chirpdetector">
-    <img src="assets/logowide.png" alt="Logo" width="800" height="400">
+    <img src="assets/logo.svg" alt="Logo" width="100" height="100">
   </a>
 
 <!-- <br /> -->
