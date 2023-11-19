@@ -5,11 +5,10 @@ This module contains functions and classes for converting data from one format
 to another.
 """
 
-import argparse
 import pathlib
 import shutil
+from typing import Union, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from gridtools.datasets import Dataset, load, subset
@@ -20,7 +19,7 @@ from gridtools.utils.spectrograms import (
     sint,
     spectrogram,
 )
-from PIL import Image, ImageDraw
+from PIL import Image
 from rich import print as rprint
 from rich.console import Console
 from rich.progress import track
@@ -28,10 +27,6 @@ from rich.progress import track
 from .utils.configfiles import Config, load_config
 
 con = Console()
-
-freq_resolution = 6
-overlap_fraction = 0.9
-# spectrogram_freq_limits = (100, 2200)
 
 
 def make_file_tree(path: pathlib.Path) -> None:
@@ -68,13 +63,30 @@ def numpy_to_pil(img: np.ndarray) -> Image:
     PIL.Image
         The converted image.
     """
+
     img = np.flipud(img)
     img = np.uint8((img - img.min()) / (img.max() - img.min()) * 255)
     img = Image.fromarray(img)
+
     return img
 
 
 def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
+    """Make bounding boxes of simulated chirps using the chirp parameters.
+
+    Parameters
+    ----------
+    - `data` : `Dataset`
+        The dataset to make bounding boxes for.
+    - `nfft` : int
+        The number of samples in the FFT.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        A dataframe with the bounding boxes.
+    """
+
     assert hasattr(
         data.com.chirp, "params"
     ), "Dataset must have a chirp attribute with a params attribute"
@@ -127,6 +139,7 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
         boxes, columns=["t_center", "f_center", "width", "height"]
     )
     df["fish_id"] = ids
+
     return df
 
 
@@ -139,8 +152,37 @@ def synthetic_labels(
     spec_freqs: np.ndarray,
     imgname: str,
     chunk_no: int,
-    img: Image = None,
-) -> pd.DataFrame:
+    img: Image,
+) -> Union[Tuple[pd.DataFrame, Image], Tuple[None, None]]:
+    """Generate labels of a simulated dataset.
+
+    Parameters
+    ----------
+    - `output` : `pathlib.Path`
+        The output directory.
+    - `chunk` : `Dataset`
+        The dataset to make bounding boxes for.
+    - `nfft` : `int`
+        The number of samples in the FFT.
+    - `spec` : `np.ndarray`
+        The spectrogram.
+    - `spec_times` : `np.ndarray`
+        The time axis of the spectrogram.
+    - `spec_freqs` : `np.ndarray`
+        The frequency axis of the spectrogram.
+    - `imgname` : `str`
+        The name of the image.
+    - `chunk_no` : `int`
+        The chunk number.
+    - `img` : `Image`
+        The image.
+
+    Returns
+    -------
+    - `pandas.DataFrame`
+        A dataframe with the bounding boxes.
+    """
+
     # compute the bounding boxes for this chunk
     bboxes = chirp_bounding_boxes(chunk, nfft)
 
@@ -208,12 +250,6 @@ def synthetic_labels(
     # add as first colum instance id
     df.insert(0, "instance_id", np.ones_like(lxs, dtype=int))
 
-    # draw the bounding boxes on the image
-    # for lx, ly, rx, ry in zip(lxs, lys, rxs, rys):
-    #     img = img.convert("RGB")
-    #     draw = ImageDraw.Draw(img)
-    #     draw.rectangle((lx, ly, rx, ry), outline="red", width=1)
-
     # stash the bboxes dataframe for this chunk
     bboxes["image"] = imgname
 
@@ -234,6 +270,27 @@ def detected_labels(
     spec: np.ndarray,
     spec_times: np.ndarray,
 ) -> None:
+    """Use the detect_chirps output and save images and detected labels
+    as a YOLO dataset.
+
+    Parameters
+    ----------
+    - `output` : `pathlib.Path`
+        The output directory.
+    - `chunk` : `Dataset`
+        The dataset to make bounding boxes for.
+    - `imgname` : `str`
+        The name of the image.
+    - `spec` : `np.ndarray`
+        The spectrogram.
+    - `spec_times` : `np.ndarray`
+        The time axis of the spectrogram.
+
+    Returns
+    -------
+    - `None`
+    """
+
     # load the detected bboxes csv
     # TODO: This is a workaround. Instead improve the subset naming convention in gridtools
     source_dataset = chunk.path.name.split("_")[1:-4]
@@ -284,7 +341,23 @@ def detected_labels(
 def convert(
     data: Dataset, conf: Config, output: pathlib.Path, label_mode: str
 ) -> None:
-    """
+    """Convert a gridtools dataset to a YOLO dataset.
+
+    Parameters
+    ----------
+    - `data` : `Dataset`
+        The dataset to convert.
+    - `conf` : `Config`
+        The configuration.
+    - `output` : `pathlib.Path`
+        The output directory.
+    - `label_mode` : `str`
+        The label mode. Can be one of 'none', 'synthetic' or 'detected'.
+
+    Returns
+    -------
+    - `None`
+
     Notes
     -----
     This function iterates through a raw recording in chunks and computes the
@@ -293,6 +366,7 @@ def convert(
     the bounding boxes of chirps in that chunk and saves them to a dataframe
     and a txt file into a labels directory.
     """
+
     assert hasattr(data, "grid"), "Dataset must have a grid attribute"
     assert label_mode in [
         "none",
@@ -323,8 +397,8 @@ def convert(
     bbox_dfs = []
 
     # shift the time of the tracks to start at 0
-    # TODO: this is a hack. I should probably do this in the dataset
-    # creation step
+    # because a subset starts at the orignal time
+    # TODO: Remove this when gridtools is fixed
     data.track.times -= data.track.times[0]
 
     for chunk_no in range(n_chunks):
@@ -389,13 +463,10 @@ def convert(
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
 
-        # if label_mode == "none":
         spectrogram_freq_limits = (
             np.min(chunk.track.freqs) - freq_pad,
             np.max(chunk.track.freqs) + freq_pad,
         )
-        # else:
-        #     spectrogram_freq_limits = (100, 2200)
 
         spec = spec[
             (spec_freqs >= spectrogram_freq_limits[0])
@@ -447,20 +518,19 @@ def convert(
         f.write("\n".join(classes))
 
 
-def parse_datasets(
+def convert_cli(
     input: pathlib.Path, output: pathlib.Path, label_mode: str
 ) -> None:
-    """
-    Parse all datasets in a directory.
+    """Parse all datasets in a directory and convert them to a YOLO dataset.
 
     Parameters
     ----------
-    dataroot : pathlib.Path
+    - `input` : `pathlib.Path`
         The root directory of the datasets.
 
     Returns
     -------
-    None
+    - `None`
     """
 
     make_file_tree(output)

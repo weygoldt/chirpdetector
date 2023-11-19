@@ -6,14 +6,12 @@ Detect chirps on a spectrogram.
 
 import pathlib
 import shutil
-from IPython import embed
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-import torchvision.transforms.functional as F
 from gridtools.datasets import Dataset, load, subset
 from gridtools.utils.spectrograms import (
     decibel,
@@ -30,11 +28,14 @@ from rich.progress import (
 )
 
 from .models.utils import get_device, load_fasterrcnn
-from .utils.configfiles import Config, copy_config, load_config
+from .utils.configfiles import Config, load_config
 from .utils.logging import make_logger
 
+# Use non-gui backend for matplotlib to
+# avoid memory leaks
 matplotlib.use("Agg")
 
+# initialize the progress bar
 prog = Progress(
     SpinnerColumn(),
     *Progress.get_default_columns(),
@@ -45,7 +46,7 @@ prog = Progress(
 
 def float_index_interpolation(
     values: np.ndarray, index_arr: np.ndarray, data_arr: np.ndarray
-) -> float:
+) -> np.ndarray:
     """
     Interpolate a value in the data dimension that is not necessarily on the data array.
 
@@ -60,9 +61,10 @@ def float_index_interpolation(
 
     Returns
     -------
-    `numpy.ndarray`
+    - `numpy.ndarray`
         The interpolated value.
     """
+
     newvalues = np.zeros_like(values)
     for i, value in enumerate(values):
         nextlower = np.floor(value).astype(int)
@@ -81,12 +83,22 @@ def float_index_interpolation(
     return newvalues
 
 
-def flip_boxes(boxes, img_height):
-    """
-    Flip the boxes vertically.
+def flip_boxes(boxes: np.ndarray, img_height: int) -> np.ndarray:
+    """Flip the boxes vertically.
+
+    Parameters
+    ----------
+    - `boxes` : `numpy.ndarray`
+        The boxes to be flipped.
+    - `img_height` : `int`
+        The height of the image.
+
+    Returns
+    -------
+    - `numpy.ndarray`
+        The flipped boxes.
     """
 
-    # correct the y coordinates
     boxes[:, 1], boxes[:, 3] = (
         img_height - boxes[:, 3],
         img_height - boxes[:, 1],
@@ -95,11 +107,21 @@ def flip_boxes(boxes, img_height):
     return boxes
 
 
-def corner_coords_to_center_coords(boxes):
-    """
-    Convert box defined by corner coordinates to box defined by lower left, width
+def corner_coords_to_center_coords(boxes: np.ndarray) -> np.ndarray:
+    """Convert box defined by corner coordinates to box defined by lower left, width
     and height.
+
+    Parameters
+    ----------
+    - `boxes` : `numpy.ndarray`
+        The boxes to be converted.
+
+    Returns
+    -------
+    - `numpy.ndarray`
+        The converted boxes.
     """
+
     new_boxes = np.zeros_like(boxes)
     new_boxes[:, 0] = boxes[:, 0]
     new_boxes[:, 1] = boxes[:, 1]
@@ -109,10 +131,37 @@ def corner_coords_to_center_coords(boxes):
     return new_boxes
 
 
-def plot_detections(img_tensor, output, threshold, save_path, conf):
+def plot_detections(
+    img_tensor: torch.Tensor,
+    output: torch.Tensor,
+    threshold: float,
+    save_path: pathlib.Path,
+    conf: Config,
+) -> None:
+    """Plot the detections on the spectrogram.
+
+    Parameters
+    ----------
+    - `img_tensor` : `torch.Tensor`
+        The spectrogram.
+    - `output` : `torch.Tensor`
+        The output of the model.
+    - `threshold` : `float`
+        The threshold for the detections.
+    - `save_path` : `pathlib.Path`
+        The path to save the plot to.
+    - `conf` : `Config`
+        The configuration object.
+
+    Returns
+    -------
+    - `None`
+    """
+
+    # retrieve all the data from the output and convert
+    # spectrogram to numpy array
     img = img_tensor.detach().cpu().numpy().transpose(1, 2, 0)[..., 0]
     boxes = output["boxes"].detach().cpu().numpy()
-
     boxes = corner_coords_to_center_coords(boxes)
     scores = output["scores"].detach().cpu().numpy()
     labels = output["labels"].detach().cpu().numpy()
@@ -151,7 +200,20 @@ def plot_detections(img_tensor, output, threshold, save_path, conf):
     plt.close()
 
 
-def spec_to_image(spec):
+def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
+    """Convert a spectrogram to an image.
+
+    Add 3 color channels, normalize to 0-1, etc.
+
+    Parameters
+    ----------
+    - `spec` : `torch.Tensor`
+
+    Returns
+    -------
+    - `torch.Tensor`
+    """
+
     # Get the dimensions of the original matrix
     original_shape = spec.size()
 
@@ -176,7 +238,22 @@ def spec_to_image(spec):
     return scaled_tensor
 
 
-def detect_chirps(conf: Config, data: Dataset):
+def detect_chirps(conf: Config, data: Dataset) -> None:
+    """Detect chirps on a spectrogram.
+
+    Parameters
+    ----------
+    - `conf` : `Config`
+        The configuration object.
+    - `data` : `Dataset`
+        The gridtools dataset to detect chirps on.
+
+    Returns
+    -------
+    - `None`
+    """
+
+    # get the number of electrodes
     n_electrodes = data.grid.rec.shape[1]
 
     # TODO: fix this ugly workaround mainly because detections
@@ -338,6 +415,8 @@ def detect_chirps(conf: Config, data: Dataset):
         #     plt.show()
         # exit()
         #
+
+        # save the bboxes to a dataframe
         bbox_df = pd.DataFrame(
             data=bboxes,
             columns=["x1", "y1", "x2", "y2"],
@@ -383,12 +462,25 @@ def detect_chirps(conf: Config, data: Dataset):
 
 
 def detect_cli(path):
+    """Terminal interface for the detection function.
+
+    Parameters
+    ----------
+    - `path` : `str`
+
+    Returns
+    -------
+    - `None`
+    """
+
+    # make the global logger object
     global logger  # pylint: disable=global-statement
     path = pathlib.Path(path)
     logger = make_logger(__name__, path / "chirpdetector.log")
     datasets = [dir for dir in path.iterdir() if dir.is_dir()]
     confpath = path / "chirpdetector.toml"
 
+    # load the config file and print a warning if it does not exist
     if confpath.exists():
         config = load_config(str(confpath))
     else:
@@ -398,6 +490,8 @@ def detect_cli(path):
             "configuration file to your needs."
         )
 
+    # detect chirps in all datasets in the specified path
+    # and show a progress bar
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
         for dataset in datasets:

@@ -10,7 +10,7 @@ import pathlib
 import rich_click as click
 import toml
 
-from .convert_data import parse_datasets
+from .convert_data import convert_cli
 from .dataset_utils import (
     clean_yolo_dataset,
     merge_yolo_datasets,
@@ -157,7 +157,7 @@ def copyconfig(path):
 )
 def convert(input_path, output_path, labels):
     """Convert a wavetracker dataset to labeled or unlabeled spectrogram images to train the model."""
-    parse_datasets(input_path, output_path, labels)
+    convert_cli(input_path, output_path, labels)
 
 
 @cli.command()

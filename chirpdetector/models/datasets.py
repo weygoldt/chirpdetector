@@ -5,16 +5,16 @@ Dataset classes to train and test the model.
 """
 
 import pathlib
-from typing import List
+from typing import List, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
-import PIL
 import torch
 import torchvision
 import torchvision.transforms.functional as F
 from matplotlib.patches import Rectangle
 from torch.utils.data import DataLoader, Dataset
+from PIL import Image
 
 from ..utils.configfiles import load_config
 from .utils import collate_fn
@@ -29,16 +29,13 @@ class CustomDataset(Dataset):
         self,
         path: str,
         classes: List[str],
-        # width: int = None,
-        # height: int = None,
-        transforms: torchvision.transforms.Compose = None,
+        transforms: Union[torchvision.transforms.Compose, None] = None,
     ):
+        # initialize the variables
         self.transforms = transforms
         self.path = pathlib.Path(path)
         self.image_dir = pathlib.Path(path) / "images"
         self.label_dir = pathlib.Path(path) / "labels"
-        # self.height = height
-        # self.width = width
         self.classes = classes
 
         # get all the image paths in sorted order
@@ -49,7 +46,7 @@ class CustomDataset(Dataset):
         # get the path of the image and load it
         image_name = self.images[idx]
         image_path = self.image_dir / image_name
-        img = PIL.Image.open(image_path)
+        img = Image.open(image_path)
         img = F.to_tensor(img.convert("RGB"))
         img_width = img.shape[2]
         img_height = img.shape[1]
@@ -60,6 +57,11 @@ class CustomDataset(Dataset):
         boxes = []
         labels = []
 
+        # iterate over all the annotations
+        # and convert the bounding boxes to the format
+        # expected by the model
+        # yolo uses normalized centerx, centery, width and height
+        # model gets top left x, y, bottom right x, y
         for annot in annotations:
             # save the label
             labels.append(int(annot[0]))
@@ -99,11 +101,15 @@ class CustomDataset(Dataset):
 
         # apply the image transforms
         if self.transforms:
-            sample = self.transforms(
-                image=img, bboxes=target["boxes"], labels=labels
-            )
-            img = sample["image"]
-            target["boxes"] = torch.Tensor(sample["bboxes"])
+            raise NotImplementedError
+
+            # sample = self.transforms(
+            #     image=img,
+            #     bboxes=target["boxes"],
+            #     labels=labels,
+            # )
+            # img = sample["image"]
+            # target["boxes"] = torch.Tensor(sample["bboxes"])
 
         return img, target
 
@@ -114,7 +120,7 @@ class CustomDataset(Dataset):
 def main():
     """
     Instantiate the CustomDataset class and visualize the images and bounding
-    boxes.
+    boxes to test if everything is working as expected.
     """
 
     config = load_config(
@@ -122,8 +128,6 @@ def main():
     )
     dataset = CustomDataset(
         config.train.datapath,
-        # config.hyper.width,
-        # config.hyper.height,
         config.hyper.classes,
     )
     loader = DataLoader(
