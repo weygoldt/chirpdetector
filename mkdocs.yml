@@ -2,8 +2,8 @@ site_name: Chirp Detector
 
 theme:
   name: material
-  favicon: assets/logo.png
-  logo: assets/logo.png
+  favicon: assets/logo.svg
+  logo: assets/logo.svg
   palette: 
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"

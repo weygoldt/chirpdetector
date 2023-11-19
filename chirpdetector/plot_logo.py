@@ -102,7 +102,7 @@ def plot_logo(spec, freq, time, f):
     ftime = np.linspace(0, 5, len(f))
     print(f)
 
-    fig, ax = plt.subplots(figsize=(6, 2))
+    fig, ax = plt.subplots(figsize=(20, 5))
     ax.imshow(
         spec,
         aspect="auto",
@@ -114,7 +114,9 @@ def plot_logo(spec, freq, time, f):
     ax.plot(ftime, f, color="black", lw=1.5, zorder=1000)
     ax.set_xlim(1.5, 3.5)
     ax.set_ylim(350, 750)
-    plt.savefig("logo.svg", dpi=300, bbox_inches="tight", transparent=True)
+    plt.savefig(
+        "../assets/logo_raw.svg", dpi=300, bbox_inches="tight", transparent=True
+    )
 
 
 def main():
