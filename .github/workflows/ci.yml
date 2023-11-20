@@ -1,3 +1,4 @@
+name: Example workflow for Codecov
 on: [push]
 jobs:
   run:
@@ -29,4 +30,4 @@ jobs:
         files: ./coverage1.xml,./coverage2.xml,!./cache
         flags: unittests
         name: codecov-umbrella
-        verbose: true   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true
