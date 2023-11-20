@@ -38,6 +38,9 @@ theme:
 plugins:
   - mkdocstrings:
       default_handler: python
+      handlers:
+        python:
+          paths: [src]
   - search
   
 extra:
@@ -60,10 +63,9 @@ repo_name: weygoldt/chirpdetector
 
 nav:
     - Home: 'index.md'
-    - 'User guide':
-        - 'Detection': 'detection.md'
-    - 'Example workflows':
-        - 'Example 1': 'example1.md'
-    - 'Contributing': 'contributing.md'
-    - API reference: 'api/index.html'
+    # - 'User guide':
+    #     - 'Detection': '/detection.md'
+    # - 'Example workflows':
+    #     - 'Example 1': '/example1.md'
+    # - 'Contributing': 'contributing.md'
 
