@@ -21,6 +21,8 @@
   </p>
 </div>
 
+![codecov](https://github.com/weygoldt/chirpdetector/actions/workflows/codecov.yml/badge.svg)
+
 ## The Problem
 
 Chirps are by far the most thoroughly studied communication signal of weakly electric, if not all fish. But as soon as the electric fields of more than one fish is recorded on the same electrode, detecting chirps becomes so hard, that most of the research to date analyzes this signal in isolated individuals. This is not particularly advantageous if the focus lies on the communication aspect of this signal. 
