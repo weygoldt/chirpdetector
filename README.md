@@ -21,7 +21,7 @@
   </p>
 </div>
 
-![codecov](https://github.com/weygoldt/chirpdetector/actions/workflows/codecov.yml/badge.svg)
+![Codecov](https://img.shields.io/codecov/c/github/weygoldt/chirpdetector)
 
 ## The Problem
 
