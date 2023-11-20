@@ -31,10 +31,31 @@ def get_device():
     return device
 
 
-def get_transforms(width, height, train: bool):
+def get_transforms(width: int, height: int, train: bool) -> A.Compose:
+    """Define the transformations that should be applied to the images.
+
+    Transforms are used to augment the training data and to standardize the
+    validation data. Augmentations help to increase the robustness of the model
+    and to prevent overfitting.
+
+    Parameters
+    ----------
+    - `width`: `int`
+        The width of the images.
+    - `height`: `int`
+        The height of the images.
+    - `train`: `bool`
+        Whether the images are used for training or validation.
+
+    Returns
+    -------
+    - `transforms`: `A.Compose`
+        The transformations that should be applied to the images.
     """
-    Define the transformations that should be applied to the images.
-    """
+    assert isinstance(width, int), "width must be an integer"
+    assert isinstance(height, int), "height must be an integer"
+    assert isinstance(train, bool), "train must be a boolean"
+
     if train:
         return A.Compose(
             [
@@ -54,7 +75,7 @@ def get_transforms(width, height, train: bool):
     )
 
 
-def collate_fn(batch):
+def collate_fn(batch: list) -> tuple:
     """
     Since each image may have a different number of objects, we need a collate
     function (to be passed to the DataLoader).
@@ -63,6 +84,11 @@ def collate_fn(batch):
     ----------
     - `batch`: `list`
         A list of the data loaded from the dataset.
+
+    Returns
+    -------
+    - `tuple`
+        A tuple containing the images and the targets.
     """
     return tuple(zip(*batch))
 
@@ -83,6 +109,10 @@ def load_fasterrcnn(num_classes: int) -> torch.nn.Module:
     - `model`: `torch.nn.Module`
         Adapted FasterRCNN Model
     """
+
+    if not isinstance(num_classes, int):
+        raise TypeError("num_classes must be an integer")
+
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
         weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT
     )

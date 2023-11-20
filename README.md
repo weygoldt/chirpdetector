@@ -33,6 +33,9 @@ This project is still work in progress and will approximately be released in spr
 
 ## TODO
 
+### Urgent!!!
+- [ ] Refactor train, detect, convert. All into much smaller functions. Move accesory functions to utils 
+
 - [x] Move the dataconverter from `gridtools` to `chirpdetector`
 - [x] Extend the dataconverter to just output the spectrograms so that hand-labelling can be done in a separate step
 - [x] Add a main script so that the cli is `chirpdetector <task> --<flag> <args>`

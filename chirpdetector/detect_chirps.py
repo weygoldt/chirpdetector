@@ -12,20 +12,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from matplotlib.patches import Rectangle
-from rich.progress import (
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TimeElapsedColumn,
-)
-
 from gridtools.datasets import Dataset, load, subset
 from gridtools.utils.spectrograms import (
     decibel,
     freqres_to_nfft,
     overlap_to_hoplen,
     spectrogram,
+)
+from matplotlib.patches import Rectangle
+from rich.progress import (
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
 )
 
 from .models.utils import get_device, load_fasterrcnn
@@ -49,19 +48,28 @@ def float_index_interpolation(
     values: np.ndarray, index_arr: np.ndarray, data_arr: np.ndarray
 ) -> np.ndarray:
     """
-    Interpolate a value in the data dimension that is not necessarily on the data array.
+    Interpolates a set of float indices within the given index
+    array to obtain corresponding values from the data
+    array using linear interpolation.
 
-    Interpolates a float index in the index array to the corresponding value in the data
-    array. If the index is outside of the index array, the value is set to NaN.
+    Given a set of float indices (`values`), this function determines
+    the corresponding values in the `data_arr` by linearly interpolating
+    between adjacent indices in the `index_arr`. Linear interpolation
+    involves calculating weighted averages based on the fractional
+    parts of the float indices.
 
-    Uses linear interpolation.
+    This function is useful to transform float coordinates on a spectrogram
+    matrix to the corresponding time and frequency values. The reason for
+    this is, that the model outputs bounding boxes in float coordinates,
+    i.e. it does not care about the exact pixel location of the bounding
+    box.
 
     Parameters
     ----------
     - `values` : `np.ndarray`
-        The value to be interpolated.
+        The index value as a float that should be interpolated.
     - `index_arr` : `numpy.ndarray`
-        The array of indices.
+        The array of indices on the data array.
     - `data_arr` : `numpy.ndarray`
         The array of data.
 
@@ -69,66 +77,75 @@ def float_index_interpolation(
     -------
     - `numpy.ndarray`
         The interpolated value.
+
+    Raises
+    ------
+    - `ValueError`
+        If any of the input float indices (`values`) are outside
+        the range of the provided `index_arr`.
+
+    Examples
+    --------
+    >>> values = np.array([2.5, 3.2, 4.8])
+    >>> index_arr = np.array([2, 3, 4, 5])
+    >>> data_arr = np.array([10, 15, 20, 25])
+    >>> result = float_index_interpolation(values, index_arr, data_arr)
+    >>> print(result)
+    array([12.5, 16. , 22.5])
     """
 
-    newvalues = np.zeros_like(values)
-    for i, value in enumerate(values):
-        nextlower = np.floor(value).astype(int)
-        rest = value - nextlower
+    # Check if the values are within the range of the index array
+    if np.any(values < np.min(index_arr)) or np.any(values > np.max(index_arr)):
+        raise ValueError("Values outside the range of index array")
 
-        # Check if the value is before the first index
-        if value < index_arr[0]:
-            newvalues[i] = np.nan
-            continue
+    # Find the indices corresponding to the values
+    lower_indices = np.floor(values).astype(int)
+    upper_indices = np.ceil(values).astype(int)
 
-        # Check if the next lower index is outside of the index array
-        if value > index_arr[-1]:
-            newvalues[i] = np.nan
-            continue
+    # Ensure upper indices are within the array bounds
+    upper_indices = np.minimum(upper_indices, len(index_arr) - 1)
 
-        # Check if the next higher index is outside of the index array
-        if nextlower > len(data_arr) - 2:
-            newvalues[i] = data_arr[nextlower] + rest * (
-                data_arr[nextlower] - data_arr[nextlower - 1]
-            )
-            continue
+    # Calculate the interpolation weights
+    weights = values - lower_indices
 
-        nextlower_data = data_arr[index_arr == nextlower][0]
-        nexthigher_data = data_arr[index_arr == nextlower + 1][0]
+    # Linear interpolation
+    interpolated_values = (1 - weights) * data_arr[
+        lower_indices
+    ] + weights * data_arr[upper_indices]
 
-        newvalue = nextlower_data + rest * (nexthigher_data - nextlower_data)
-        newvalues[i] = newvalue
-
-    return newvalues
+    return interpolated_values
 
 
-def flip_boxes(boxes: np.ndarray, img_height: int) -> np.ndarray:
-    """Flip the boxes vertically.
+# def flip_boxes(boxes: np.ndarray, img_height: int) -> np.ndarray:
+#     """Flip the boxes vertically.
+#
+#     Parameters
+#     ----------
+#     - `boxes` : `numpy.ndarray`
+#         The boxes to be flipped.
+#     - `img_height` : `int`
+#         The height of the image.
+#
+#     Returns
+#     -------
+#     - `numpy.ndarray`
+#         The flipped boxes.
+#     """
+#
+#     boxes[:, 1], boxes[:, 3] = (
+#         img_height - boxes[:, 3],
+#         img_height - boxes[:, 1],
+#     )
+#
+#     return boxes
 
-    Parameters
-    ----------
-    - `boxes` : `numpy.ndarray`
-        The boxes to be flipped.
-    - `img_height` : `int`
-        The height of the image.
 
-    Returns
-    -------
-    - `numpy.ndarray`
-        The flipped boxes.
-    """
+def coords_to_mpl_rectangle(boxes: np.ndarray) -> np.ndarray:
+    """Convert box defined by corner coordinates (x1, y1, x2, y2)
+    to box defined by lower left, width and height (x1, y1, w, h).
 
-    boxes[:, 1], boxes[:, 3] = (
-        img_height - boxes[:, 3],
-        img_height - boxes[:, 1],
-    )
-
-    return boxes
-
-
-def corner_coords_to_center_coords(boxes: np.ndarray) -> np.ndarray:
-    """Convert box defined by corner coordinates to box defined by lower left, width
-    and height.
+    The corner coordinates are the model output, but the center coordinates
+    are needed by the `matplotlib.patches.Rectangle` object for plotting.
 
     Parameters
     ----------
@@ -140,6 +157,10 @@ def corner_coords_to_center_coords(boxes: np.ndarray) -> np.ndarray:
     - `numpy.ndarray`
         The converted boxes.
     """
+    if len(boxes.shape) == 1:
+        raise ValueError("The boxes array must be 2-dimensional.")
+    if boxes.shape[1] != 4:
+        raise ValueError("The boxes array must have 4 columns.")
 
     new_boxes = np.zeros_like(boxes)
     new_boxes[:, 0] = boxes[:, 0]
@@ -181,7 +202,7 @@ def plot_detections(
     # spectrogram to numpy array
     img = img_tensor.detach().cpu().numpy().transpose(1, 2, 0)[..., 0]
     boxes = output["boxes"].detach().cpu().numpy()
-    boxes = corner_coords_to_center_coords(boxes)
+    boxes = coords_to_mpl_rectangle(boxes)
     scores = output["scores"].detach().cpu().numpy()
     labels = output["labels"].detach().cpu().numpy()
     labels = [conf.hyper.classes[i] for i in labels]
@@ -232,6 +253,22 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     -------
     - `torch.Tensor`
     """
+
+    # make sure the spectrogram is a tensor
+    if not isinstance(spec, torch.Tensor):
+        raise TypeError("The spectrogram must be a torch.Tensor.")
+
+    # make sure the spectrogram is 2-dimensional
+    if len(spec.size()) != 2:
+        raise ValueError("The spectrogram must be a 2-dimensional matrix.")
+
+    # make sure the spectrogram contains some data
+    if (
+        np.max(spec.detach().cpu().numpy())
+        - np.min(spec.detach().cpu().numpy())
+        == 0
+    ):
+        raise ValueError("The spectrogram must contain some data.")
 
     # Get the dimensions of the original matrix
     original_shape = spec.size()

@@ -30,7 +30,7 @@ from .utils.configfiles import Config, load_config
 con = Console()
 
 
-def make_file_tree(path: pathlib.Path) -> None:
+def make_file_tree(path: Union[pathlib.Path, str]) -> None:
     """
     Builds a file tree for the training dataset.
 
@@ -39,6 +39,15 @@ def make_file_tree(path: pathlib.Path) -> None:
     path : pathlib.Path
         The root directory of the dataset.
     """
+
+    if not isinstance(path, pathlib.Path):
+        path = pathlib.Path(path)
+
+    if path.parent.exists() and path.parent.is_file():
+        raise ValueError(
+            f"Parent directory of {path} is a file. "
+            "Please specify a directory."
+        )
 
     if path.exists():
         shutil.rmtree(path)
@@ -51,8 +60,8 @@ def make_file_tree(path: pathlib.Path) -> None:
     train_labels.mkdir(exist_ok=True, parents=True)
 
 
-def numpy_to_pil(img: np.ndarray) -> Image:
-    """Convert a numpy array to a PIL image.
+def numpy_to_pil(img: np.ndarray) -> Image.Image:
+    """Convert a 2D numpy array to a PIL image.
 
     Parameters
     ----------
@@ -64,6 +73,12 @@ def numpy_to_pil(img: np.ndarray) -> Image:
     PIL.Image
         The converted image.
     """
+
+    if len(img.shape) != 2:
+        raise ValueError("Image must be 2D")
+
+    if img.max() == img.min():
+        raise ValueError("Image must have more than one value")
 
     img = np.flipud(img)
     img = np.uint8((img - img.min()) / (img.max() - img.min()) * 255)

@@ -119,15 +119,6 @@ def load_config(path: Union[str, pathlib.Path]) -> Config:
         Configuration object.
     """
 
-    # global logger
-    # logger = make_logger(
-    #     __name__, pathlib.Path(path).parent / "chirpdetector.log"
-    # )
-    #
-    # logger.info(
-    #     f"Moving default configuration file to {pathlib.Path(path).parent}"
-    # )
-
     file = toml.load(path)
     hy = Hyperparams(**file["hyperparameters"])
     tr = Training(**file["training"])

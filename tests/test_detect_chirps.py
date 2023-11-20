@@ -1,6 +1,11 @@
 import numpy as np
+import torch
 
-from chirpdetector.detect_chirps import float_index_interpolation
+from chirpdetector.detect_chirps import (
+    coords_to_mpl_rectangle,
+    float_index_interpolation,
+    spec_to_image,
+)
 
 
 def test_float_index_interpolation():
@@ -31,7 +36,7 @@ def test_float_index_interpolation():
 
     # Happy path with integers
     values = np.array([1, 2, 3, 3])
-    expected = np.array([1, 2, 3, 3])
+    expected = np.array([1.5, 2.5, 3.5, 3.5])
     actual = float_index_interpolation(values, index_arr, data_arr)
     np.testing.assert_array_equal(actual, expected)
 
@@ -41,7 +46,97 @@ def test_float_index_interpolation():
     actual = float_index_interpolation(values, index_arr, data_arr)
     np.testing.assert_array_equal(actual, expected)
 
+    # Happy path: values not sorted
+    values = np.array([2, 1])
+    expected = np.array([2.5, 1.5])
+    actual = float_index_interpolation(values, index_arr, data_arr)
+    np.testing.assert_array_equal(actual, expected)
+
     # Sad path: values outside of index_arr
     values = np.array([-1, 5])
-    expected = np.array([np.nan, np.nan])
+    try:
+        float_index_interpolation(values, index_arr, data_arr)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_coords_to_mpl_rectangle():
+    """
+    Test the corner_coords_to_center_coords function
+    """
+
+    # Happy path
+    corner_coords = np.array([[1, 1, 2, 2]])
+    expected = np.array([[1, 1, 1, 1]])
+    actual = coords_to_mpl_rectangle(corner_coords)
     np.testing.assert_array_equal(actual, expected)
+
+    # Happy path with multiple values
+    corner_coords = np.array([[1, 1, 2, 2], [2, 2, 3, 3]])
+    expected = np.array([[1, 1, 1, 1], [2, 2, 1, 1]])
+    actual = coords_to_mpl_rectangle(corner_coords)
+    np.testing.assert_array_equal(actual, expected)
+
+    # Sad path: wrong number of columns
+    corner_coords = np.array([[1, 1, 2, 2, 3]])
+    try:
+        coords_to_mpl_rectangle(corner_coords)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError")
+
+    # Sad path: wrong dimensions
+    corner_coords = np.array([1, 1, 2, 2])
+    try:
+        coords_to_mpl_rectangle(corner_coords)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_spec_to_image():
+    """
+    Test the spec_to_image function
+    """
+
+    # Happy path
+    spec = torch.tensor(np.array([[1, 1, 1], [2, 2, 2]]))
+    expected = (
+        torch.tensor([[0, 0, 0], [1, 1, 1]])
+        .repeat(3, 1, 1)
+        .view(3, 2, 3)
+        .float()
+    )
+    actual = spec_to_image(spec)
+    np.testing.assert_array_equal(actual, expected)
+
+    # Sad path: No data
+    spec = torch.tensor(np.array([[1, 1, 1], [1, 1, 1]]))
+    try:
+        spec_to_image(spec)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError")
+
+    # Sad path: Wrong dimensions
+    spec = torch.tensor(np.array([1, 1, 1]))
+    try:
+        spec_to_image(spec)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError")
+
+    # Sad path: Wrong type:
+    spec = np.array([[1, 1, 1], [1, 1, 1]])
+    try:
+        spec_to_image(spec)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("Expected TypeError")
