@@ -53,3 +53,4 @@ This project is still work in progress and will approximately be released in spr
 - [ ] Add augmentation transforms to the dataset class and add augmentations to the simulation in `gridtools`
 - [x] Change bbox to actual yolo format, not the weird one I made up (which is x1, y1, x2, y2 instead of x1, y1, w, h). This is why the label-studio export is not working.
 - [x] Port cli to click, works better
+- [x] Try clustering the detected chirp windows on a spectrogram, could be interesting
