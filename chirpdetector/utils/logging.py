@@ -23,7 +23,6 @@ def make_logger(name: str, logfile: pathlib.Path) -> logging.Logger:
     - `logging.Logger`
         Logger object.
     """
-
     # create logger formats for file and terminal
     file_formatter = logging.Formatter(
         "[ %(levelname)s ] ~ %(asctime)s ~ %(name)s.%(funcName)s:%(lineno)d: %(message)s"

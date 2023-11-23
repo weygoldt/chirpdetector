@@ -12,7 +12,6 @@ def test_make_file_tree(tmp_path):
     """
     Test the make_file_tree function
     """
-
     # Happy path non-existing directory
     make_file_tree(tmp_path)
     assert (tmp_path / "images").exists()
@@ -34,7 +33,6 @@ def test_numpy_to_pil():
     """
     Test the numpy_to_pil function
     """
-
     # Happy path
     array = np.zeros((10, 10), dtype=np.float32)
     array[0, 0] = 0.5

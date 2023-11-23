@@ -122,7 +122,6 @@ def main():
     Instantiate the CustomDataset class and visualize the images and bounding
     boxes to test if everything is working as expected.
     """
-
     config = load_config(
         "/home/weygoldt/Projects/mscthesis/src/chirpdetector/chirpdetector/config.toml"
     )

@@ -1,8 +1,6 @@
 #! /usr/bin/env python3
 
-"""
-Train and test the neural network specified in the config file.
-"""
+"""Train and test the neural network specified in the config file."""
 
 import pathlib
 from typing import List
@@ -66,7 +64,6 @@ def save_model(
     -------
     - `None`
     """
-
     path = pathlib.Path(path)
     path.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -105,7 +102,6 @@ def plot_epochs(
     -------
     - `None`
     """
-
     _, ax = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
 
     x_train = np.arange(len(epoch_train_loss[0])) + 1
@@ -158,7 +154,6 @@ def plot_folds(
     -------
     - `None`
     """
-
     _, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
 
     for train_loss, val_loss in zip(fold_avg_train_loss, fold_avg_val_loss):
@@ -215,7 +210,6 @@ def train_epoch(
     - `train_loss`: `List`
         The training loss for each batch.
     """
-
     train_loss = []
 
     for samples, targets in dataloader:
@@ -257,7 +251,6 @@ def val_epoch(
     - `loss_dict`: `dict`
         The loss dictionary.
     """
-
     val_loss = []
     for samples, targets in dataloader:
         images = list(sample.to(device) for sample in samples)
@@ -289,7 +282,6 @@ def train(config: Config, mode: str = "pretrain") -> None:
     -------
     - `None`
     """
-
     # Load a pretrained model from pytorch if in pretrain mode,
     # otherwise open an already trained model from the
     # model state dict.
@@ -511,96 +503,5 @@ def train_cli(config_path: pathlib.Path, mode: str) -> None:
     -------
     - `None`
     """
-
     config = load_config(config_path)
     train(config, mode=mode)
-
-
-#
-#
-# def verify_detections(
-#     image: torch.Tensor, target: dict, output: dict, path: str
-# ) -> None:
-#     """
-#     Verify the detections by plotting them on the image.
-#     """
-#
-#     _, ax = plt.subplots()
-#     ax.imshow(image.cpu().numpy().transpose((1, 2, 0)))
-#
-#     for box in target["boxes"]:
-#         box = box.cpu().numpy()
-#         ax.add_patch(
-#             matplotlib.patches.Rectangle(
-#                 (box[0], box[1]),
-#                 box[2] - box[0],
-#                 box[3] - box[1],
-#                 fill=False,
-#                 edgecolor="red",
-#                 linewidth=1,
-#             )
-#         )
-#
-#     for box in output["boxes"]:
-#         box = box.cpu().numpy()
-#         ax.add_patch(
-#             matplotlib.patches.Rectangle(
-#                 (box[0], box[1]),
-#                 box[2] - box[0],
-#                 box[3] - box[1],
-#                 fill=False,
-#                 edgecolor="blue",
-#                 linewidth=1,
-#             )
-#         )
-#         ax.text(
-#             box[0],
-#             box[1],
-#             f"{output['scores'][0].cpu().numpy():.2f}",
-#             color="blue",
-#         )
-#
-#     plt.savefig(path)
-#     plt.close()
-#
-#
-# def inference_on_trainingdata(conf: Config, path) -> None:
-#     """
-#     Perform inference on the training data.
-#     """
-#     device = get_device()
-#     con.log(f"Using device: [bold blue]{device}[reset]")
-#     con.log(f"Using config file: [bold blue]{conf.path}[reset]")
-#     con.log(
-#         "[bold magenta] ------------------ Starting Inference ------------------ [reset]"
-#     )
-#     data = CustomDataset(
-#         path=path,
-#         classes=conf.hyper.classes,
-#     )
-#
-#     modelpath = pathlib.Path(conf.hyper.modelpath) / "model.pt"
-#
-#     model = load_fasterrcnn(len(conf.hyper.classes)).to(device)
-#     model.load_state_dict(torch.load(modelpath)["model_state_dict"])
-#     model.eval()
-#
-#     # with prog:
-#     # task = prog.add_task("Inference", total=len(data))
-#     for idx in range(len(data)):
-#         image, target = data[idx]
-#         image = image.to(device)
-#         target = {k: v.to(device) for k, v in target.items()}
-#
-#         with torch.inference_mode():
-#             output = model([image])
-#
-#         path = pathlib.Path(conf.hyper.modelpath) / "verify"
-#         path.mkdir(parents=True, exist_ok=True)
-#         path = path / f"{idx}.png"
-#         verify_detections(
-#             image=image,
-#             target=target,
-#             output=output[0],
-#             path=path,
-#         )

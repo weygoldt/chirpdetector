@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 
-"""This module contains functions to visualize detections on images."""
+"""Functions to visualize detections on images."""
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from gridtools.datasets import Dataset, load, subset
-from .utils.configfiles import Config, load_config
-import torch
 import pathlib
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+from gridtools.datasets import Dataset, load, subset
 from gridtools.utils.spectrograms import (
     decibel,
     freqres_to_nfft,
@@ -17,10 +16,23 @@ from gridtools.utils.spectrograms import (
     spectrogram,
 )
 
+from .utils.configfiles import Config, load_config
+
 
 def plot_detections(
     data: Dataset, chirp_df: pd.DataFrame, conf: Config
 ) -> None:
+    """Plot detections on spectrograms.
+
+    Parameters
+    ----------
+    data : Dataset
+        The dataset.
+    chirp_df : pd.DataFrame
+        The dataframe containing the chirp detections.
+    conf : Config
+        The config file.
+    """
     time_window = 15
     n_electrodes = data.grid.rec.shape[1]
 
@@ -88,7 +100,10 @@ def plot_detections(
         spec = spec.detach().cpu().numpy()
 
         # Set y limits
-        flims = (np.min(data.track.freqs) - 200, np.max(data.track.freqs) + 700)
+        flims = (
+            np.min(data.track.freqs) - 200,
+            np.max(data.track.freqs) + 700,
+        )
         spec = spec[(spec_freqs >= flims[0]) & (spec_freqs <= flims[1]), :]
         spec_freqs = spec_freqs[
             (spec_freqs >= flims[0]) & (spec_freqs <= flims[1])

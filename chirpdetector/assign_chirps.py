@@ -4,11 +4,9 @@
 
 import pathlib
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from gridtools.datasets import Dataset, load
-from IPython import embed
 from rich.progress import (
     MofNCompleteColumn,
     Progress,
@@ -17,9 +15,9 @@ from rich.progress import (
 )
 from scipy.signal import find_peaks
 
-from .utils.configfiles import Config, load_config
-from .utils.logging import make_logger
+from .utils.configfiles import load_config
 from .utils.filters import bandpass_filter, envelope
+from .utils.logging import make_logger
 
 # initialize the progress bar
 prog = Progress(
@@ -49,7 +47,6 @@ def non_max_suppression_fast(
     - `pick`: `list`
         List of indices of bboxes to keep
     """
-
     # slightly modified version of
     # https://pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/
 
@@ -101,7 +98,8 @@ def non_max_suppression_fast(
 
         # delete all indexes from the index list that have
         idxs = np.delete(
-            idxs, np.concatenate(([last], np.where(overlap > overlapThresh)[0]))
+            idxs,
+            np.concatenate(([last], np.where(overlap > overlapThresh)[0])),
         )
         # return the indicies of the picked boxes
     return pick
@@ -110,7 +108,7 @@ def non_max_suppression_fast(
 def track_filter(
     chirp_df: pd.DataFrame, minf: float, maxf: float
 ) -> pd.DataFrame:
-    """Remove chirp bboxes that do not overlap with the range spanned by minf and maxf.
+    """Remove chirp bboxes that do not overlap with tracks.
 
     Parameters
     ----------
@@ -126,7 +124,6 @@ def track_filter(
     - `chirp_df_tf`: `pd.DataFrame`
         Dataframe containing the chirp bboxes that overlap with the range
     """
-
     # remove all chirp bboxes that have no overlap with the range spanned by
     # minf and maxf
 
@@ -168,7 +165,6 @@ def clean_bboxes(data: Dataset, chirp_df: pd.DataFrame) -> pd.DataFrame:
     - `chirp_df_tf`: `pd.DataFrame`
         Dataframe containing the chirp bboxes that overlap with the range
     """
-
     # non-max suppression: remove all chirp bboxes that overlap with
     # another more than threshold
     pick_indices = non_max_suppression_fast(chirp_df, 0.5)
@@ -199,7 +195,6 @@ def bbox_to_chirptimes(chirp_df: pd.DataFrame) -> pd.DataFrame:
     - `chirp_df`: `pd.DataFrame`
         Dataframe containing the chirp bboxes with chirp times.
     """
-
     chirp_df["chirp_times"] = np.mean(chirp_df[["t1", "t2"]], axis=1)
 
     return chirp_df
@@ -212,9 +207,12 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
     1. Clean the chirp bboxes
     2. For each fish track, filter the signal on the best electrode
     3. Find troughs in the envelope of the filtered signal
-    4. Compute the prominence of the trough and the distance to the chirp center
-    5. Compute a cost function that is high when the trough prominence is high and the distance to the chirp center is low
-    6. Compare the value of the cost function for each track and choose the track with the highest cost function value
+    4. Compute the prominence of the trough and the distance to the chirp
+    center
+    5. Compute a cost function that is high when the trough prominence is high
+    and the distance to the chirp center is low
+    6. Compare the value of the cost function for each track and choose the
+    track with the highest cost function value
 
     Parameters
     ----------
@@ -223,7 +221,6 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
     - `chirp_df`: `pd.DataFrame`
         Dataframe containing the chirp bboxes
     """
-
     # first clean the bboxes
     chirp_df = clean_bboxes(data, chirp_df)
 
@@ -238,9 +235,7 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
     track_ids = []  # id of track / fish
     peak_prominences = []  # prominence of trough in envelope
     peak_distances = []  # distance of trough to chirp center
-    peak_times = (
-        []
-    )  # time of trough in envelope, should be close to chirp center
+    peak_times = []  # time of trough in envelope, should be close to chirp
 
     for fish_id in data.track.ids:
         # get chirps, times and freqs and powers for this track
@@ -278,7 +273,7 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
             stop_idx = int(np.round(t2 * data.grid.samplerate))
             center_idx = int(np.round(chirp * data.grid.samplerate))
 
-            # determine bandpass cutoffs above and below baseline frequency from track
+            # determine bandpass cutoffs above and below baseline frequency
             lower_f = best_freq - 15
             upper_f = best_freq + 15
 
@@ -342,17 +337,18 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
     track_ids = np.array(track_ids)
 
     # compute cost function.
-    # This function is high when the trough prominence is high (-> Chirp with high contrast)
-    # and when the trough is close to the chirp center as detected by the R-CNN (-> Detected
-    # chirp is close to the actual chirp)
+    # This function is high when the trough prominence is high
+    # (-> Chirp with high contrast)
+    # and when the trough is close to the chirp center as detected by the
+    # R-CNN (-> Detected chirp is close to the actual chirp)
     cost = peak_prominences / peak_distances**2
 
     # set cost to zero for cases where no peak was found
     cost[np.isnan(cost)] = 0
 
     # for each chirp, choose the track where the cost is highest
-    # TODO: To avoid confusion make a cost function where high is good and low is bad
-    # this is more like a "gain function"
+    # TODO: To avoid confusion make a cost function where high is good and low
+    # is bad. this is more like a "gain function"
     chosen_tracks = []
     chosen_track_times = []
     for idx in np.unique(chirp_indices):
@@ -386,7 +382,6 @@ def assign_cli(path: pathlib.Path) -> None:
     - `path`: `pathlib.Path`
         Path to the directory containing the chirpdetector.toml file
     """
-
     if not path.is_dir():
         raise ValueError(f"{path} is not a directory")
 

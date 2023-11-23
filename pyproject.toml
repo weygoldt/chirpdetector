@@ -13,24 +13,75 @@ torch = "^2.1.0"
 torchaudio = "^2.1.0"
 torchvision = "^0.16.0"
 matplotlib = "^3.8.0"
-rich = "^13.6.0"
 scikit-learn = "^1.3.2"
 toml = "^0.10.2"
 pandas = "^2.1.2"
 pydantic = "^2.4.2"
-rich-argparse = "^1.4.0"
+rich = "^13.6.0"
 click = "^8.1.7"
 rich-click = "^1.7.1"
-pytest = "^7.4.3"
+gridtools = {path = "../gridtools", develop = true}
 
 [tool.poetry.group.dev.dependencies]
-black = "^23.10.1"
 pre-commit = "^3.5.0"
 pytest-coverage = "^0.0"
+mypy = "^1.7.1"
+pytest = "^7.4.3"
+ruff = "^0.1.6"
+isort = "^5.12.0"
+black = "^23.11.0"
 
 [tool.poetry.scripts]
 chirpdetector = "chirpdetector.chirpdetector:cli"
 cpd = "chirpdetector.chirpdetector:cli"
+
+[tool.ruff]
+line-length = 79
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "A",  # prevent using keywords that clobber python builtins
+    "B",  # bugbear: security warnings
+    "E",  # pycodestyle
+    "F",  # pyflakes
+    "ISC",  # implicit string concatenation
+    "UP",  # alert you when better syntax is available in your python version
+    "RUF",  # the ruff developer's own rules
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.black]
+line-length = 79
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
 
 [build-system]
 requires = ["poetry-core"]

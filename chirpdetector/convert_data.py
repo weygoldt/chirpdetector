@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 
-"""
-This module contains functions and classes for converting data from one format
-to another.
-"""
+"""Functions and classes for converting data."""
 
 import pathlib
 import shutil
@@ -30,15 +27,13 @@ con = Console()
 
 
 def make_file_tree(path: Union[pathlib.Path, str]) -> None:
-    """
-    Builds a file tree for the training dataset.
+    """Build a file tree for the training dataset.
 
     Parameters
     ----------
     path : pathlib.Path
         The root directory of the dataset.
     """
-
     if not isinstance(path, pathlib.Path):
         path = pathlib.Path(path)
 
@@ -72,7 +67,6 @@ def numpy_to_pil(img: np.ndarray) -> Image.Image:
     PIL.Image
         The converted image.
     """
-
     if len(img.shape) != 2:
         raise ValueError("Image must be 2D")
 
@@ -101,7 +95,6 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
     `pandas.DataFrame`
         A dataframe with the bounding boxes.
     """
-
     assert hasattr(
         data.com.chirp, "params"
     ), "Dataset must have a chirp attribute with a params attribute"
@@ -197,7 +190,6 @@ def synthetic_labels(
     - `pandas.DataFrame`
         A dataframe with the bounding boxes.
     """
-
     # compute the bounding boxes for this chunk
     bboxes = chirp_bounding_boxes(chunk, nfft)
 
@@ -285,8 +277,7 @@ def detected_labels(
     spec: np.ndarray,
     spec_times: np.ndarray,
 ) -> None:
-    """Use the detect_chirps output and save images and detected labels
-    as a YOLO dataset.
+    """Use the detect_chirps to make a YOLO dataset.
 
     Parameters
     ----------
@@ -305,9 +296,9 @@ def detected_labels(
     -------
     - `None`
     """
-
     # load the detected bboxes csv
-    # TODO: This is a workaround. Instead improve the subset naming convention in gridtools
+    # TODO: This is a workaround. Instead improve the subset naming convention
+    # in gridtools
     source_dataset = chunk.path.name.split("_")[1:-4]
     source_dataset = "_".join(source_dataset)
     source_dataset = chunk.path.parent / source_dataset
@@ -381,7 +372,6 @@ def convert(
     the bounding boxes of chirps in that chunk and saves them to a dataframe
     and a txt file into a labels directory.
     """
-
     assert hasattr(data, "grid"), "Dataset must have a grid attribute"
     assert label_mode in [
         "none",
@@ -547,7 +537,6 @@ def convert_cli(
     -------
     - `None`
     """
-
     make_file_tree(output)
     config = load_config(str(input / "chirpdetector.toml"))
 

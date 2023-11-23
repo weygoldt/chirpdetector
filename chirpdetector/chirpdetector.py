@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
-"""
-Chirpdetector - Detect chirps of fish on a spectrogram.
+"""Chirpdetector - Detect chirps of fish on a spectrogram.
+
 This is the main entry point of the chirpdetector command line tool.
 """
 
@@ -10,7 +10,6 @@ import pathlib
 import rich_click as click
 import toml
 
-from .plot_detections import plot_detections_cli
 from .assign_chirps import assign_cli
 from .convert_data import convert_cli
 from .dataset_utils import (
@@ -19,7 +18,8 @@ from .dataset_utils import (
     plot_yolo_dataset,
     subset_yolo_dataset,
 )
-from .detect_chirps import detect_cli, plot_detections
+from .detect_chirps import detect_cli
+from .plot_detections import plot_detections_cli
 from .train_model import train_cli
 from .utils.configfiles import copy_config
 
@@ -31,9 +31,7 @@ __version__ = pyproject["tool"]["poetry"]["version"]
 
 
 def add_version(f):
-    """
-    Add the version of the chirpdetector to the help heading.
-    """
+    """Add the version of the chirpdetector to the help heading."""
     doc = f.__doc__
     f.__doc__ = (
         "Welcome to Chirpdetector Version: " + __version__ + "\n\n" + doc
@@ -43,7 +41,10 @@ def add_version(f):
 
 @click.group()
 @click.version_option(
-    __version__, "-V", "--version", message="Chirpdetector, version %(version)s"
+    __version__,
+    "-V",
+    "--version",
+    message="Chirpdetector, version %(version)s",
 )
 @add_version
 def cli():
@@ -97,9 +98,9 @@ def cli():
     help="Number of images to show.",
 )
 def show(mode, path, n_images):
-    """
-    Visualize chirps on spectrograms for the training dataset
-    or detected chirps on wavetracker datasets.
+    """Visualize chirps on spectrograms.
+
+    ... for the training dataset or detected chirps on wavetracker datasets.
     """
     if mode == "train":
         plot_yolo_dataset(path, n_images)
@@ -156,10 +157,17 @@ def copyconfig(path):
     "-l",
     type=click.Choice(["none", "synthetic", "detected"]),
     required=True,
-    help="Whether labels are not there yet (none), simulated (synthetic) or inferred by the detector (detected).",
+    help="""
+    Whether labels are not there yet (none), simulated 
+    (synthetic) or inferred by the detector (detected).
+    """,
 )
 def convert(input_path, output_path, labels):
-    """Convert a wavetracker dataset to labeled or unlabeled spectrogram images to train the model."""
+    """Convert a wavetracker dataset to YOLO.
+
+    Convert wavetracker dataset to labeled or unlabeled
+    spectrogram images to train the model.
+    """
     convert_cli(input_path, output_path, labels)
 
 
@@ -308,7 +316,10 @@ def clean(path, img_ext):
     help="The size of the subset",
 )
 def subset(path, img_ext, n):
-    """Create a subset of a dataset. Useful for manually labeling a small subset."""
+    """Create a subset of a dataset.
+
+    Useful for manually labeling a small subset.
+    """
     subset_yolo_dataset(path, img_ext, n)
 
 

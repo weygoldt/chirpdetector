@@ -109,7 +109,6 @@ def load_fasterrcnn(num_classes: int) -> torch.nn.Module:
     - `model`: `torch.nn.Module`
         Adapted FasterRCNN Model
     """
-
     if not isinstance(num_classes, int):
         raise TypeError("num_classes must be an integer")
 

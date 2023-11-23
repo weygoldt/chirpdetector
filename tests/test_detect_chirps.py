@@ -12,7 +12,6 @@ def test_float_index_interpolation():
     """
     Test the float_index_interpolation function
     """
-
     index_arr = np.arange(5)
     data_arr = np.array([0.5, 1.5, 2.5, 3.5, 4.5])
 
@@ -66,7 +65,6 @@ def test_coords_to_mpl_rectangle():
     """
     Test the corner_coords_to_center_coords function
     """
-
     # Happy path
     corner_coords = np.array([[1, 1, 2, 2]])
     expected = np.array([[1, 1, 1, 1]])
@@ -102,7 +100,6 @@ def test_spec_to_image():
     """
     Test the spec_to_image function
     """
-
     # Happy path
     spec = torch.tensor(np.array([[1, 1, 1], [2, 2, 2]]))
     expected = (

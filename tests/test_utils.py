@@ -24,7 +24,6 @@ def test_get_transforms():
     """
     Test the get_transforms function
     """
-
     # Happy path train
     transforms = get_transforms(10, 10, True)
     assert transforms is not None
@@ -62,7 +61,6 @@ def test_collate_fn():
     """
     Test the collate_fn function
     """
-
     input = [[1, 1, 1], [2, 2, 2]]
     expected = ((1, 2), (1, 2), (1, 2))
     actual = collate_fn(input)
@@ -73,7 +71,6 @@ def test_load_fasterrcnn():
     """
     Test the load_fasterrcnn function
     """
-
     # Happy path
     model = load_fasterrcnn(2)
     assert model is not None

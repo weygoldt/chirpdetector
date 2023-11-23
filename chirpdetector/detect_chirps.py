@@ -1,8 +1,6 @@
 #! /usr/bin/env python3
 
-"""
-Detect chirps on a spectrogram.
-"""
+"""Detect chirps on a spectrogram."""
 
 import pathlib
 import shutil
@@ -47,7 +45,8 @@ prog = Progress(
 def float_index_interpolation(
     values: np.ndarray, index_arr: np.ndarray, data_arr: np.ndarray
 ) -> np.ndarray:
-    """
+    """Convert float indices to values by linear interpolation.
+
     Interpolates a set of float indices within the given index
     array to obtain corresponding values from the data
     array using linear interpolation.
@@ -93,7 +92,6 @@ def float_index_interpolation(
     >>> print(result)
     array([12.5, 16. , 22.5])
     """
-
     # Check if the values are within the range of the index array
     if np.any(values < np.min(index_arr)) or np.any(values > np.max(index_arr)):
         raise ValueError("Values outside the range of index array")
@@ -141,7 +139,9 @@ def float_index_interpolation(
 
 
 def coords_to_mpl_rectangle(boxes: np.ndarray) -> np.ndarray:
-    """Convert box defined by corner coordinates (x1, y1, x2, y2)
+    """Convert normal bounding box to matplotlib.pathes.Rectangle format.
+
+    Convert box defined by corner coordinates (x1, y1, x2, y2)
     to box defined by lower left, width and height (x1, y1, w, h).
 
     The corner coordinates are the model output, but the center coordinates
@@ -197,7 +197,6 @@ def plot_detections(
     -------
     - `None`
     """
-
     # retrieve all the data from the output and convert
     # spectrogram to numpy array
     img = img_tensor.detach().cpu().numpy().transpose(1, 2, 0)[..., 0]
@@ -253,7 +252,6 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     -------
     - `torch.Tensor`
     """
-
     # make sure the spectrogram is a tensor
     if not isinstance(spec, torch.Tensor):
         raise TypeError("The spectrogram must be a torch.Tensor.")
@@ -308,7 +306,6 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     -------
     - `None`
     """
-
     # get the number of electrodes
     n_electrodes = data.grid.rec.shape[1]
 
@@ -394,8 +391,8 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
         # TODO: THIS IS SKETCHY AS HELL! As a result, only time and frequency
-        # bounding boxes can be used later! The spectrogram limits change for every
-        # window!
+        # bounding boxes can be used later! The spectrogram limits change
+        # for every window!
         flims = (
             np.min(chunk.track.freqs) - conf.spec.freq_pad,
             np.max(chunk.track.freqs) + conf.spec.freq_pad,
@@ -431,42 +428,6 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         bboxes = bboxes[scores > conf.det.threshold]
         labels = labels[scores > conf.det.threshold]
         scores = scores[scores > conf.det.threshold]
-
-        # from scipy.signal import find_peaks
-        # for bbox in bboxes:
-        #     print(bbox)
-        #     matplotlib.use("TkAgg")
-        #     # cut out spec region of bbox
-        #     bbox_spec = spec[
-        #         int(bbox[1]) : int(bbox[3]),
-        #         int(bbox[0]) : int(bbox[2]),
-        #     ]
-        #     bbox_spec_times = spec_times[int(bbox[0]) : int(bbox[2])]
-        #     bbox_spec_freqs = spec_freqs[int(bbox[1]) : int(bbox[3])]
-        #
-        #     avg_spec = np.mean(bbox_spec.cpu().numpy(), axis=1)
-        #     peaks, _ = find_peaks(avg_spec, prominence=5)
-        #
-        #     _, ax = plt.subplots(1,2, sharey=True, figsize=(20, 10))
-        #     ax[0].imshow(bbox_spec.detach().cpu().numpy(), cmap="magma", origin="lower", extent = [bbox_spec_times[0], bbox_spec_times[-1], bbox_spec_freqs[0], bbox_spec_freqs[-1]], aspect = 'auto')
-        #     ax[1].plot(avg_spec, bbox_spec_freqs)
-        #     ax[1].scatter(avg_spec[peaks], bbox_spec_freqs[peaks], color="red")
-        #
-        #     for fish_id in chunk.track.ids:
-        #         track = chunk.track.freqs[chunk.track.idents == fish_id]
-        #         times = chunk.track.times[chunk.track.indices[chunk.track.idents == fish_id]]
-        #         track = track[(times >= bbox_spec_times[0]) & (times <= bbox_spec_times[-1])]
-        #         times = times[(times >= bbox_spec_times[0]) & (times <= bbox_spec_times[-1])]
-        #         ax[0].plot(
-        #             times,
-        #             track,
-        #             color="black",
-        #             linewidth=1,
-        #         )
-        #
-        #     plt.show()
-        # exit()
-        #
 
         # save the bboxes to a dataframe
         bbox_df = pd.DataFrame(
@@ -524,7 +485,6 @@ def detect_cli(path):
     -------
     - `None`
     """
-
     # make the global logger object
     global logger  # pylint: disable=global-statement
     path = pathlib.Path(path)

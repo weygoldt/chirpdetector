@@ -81,7 +81,6 @@ def copy_config(path: str) -> None:
     -------
     - `None`
     """
-
     origin = pathlib.Path(__file__).parent.parent / "config.toml"
     if not origin.exists():
         raise FileNotFoundError(
@@ -118,7 +117,6 @@ def load_config(path: Union[str, pathlib.Path]) -> Config:
     - `Config`
         Configuration object.
     """
-
     file = toml.load(path)
     hy = Hyperparams(**file["hyperparameters"])
     tr = Training(**file["training"])

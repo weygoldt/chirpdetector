@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
-"""
-This file contains utility functions for training datasets in the YOLO format.
-"""
+"""Utility functions for training datasets in the YOLO format."""
 
 import pathlib
 import shutil
@@ -172,7 +170,6 @@ def merge_yolo_datasets(
     -------
     None
     """
-
     dataset1 = pathlib.Path(dataset1)
     dataset2 = pathlib.Path(dataset2)
     output = pathlib.Path(output)
