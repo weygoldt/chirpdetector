@@ -15,7 +15,7 @@ from rich.progress import (
     SpinnerColumn,
     TimeElapsedColumn,
 )
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_prominences
 
 from .utils.configfiles import Config, load_config
 from .utils.logging import make_logger
@@ -182,13 +182,10 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
     chirp_df = bbox_to_chirptimes(chirp_df)
 
     # now loop over all tracks and assign chirps to tracks
-    chirp_indices = []  # index of chirp in chirp_df
-    track_ids = []  # id of track / fish
-    peak_prominences = []  # prominence of trough in envelope
-    peak_distances = []  # distance of trough to chirp center
-    peak_times = (
-        []
-    )  # time of trough in envelope, should be close to chirp center
+    chirp_indices = []
+    track_ids = []
+    peak_prominences = []
+    peak_distances = []
 
     for fish_id in data.track.ids:
         # get chirps, times and freqs and powers for this track
@@ -200,6 +197,7 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
         powers = data.track.powers[data.track.idents == fish_id, :]
 
         for idx, chirp in enumerate(chirps):
+
             # find the closest time, freq and power to the chirp time
             closest_idx = np.argmin(np.abs(time - chirp))
             best_electrode = np.argmax(powers[closest_idx, :])
@@ -212,7 +210,6 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
             if (f1 > best_freq) or (f2 < best_freq):
                 peak_distances.append(np.nan)
                 peak_prominences.append(np.nan)
-                peak_times.append(np.nan)
                 chirp_indices.append(idx)
                 track_ids.append(fish_id)
                 continue
@@ -247,23 +244,14 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
                 cutoff_frequency=50,
             )
 
-            # normalize the envelope using the amplitude of the raw signal
-            # to preserve the amplitude of the envelope
-            env = env / np.max(np.abs(raw))
-
-            # cut of the first and last 20% of the envelope
-            env[: int(0.2 * len(env))] = np.nan
-            env[int(0.8 * len(env)) :] = np.nan
-
             # find troughs in the envelope and compute trough prominences
-            peaks, params = find_peaks(-env, prominence=1e-3)
+            peaks, params = find_peaks(-env, prominence=1e-6)
             proms = params["prominences"]
 
             # if no peaks are found, skip this chirp
             if len(peaks) == 0:
                 peak_distances.append(np.nan)
                 peak_prominences.append(np.nan)
-                peak_times.append(np.nan)
                 chirp_indices.append(idx)
                 track_ids.append(fish_id)
                 continue
@@ -275,9 +263,6 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
             # store peak prominence and distance to chirp center
             peak_distances.append(distances[closest_peak_idx])
             peak_prominences.append(proms[closest_peak_idx])
-            peak_times.append(
-                (start_idx + peaks[closest_peak_idx]) / data.grid.samplerate
-            )
             chirp_indices.append(idx)
             track_ids.append(fish_id)
 
@@ -300,43 +285,29 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
     # make a cost function and choose the track with the highest trough prominence and
     # lowest distance to chirp
 
-    peak_prominences = np.array(peak_prominences)
-    peak_distances = (
-        np.array(peak_distances) + 1
-    )  # add 1 to avoid division by zero
-    peak_times = np.array(peak_times)
+    peak_prominences = np.array(peak_prominences) * 1e6 # scale up because of rounding errors
+    peak_distances = np.array(peak_distances) + 1 # add 1 to avoid division by zero
     chirp_indices = np.array(chirp_indices)
     track_ids = np.array(track_ids)
 
-    # compute cost function.
-    # This function is high when the trough prominence is high (-> Chirp with high contrast)
-    # and when the trough is close to the chirp center as detected by the R-CNN (-> Detected
-    # chirp is close to the actual chirp)
-    cost = peak_prominences / peak_distances**2
-
-    # set cost to zero for cases where no peak was found
-    cost[np.isnan(cost)] = 0
+    # compute cost function
+    cost = peak_prominences / peak_distances
+    cost[np.isnan(cost)] = -np.inf
 
     # for each chirp, choose the track where the cost is highest
-    # TODO: To avoid confusion make a cost function where high is good and low is bad
-    # this is more like a "gain function"
     chosen_tracks = []
-    chosen_track_times = []
     for idx in np.unique(chirp_indices):
-        candidate_tracks = track_ids[chirp_indices == idx]
-        candidate_costs = cost[chirp_indices == idx]
-        candidate_times = peak_times[chirp_indices == idx]
-        chosen_tracks.append(candidate_tracks[np.argmax(candidate_costs)])
-        chosen_track_times.append(candidate_times[np.argmax(candidate_costs)])
+        print(f"Current cost: {cost[chirp_indices == idx]}")
+        chosen_tracks.append(track_ids[np.argmax(cost[chirp_indices == idx])])
+        print(f"Chosen cost: {cost[chirp_indices == idx][np.argmax(cost[chirp_indices == idx])]}")
+        print(f"Chosen track: {track_ids[np.argmax(cost[chirp_indices == idx])]}")
 
     # store chosen tracks in chirp_df
     chirp_df["assigned_track"] = chosen_tracks
 
-    # store chirp time estimated from envelope trough in chirp_df
-    chirp_df["envelope_trough_time"] = chosen_track_times
-
     # save chirp_df
     chirp_df.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
+
 
 
 def assign_cli(path: pathlib.Path):
@@ -353,7 +324,6 @@ def assign_cli(path: pathlib.Path):
     config = load_config(path / "chirpdetector.toml")
     recs = list(path.iterdir())
     recs = [r for r in recs if r.is_dir()]
-    # recs = [path / "subset_2020-03-18-10_34_t0_9320.0_t1_9920.0"]
 
     msg = f"Found {len(recs)} recordings in {path}, starting assignment"
     print(msg)
