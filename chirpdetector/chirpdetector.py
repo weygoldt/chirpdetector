@@ -10,6 +10,7 @@ import pathlib
 import rich_click as click
 import toml
 
+from .plot_detections import plot_detections_cli
 from .assign_chirps import assign_cli
 from .convert_data import convert_cli
 from .dataset_utils import (
@@ -18,7 +19,7 @@ from .dataset_utils import (
     plot_yolo_dataset,
     subset_yolo_dataset,
 )
-from .detect_chirps import detect_cli
+from .detect_chirps import detect_cli, plot_detections
 from .train_model import train_cli
 from .utils.configfiles import copy_config
 
@@ -225,6 +226,25 @@ def detect(path):
 def assign(path):
     """Detect chirps on a spectrogram."""
     assign_cli(path)
+
+
+@cli.command()
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        path_type=pathlib.Path,
+    ),
+    required=True,
+    help="Path to the dataset.",
+)
+def plot(path):
+    """Detect chirps on a spectrogram."""
+    plot_detections_cli(path)
 
 
 @cli.group()

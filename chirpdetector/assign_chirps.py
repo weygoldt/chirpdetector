@@ -30,7 +30,26 @@ prog = Progress(
 )
 
 
-def non_max_suppression_fast(chirp_df, overlapThresh):
+def non_max_suppression_fast(
+    chirp_df: pd.DataFrame, overlapThresh: float
+) -> list:
+    """Faster implementation of non-maximum suppression.
+
+    To remove overlapping bounding boxes.
+
+    Parameters
+    ----------
+    - `chirp_df`: `pd.DataFrame`
+        Dataframe containing the chirp bboxes
+    - `overlapThresh`: `float`
+        Threshold for overlap between bboxes
+
+    Returns
+    -------
+    - `pick`: `list`
+        List of indices of bboxes to keep
+    """
+
     # slightly modified version of
     # https://pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/
 
@@ -91,6 +110,23 @@ def non_max_suppression_fast(chirp_df, overlapThresh):
 def track_filter(
     chirp_df: pd.DataFrame, minf: float, maxf: float
 ) -> pd.DataFrame:
+    """Remove chirp bboxes that do not overlap with the range spanned by minf and maxf.
+
+    Parameters
+    ----------
+    - `chirp_df`: `pd.DataFrame`
+        Dataframe containing the chirp bboxes
+    - `minf`: `float`
+        Minimum frequency of the range
+    - `maxf`: `float`
+        Maximum frequency of the range
+
+    Returns
+    -------
+    - `chirp_df_tf`: `pd.DataFrame`
+        Dataframe containing the chirp bboxes that overlap with the range
+    """
+
     # remove all chirp bboxes that have no overlap with the range spanned by
     # minf and maxf
 
@@ -110,10 +146,29 @@ def track_filter(
         axis=1,
     )
     chirp_df_tf = chirp_df_tf.loc[intersection > 0, :]
+
     return chirp_df_tf
 
 
 def clean_bboxes(data: Dataset, chirp_df: pd.DataFrame) -> pd.DataFrame:
+    """Clean the chirp bboxes.
+
+    This is a collection of filters that remove bboxes that
+    either overlap, are out of range or otherwise do not make sense.
+
+    Parameters
+    ----------
+    - `data`: `Dataset`
+        Dataset object containing the data
+    - `chirp_df`: `pd.DataFrame`
+        Dataframe containing the chirp bboxes
+
+    Returns
+    -------
+    - `chirp_df_tf`: `pd.DataFrame`
+        Dataframe containing the chirp bboxes that overlap with the range
+    """
+
     # non-max suppression: remove all chirp bboxes that overlap with
     # another more than threshold
     pick_indices = non_max_suppression_fast(chirp_df, 0.5)
@@ -128,50 +183,47 @@ def clean_bboxes(data: Dataset, chirp_df: pd.DataFrame) -> pd.DataFrame:
     # maybe add some more cleaning here, such
     # as removing chirps that are too short or too long
 
-    # import matplotlib
-    # from matplotlib.patches import Rectangle
-    # matplotlib.use("TkAgg")
-    # fig, ax = plt.subplots(figsize=(10, 10))
-    # for fish_id in data.track.ids:
-    #     time = data.track.times[data.track.indices[data.track.idents == fish_id]]
-    #     freq = data.track.freqs[data.track.idents == fish_id]
-    #     plt.plot(time, freq, color="black", zorder = 1000)
-    # for i, row in chirp_df.iterrows():
-    #     ax.add_patch(
-    #         Rectangle(
-    #             (row["t1"], row["f1"]),
-    #             row["t2"] - row["t1"],
-    #             row["f2"] - row["f1"],
-    #             fill=False,
-    #             edgecolor="red",
-    #             linewidth=1,
-    #         )
-    #     )
-    # for i, row in chirp_df_tf.iterrows():
-    #     ax.add_patch(
-    #         Rectangle(
-    #             (row["t1"], row["f1"]),
-    #             row["t2"] - row["t1"],
-    #             row["f2"] - row["f1"],
-    #             fill=False,
-    #             edgecolor="green",
-    #             linewidth=1,
-    #             linestyle="dashed",
-    #         )
-    #     )
-    # ax.set_xlim(chirp_df.t1.min(), chirp_df.t2.max())
-    # ax.set_ylim(chirp_df.f1.min(), chirp_df.f2.max())
-    # plt.show()
-
     return chirp_df_tf
 
 
 def bbox_to_chirptimes(chirp_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert chirp bboxes to chirp times.
+
+    Parameters
+    ----------
+    - `chirp_df`: `pd.DataFrame`
+        Dataframe containing the chirp bboxes
+
+    Returns
+    -------
+    - `chirp_df`: `pd.DataFrame`
+        Dataframe containing the chirp bboxes with chirp times.
+    """
+
     chirp_df["chirp_times"] = np.mean(chirp_df[["t1", "t2"]], axis=1)
+
     return chirp_df
 
 
 def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
+    """Assign chirps to wavetracker tracks.
+
+    This algorigthm assigns chirps to wavetracker tracks by a series of steps:
+    1. Clean the chirp bboxes
+    2. For each fish track, filter the signal on the best electrode
+    3. Find troughs in the envelope of the filtered signal
+    4. Compute the prominence of the trough and the distance to the chirp center
+    5. Compute a cost function that is high when the trough prominence is high and the distance to the chirp center is low
+    6. Compare the value of the cost function for each track and choose the track with the highest cost function value
+
+    Parameters
+    ----------
+    - `data`: `Dataset`
+        Dataset object containing the data
+    - `chirp_df`: `pd.DataFrame`
+        Dataframe containing the chirp bboxes
+    """
+
     # first clean the bboxes
     chirp_df = clean_bboxes(data, chirp_df)
 
@@ -281,25 +333,6 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
             chirp_indices.append(idx)
             track_ids.append(fish_id)
 
-            # import matplotlib
-            #
-            # matplotlib.use("TkAgg")
-            # fig, ax = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
-            # ax[0].plot(raw)
-            # ax[0].plot(raw_filtered)
-            # ax[0].axvline(center_idx - start_idx, color="black")
-            # ax[1].plot(env)
-            # ax[1].axvline(center_idx - start_idx, color="black")
-            # ax[1].plot(peaks, env[peaks], "x")
-            # ax[1].plot(
-            #     peaks[closest_peak_idx], env[peaks[closest_peak_idx]], "x", color="red"
-            # )
-            # plt.show()
-
-    # NEXTUP: For each candidate track, compute trough prominence and distance to chirp
-    # make a cost function and choose the track with the highest trough prominence and
-    # lowest distance to chirp
-
     peak_prominences = np.array(peak_prominences)
     peak_distances = (
         np.array(peak_distances) + 1
@@ -338,8 +371,22 @@ def assign_chirps(data: Dataset, chirp_df: pd.DataFrame) -> None:
     # save chirp_df
     chirp_df.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
 
+    # save old format:
+    np.save(data.path / "chirp_ids_rcnn.npy", chosen_tracks)
+    np.save(data.path / "chirp_times_rcnn.npy", chosen_track_times)
 
-def assign_cli(path: pathlib.Path):
+
+def assign_cli(path: pathlib.Path) -> None:
+    """Assign chirps to wavetracker tracks.
+
+    This is the command line interface for the assign_chirps function.
+
+    Parameters
+    ----------
+    - `path`: `pathlib.Path`
+        Path to the directory containing the chirpdetector.toml file
+    """
+
     if not path.is_dir():
         raise ValueError(f"{path} is not a directory")
 
@@ -356,12 +403,18 @@ def assign_cli(path: pathlib.Path):
     # recs = [path / "subset_2020-03-18-10_34_t0_9320.0_t1_9920.0"]
 
     msg = f"Found {len(recs)} recordings in {path}, starting assignment"
-    print(msg)
+    prog.console.log(msg)
     logger.info(msg)
 
-    for rec in recs:
-        logger.info(f"Assigning chirps in {rec}")
-        print(rec)
-        data = load(rec, grid=True)
-        chirp_df = pd.read_csv(rec / "chirpdetector_bboxes.csv")
-        assign_chirps(data, chirp_df)
+    prog.console.rule("Starting assignment")
+    with prog:
+        task = prog.add_task("Assigning chirps", total=len(recs))
+        for rec in recs:
+            msg = f"Assigning chirps in {rec}"
+            logger.info(msg)
+            prog.console.log(msg)
+
+            data = load(rec, grid=True)
+            chirp_df = pd.read_csv(rec / "chirpdetector_bboxes.csv")
+            assign_chirps(data, chirp_df)
+            prog.update(task, advance=1)

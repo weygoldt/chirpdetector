@@ -312,10 +312,6 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     # get the number of electrodes
     n_electrodes = data.grid.rec.shape[1]
 
-    # TODO: fix this ugly workaround mainly because detections
-    # in time will be wrong!
-    data.track.times -= data.track.times[0]
-
     # load the model and the checkpoint, and set it to evaluation mode
     device = get_device()
     model = load_fasterrcnn(num_classes=len(conf.hyper.classes))
@@ -548,6 +544,7 @@ def detect_cli(path):
 
     # detect chirps in all datasets in the specified path
     # and show a progress bar
+    prog.console.rule("Starting detection")
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
         for dataset in datasets:
