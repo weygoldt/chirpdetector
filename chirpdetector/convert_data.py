@@ -11,11 +11,6 @@ from typing import Tuple, Union
 
 import numpy as np
 import pandas as pd
-from PIL import Image
-from rich import print as rprint
-from rich.console import Console
-from rich.progress import track
-
 from gridtools.datasets import Dataset, load, subset
 from gridtools.utils.spectrograms import (
     decibel,
@@ -24,6 +19,10 @@ from gridtools.utils.spectrograms import (
     sint,
     spectrogram,
 )
+from PIL import Image
+from rich import print as rprint
+from rich.console import Console
+from rich.progress import track
 
 from .utils.configfiles import Config, load_config
 

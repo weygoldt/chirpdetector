@@ -5,9 +5,9 @@
 import torch
 
 from chirpdetector.models.utils import (
+    collate_fn,
     get_device,
     get_transforms,
-    collate_fn,
     load_fasterrcnn,
 )
 

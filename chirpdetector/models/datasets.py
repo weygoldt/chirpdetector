@@ -13,8 +13,8 @@ import torch
 import torchvision
 import torchvision.transforms.functional as F
 from matplotlib.patches import Rectangle
-from torch.utils.data import DataLoader, Dataset
 from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 
 from ..utils.configfiles import load_config
 from .utils import collate_fn

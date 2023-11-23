@@ -4,6 +4,7 @@
 
 import numpy as np
 from PIL import Image
+
 from chirpdetector.convert_data import make_file_tree, numpy_to_pil
 
 

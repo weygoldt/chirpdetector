@@ -10,6 +10,7 @@ import pathlib
 import rich_click as click
 import toml
 
+from .assign_chirps import assign_cli
 from .convert_data import convert_cli
 from .dataset_utils import (
     clean_yolo_dataset,
@@ -59,6 +60,7 @@ def cli():
     3. label your data, e.g. in label-studio.
     4. `train` to train the detector.
     5. `detect` to detect chirps on your dataset.
+    6. `assign` to assign detections to the tracks of individual fish.
 
     Repeat this cycle from (2) to (5) until you are satisfied with the
     detection performance.
@@ -204,6 +206,25 @@ def train(config_path, mode):
 def detect(path):
     """Detect chirps on a spectrogram."""
     detect_cli(path)
+
+
+@cli.command()
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        path_type=pathlib.Path,
+    ),
+    required=True,
+    help="Path to the dataset.",
+)
+def assign(path):
+    """Detect chirps on a spectrogram."""
+    assign_cli(path)
 
 
 @cli.group()
