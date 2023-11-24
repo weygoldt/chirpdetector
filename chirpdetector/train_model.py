@@ -114,9 +114,17 @@ def plot_epochs(
         x_val = np.arange(len(epoch_val_loss[0])) + x_train[-1]
 
     x_avg = np.arange(len(epoch_avg_train_loss)) + 1
-    ax[1].plot(x_avg, epoch_avg_train_loss, label="Training Loss", c="tab:blue")
     ax[1].plot(
-        x_avg, epoch_avg_val_loss, label="Validation Loss", c="tab:orange"
+        x_avg,
+        epoch_avg_train_loss,
+        label="Training Loss",
+        c="tab:blue",
+    )
+    ax[1].plot(
+        x_avg,
+        epoch_avg_val_loss,
+        label="Validation Loss",
+        c="tab:orange",
     )
 
     ax[0].set_ylabel("Loss")
@@ -300,7 +308,8 @@ def train(config: Config, mode: str = "pretrain") -> None:
     # Initialize the logger and progress bar, make the logger global
     global logger
     logger = make_logger(
-        __name__, pathlib.Path(config.path).parent / "chirpdetector.log"
+        __name__,
+        pathlib.Path(config.path).parent / "chirpdetector.log",
     )
 
     # Get the device (e.g. GPU or CPU)
@@ -308,7 +317,10 @@ def train(config: Config, mode: str = "pretrain") -> None:
 
     # Print information about starting training
     progress.console.rule("Starting training")
-    msg = f"Device: {device}, Config: {config.path}, Mode: {mode}, Data: {datapath}"
+    msg = (
+        f"Device: {device}, Config: {config.path},"
+        f" Mode: {mode}, Data: {datapath}"
+    )
     progress.console.log(msg)
     logger.info(msg)
 
@@ -340,11 +352,11 @@ def train(config: Config, mode: str = "pretrain") -> None:
 
         # iterate over the folds
         for fold, (train_idx, val_idx) in enumerate(
-            splits.split(np.arange(len(data)))
+            splits.split(np.arange(len(data))),
         ):
             # initialize the model and optimizer
             model = load_fasterrcnn(num_classes=len(config.hyper.classes)).to(
-                device
+                device,
             )
 
             # If the mode is finetune, load the model state dict from
@@ -483,7 +495,10 @@ def train(config: Config, mode: str = "pretrain") -> None:
         progress.update(task_folds, visible=False)
 
         # print information about the training
-        msg = f"Average validation loss of last epoch across folds: {np.mean(fold_val_loss):.4f}"
+        msg = (
+            "Average validation loss of last epoch across folds: "
+            f"{np.mean(fold_val_loss):.4f}"
+        )
         progress.console.log(msg)
         logger.info(msg)
         progress.console.rule("[bold blue]Finished training")

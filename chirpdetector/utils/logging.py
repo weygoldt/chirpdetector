@@ -25,10 +25,11 @@ def make_logger(name: str, logfile: pathlib.Path) -> logging.Logger:
     """
     # create logger formats for file and terminal
     file_formatter = logging.Formatter(
-        "[ %(levelname)s ] ~ %(asctime)s ~ %(name)s.%(funcName)s:%(lineno)d: %(message)s"
+        """[ %(levelname)s ] ~ %(asctime)s ~ %(name)s.%(funcName)s:%(lineno)d:
+        %(message)s""",
     )
     console_formatter = logging.Formatter(
-        "[ %(levelname)s ] in %(name)s.%(funcName)s:%(lineno)d: %(message)s"
+        "[ %(levelname)s ] in %(name)s.%(funcName)s:%(lineno)d: %(message)s",
     )
 
     # create stream handler for terminal output

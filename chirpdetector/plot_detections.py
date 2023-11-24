@@ -20,7 +20,9 @@ from .utils.configfiles import Config, load_config
 
 
 def plot_detections(
-    data: Dataset, chirp_df: pd.DataFrame, conf: Config
+    data: Dataset,
+    chirp_df: pd.DataFrame,
+    conf: Config,
 ) -> None:
     """Plot detections on spectrograms.
 
@@ -147,7 +149,7 @@ def plot_detections(
             vmax=-45,
         )
         idx = 0
-        for idx, bbox in enumerate(bboxes):
+        for bbox in bboxes:
             ax.add_patch(
                 Rectangle(
                     (bbox[1], bbox[2]),
@@ -157,7 +159,7 @@ def plot_detections(
                     color="gray",
                     linewidth=1,
                     label="faster-R-CNN predictions",
-                )
+                ),
             )
             ax.text(
                 bbox[1],
@@ -191,7 +193,13 @@ def plot_detections(
                 idx = np.argmin(np.abs(times - ctime))
                 cfreqs[i] = freqs[idx]
 
-            ax.plot(times, freqs, lw=2, color="black", label="Frequency traces")
+            ax.plot(
+                times,
+                freqs,
+                lw=2,
+                color="black",
+                label="Frequency traces",
+            )
 
             ax.scatter(
                 ctimes,

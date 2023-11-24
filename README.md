@@ -33,6 +33,24 @@ To tackle this isse, this package provides an interface to detect chirps of mult
 
 This project is still work in progress and will approximately be released in spring of 2024.
 
+## Development
+
+I try my best to adhere to good coding practices and catch up on writing tests 
+for this package. As I am currently the only one working on it, here is some 
+documentation of the development packages I use:
+
+- `pre-commit` for pre-commit hooks
+- `pytest` and `pytest-coverage` for unit tests
+- `ruff` for linting and formatting 
+- `black` for linting and formatting 
+- `isort` to sort imports
+- `pyright` for static type checking
+
+Before every commit, a pre-commit hook runs all these packages on the code base
+and refuses a push if errors are raised. If you want to contribute, please 
+make sure that your code is proberly formatted and run the tests before issuing 
+a pull request.
+
 ## TODO
 
 ### Urgent!!!

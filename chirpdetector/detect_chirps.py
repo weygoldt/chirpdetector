@@ -43,7 +43,9 @@ prog = Progress(
 
 
 def float_index_interpolation(
-    values: np.ndarray, index_arr: np.ndarray, data_arr: np.ndarray
+    values: np.ndarray,
+    index_arr: np.ndarray,
+    data_arr: np.ndarray,
 ) -> np.ndarray:
     """Convert float indices to values by linear interpolation.
 
@@ -93,7 +95,9 @@ def float_index_interpolation(
     array([12.5, 16. , 22.5])
     """
     # Check if the values are within the range of the index array
-    if np.any(values < np.min(index_arr)) or np.any(values > np.max(index_arr)):
+    if np.any(values < np.min(index_arr)) or np.any(
+        values > np.max(index_arr),
+    ):
         raise ValueError("Values outside the range of index array")
 
     # Find the indices corresponding to the values
@@ -224,7 +228,7 @@ def plot_detections(
                     fill=False,
                     color="white",
                     linewidth=1,
-                )
+                ),
             )
             ax.text(
                 box[0],
@@ -313,7 +317,8 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     device = get_device()
     model = load_fasterrcnn(num_classes=len(conf.hyper.classes))
     checkpoint = torch.load(
-        f"{conf.hyper.modelpath}/model.pt", map_location=device
+        f"{conf.hyper.modelpath}/model.pt",
+        map_location=device,
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device).eval()
@@ -440,19 +445,27 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         # convert x values to time on spec_times
         spec_times_index = np.arange(0, len(spec_times))
         bbox_df["t1"] = float_index_interpolation(
-            bbox_df["x1"].values, spec_times_index, spec_times
+            bbox_df["x1"].values,
+            spec_times_index,
+            spec_times,
         )
         bbox_df["t2"] = float_index_interpolation(
-            bbox_df["x2"].values, spec_times_index, spec_times
+            bbox_df["x2"].values,
+            spec_times_index,
+            spec_times,
         )
 
         # convert y values to frequency on spec_freqs
         spec_freqs_index = np.arange(0, len(spec_freqs))
         bbox_df["f1"] = float_index_interpolation(
-            bbox_df["y1"].values, spec_freqs_index, spec_freqs
+            bbox_df["y1"].values,
+            spec_freqs_index,
+            spec_freqs,
         )
         bbox_df["f2"] = float_index_interpolation(
-            bbox_df["y2"].values, spec_freqs_index, spec_freqs
+            bbox_df["y2"].values,
+            spec_freqs_index,
+            spec_freqs,
         )
 
         # save df to list
@@ -489,7 +502,7 @@ def detect_cli(path):
     global logger  # pylint: disable=global-statement
     path = pathlib.Path(path)
     logger = make_logger(__name__, path / "chirpdetector.log")
-    datasets = [dir for dir in path.iterdir() if dir.is_dir()]
+    datasets = [folder for folder in path.iterdir() if folder.is_dir()]
     confpath = path / "chirpdetector.toml"
 
     # load the config file and print a warning if it does not exist
@@ -499,7 +512,7 @@ def detect_cli(path):
         raise FileNotFoundError(
             "The configuration file could not be found in the specified path."
             "Please run `chirpdetector copyconfig` and change the "
-            "configuration file to your needs."
+            "configuration file to your needs.",
         )
 
     # detect chirps in all datasets in the specified path

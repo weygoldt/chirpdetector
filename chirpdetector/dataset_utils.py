@@ -79,7 +79,7 @@ def plot_yolo_dataset(path: pathlib.Path, n: int) -> None:
                     ymax[i] - ymin[i],
                     fill=False,
                     color="white",
-                )
+                ),
             )
         ax.set_title(imgp.stem)
         plt.axis("off")

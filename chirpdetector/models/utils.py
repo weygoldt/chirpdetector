@@ -12,14 +12,15 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 
 def get_device():
-    """
-    Check if a CUDA-enabled GPU is available, and return the appropriate device.
+    """Check if a CUDA-enabled GPU is available, and return the correct device.
 
     Returns
     -------
     - `device`: `torch.device`
-        The device to use for PyTorch computations. If a CUDA-enabled GPU is available, returns a device object
-        representing that GPU. If an Apple M1 GPU is available, returns a device object representing that GPU.
+        The device to use for PyTorch computations. If a CUDA-enabled GPU is
+        available, returns a device object
+        representing that GPU. If an Apple M1 GPU is available, returns a
+        device object representing that GPU.
         Otherwise, returns a device object representing the CPU.
     """
     if torch.cuda.is_available() is True:
@@ -64,7 +65,8 @@ def get_transforms(width: int, height: int, train: bool) -> A.Compose:
                 A.Resize(width, height),
             ],
             bbox_params=A.BboxParams(
-                format="pascal_voc", label_fields=["labels"]
+                format="pascal_voc",
+                label_fields=["labels"],
             ),
         )
     return A.Compose(
@@ -94,9 +96,10 @@ def collate_fn(batch: list) -> tuple:
 
 
 def load_fasterrcnn(num_classes: int) -> torch.nn.Module:
-    """
-    Create a pretrained Faster RCNN Model and replaces the final predictor in order to fit
-    to a specific detection task.
+    """Create a pretrained Faster RCNN Model and replaces the final predictor.
+
+    Replace the final predictor of the Faster RCNN Model to fit to a specific
+    detection task.
 
     Parameters
     ----------
@@ -113,7 +116,7 @@ def load_fasterrcnn(num_classes: int) -> torch.nn.Module:
         raise TypeError("num_classes must be an integer")
 
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
-        weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT
+        weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT,
     )
 
     in_features = model.roi_heads.box_predictor.cls_score.in_features

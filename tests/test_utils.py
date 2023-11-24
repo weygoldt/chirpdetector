@@ -61,9 +61,9 @@ def test_collate_fn():
     """
     Test the collate_fn function
     """
-    input = [[1, 1, 1], [2, 2, 2]]
+    argument = [[1, 1, 1], [2, 2, 2]]
     expected = ((1, 2), (1, 2), (1, 2))
-    actual = collate_fn(input)
+    actual = collate_fn(argument)
     assert actual == expected
 
 

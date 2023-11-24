@@ -1,11 +1,10 @@
-#!/usr/bin/env python
-
 """Chirpdetector - Detect chirps of fish on a spectrogram.
 
 This is the main entry point of the chirpdetector command line tool.
 """
 
 import pathlib
+from typing import Callable
 
 import rich_click as click
 import toml
@@ -30,7 +29,7 @@ pyproject = toml.load(pathlib.Path(__file__).parent.parent / "pyproject.toml")
 __version__ = pyproject["tool"]["poetry"]["version"]
 
 
-def add_version(f):
+def add_version(f: Callable) -> Callable:
     """Add the version of the chirpdetector to the help heading."""
     doc = f.__doc__
     f.__doc__ = (
@@ -47,7 +46,7 @@ def add_version(f):
     message="Chirpdetector, version %(version)s",
 )
 @add_version
-def cli():
+def cli() -> None:
     """Detect chirps of fish on a spectrogram.
 
     The chirpdetector command line tool is a collection of commands that
@@ -72,7 +71,6 @@ def cli():
 
     Happy chirp detecting :fish::zap:
     """
-    pass
 
 
 @cli.command()
@@ -97,13 +95,13 @@ def cli():
     required=True,
     help="Number of images to show.",
 )
-def show(mode, path, n_images):
+def show(mode: str, input_path: pathlib.Path, n_images: int) -> None:
     """Visualize chirps on spectrograms.
 
     ... for the training dataset or detected chirps on wavetracker datasets.
     """
     if mode == "train":
-        plot_yolo_dataset(path, n_images)
+        plot_yolo_dataset(input_path, n_images)
 
 
 @cli.command()
@@ -120,9 +118,9 @@ def show(mode, path, n_images):
     help="Path to the dataset.",
     required=True,
 )
-def copyconfig(path):
+def copyconfig(input_path: pathlib.Path) -> None:
     """Copy the default config file to your dataset."""
-    copy_config(path)
+    copy_config(str(input_path))
 
 
 @cli.command()
@@ -158,11 +156,13 @@ def copyconfig(path):
     type=click.Choice(["none", "synthetic", "detected"]),
     required=True,
     help="""
-    Whether labels are not there yet (none), simulated 
+    Whether labels are not there yet (none), simulated
     (synthetic) or inferred by the detector (detected).
     """,
 )
-def convert(input_path, output_path, labels):
+def convert(
+    input_path: pathlib.Path, output_path: pathlib.Path, labels: str
+) -> None:
     """Convert a wavetracker dataset to YOLO.
 
     Convert wavetracker dataset to labeled or unlabeled
@@ -190,10 +190,10 @@ def convert(input_path, output_path, labels):
     "-m",
     type=click.Choice(["pretrain", "finetune"]),
     required=True,
-    help="""Whether to train the model with synthetic data or to finetune a 
+    help="""Whether to train the model with synthetic data or to finetune a
         model with real data.""",
 )
-def train(config_path, mode):
+def train(config_path: pathlib.Path, mode: str) -> None:
     """Train the model."""
     train_cli(config_path, mode)
 
@@ -212,7 +212,7 @@ def train(config_path, mode):
     required=True,
     help="Path to the dataset.",
 )
-def detect(path):
+def detect(path: pathlib.Path) -> None:
     """Detect chirps on a spectrogram."""
     detect_cli(path)
 
@@ -231,7 +231,7 @@ def detect(path):
     required=True,
     help="Path to the dataset.",
 )
-def assign(path):
+def assign(path: pathlib.Path) -> None:
     """Detect chirps on a spectrogram."""
     assign_cli(path)
 
@@ -250,13 +250,13 @@ def assign(path):
     required=True,
     help="Path to the dataset.",
 )
-def plot(path):
+def plot(path: pathlib.Path) -> None:
     """Detect chirps on a spectrogram."""
     plot_detections_cli(path)
 
 
 @cli.group()
-def yoloutils():
+def yoloutils() -> None:
     """Utilities to manage YOLO-style training datasets."""
     pass
 
@@ -282,7 +282,7 @@ def yoloutils():
     required=True,
     help="The image extension, e.g. .png or .jpg",
 )
-def clean(path, img_ext):
+def clean(path: pathlib.Path, img_ext: str) -> None:
     """Remove all images where the label file is empty."""
     clean_yolo_dataset(path, img_ext)
 
@@ -315,7 +315,7 @@ def clean(path, img_ext):
     required=True,
     help="The size of the subset",
 )
-def subset(path, img_ext, n):
+def subset(path: pathlib.Path, img_ext: str, n: int) -> None:
     """Create a subset of a dataset.
 
     Useful for manually labeling a small subset.
@@ -363,7 +363,9 @@ def subset(path, img_ext, n):
     required=True,
     help="Path to the output dataset.",
 )
-def merge(dataset1, dataset2, output):
+def merge(
+    dataset1: pathlib.Path, dataset2: pathlib.Path, output: pathlib.Path
+) -> None:
     """Merge two datasets."""
     merge_yolo_datasets(dataset1, dataset2, output)
 

@@ -86,7 +86,7 @@ def copy_config(path: str) -> None:
         raise FileNotFoundError(
             "Could not find the default config file. "
             "Please make sure that the file 'config.toml' exists in "
-            "the package root directory."
+            "the package root directory.",
         )
 
     destination = pathlib.Path(path)
@@ -97,7 +97,7 @@ def copy_config(path: str) -> None:
     elif destination.is_file():
         raise FileExistsError(
             "The specified path already exists and is a file. "
-            "Please specify a directory or a non-existing path."
+            "Please specify a directory or a non-existing path.",
         )
 
     elif not destination.exists():

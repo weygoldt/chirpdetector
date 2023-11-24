@@ -30,13 +30,10 @@ clean:
 
 fmt:
 	ruff check --fix-only ./chirpdetector ./tests
-	black ./chirpdetector ./tests
-	isort ./chirpdetector ./tests
+	ruff format ./chirpdetector ./tests
 
 test:
 	ruff check ./chirpdetector ./tests
-	black --check ./chirpdetector ./tests
 	mypy ./chirpdetector
 	pytest --cov --cov-report=xml
-	pytest
 

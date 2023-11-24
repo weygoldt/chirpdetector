@@ -40,7 +40,7 @@ def make_file_tree(path: Union[pathlib.Path, str]) -> None:
     if path.parent.exists() and path.parent.is_file():
         raise ValueError(
             f"Parent directory of {path} is a file. "
-            "Please specify a directory."
+            "Please specify a directory.",
         )
 
     if path.exists():
@@ -96,7 +96,8 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
         A dataframe with the bounding boxes.
     """
     assert hasattr(
-        data.com.chirp, "params"
+        data.com.chirp,
+        "params",
     ), "Dataset must have a chirp attribute with a params attribute"
 
     # Time padding is one NFFT window
@@ -125,7 +126,10 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
 
             # compute the weighted average of the two closest frequency points
             # using the dt between chirp time and sampled time as weights
-            f_closest = np.average(f_closest, weights=np.abs(t_closest - chirp))
+            f_closest = np.average(
+                f_closest,
+                weights=np.abs(t_closest - chirp),
+            )
 
             # we now have baseline eodf and time point of the chirp. Now
             # we get some parameters from the params to build the bounding box
@@ -144,7 +148,8 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
             ids.append(fish_id)
 
     df = pd.DataFrame(
-        boxes, columns=["t_center", "f_center", "width", "height"]
+        boxes,
+        columns=["t_center", "f_center", "width", "height"],
     )
     df["fish_id"] = ids
 
@@ -251,7 +256,7 @@ def synthetic_labels(
             "cy": centery_norm,
             "w": width_norm,
             "h": height_norm,
-        }
+        },
     )
 
     # add as first colum instance id
@@ -332,7 +337,7 @@ def detected_labels(
 
     # make a new dataframe with the relative coordinates
     new_bboxes = pd.DataFrame(
-        {"l": labels, "x": centerx, "y": centery, "w": width, "h": height}
+        {"l": labels, "x": centerx, "y": centery, "w": width, "h": height},
     )
 
     # save dataframe for every spec without headers as txt
@@ -345,7 +350,10 @@ def detected_labels(
 
 
 def convert(
-    data: Dataset, conf: Config, output: pathlib.Path, label_mode: str
+    data: Dataset,
+    conf: Config,
+    output: pathlib.Path,
+    label_mode: str,
 ) -> None:
     """Convert a gridtools dataset to a YOLO dataset.
 
@@ -390,13 +398,15 @@ def convert(
     window_overlap_samples = window_overlap * data.grid.samplerate  # samples
 
     # Spectrogram computation parameters
-    nfft = freqres_to_nfft(freq_resolution, data.grid.samplerate)  # samples
-    hop_len = overlap_to_hoplen(overlap_fraction, nfft)  # samples
+    nfft = freqres_to_nfft(conf.spec.freq_res, data.grid.samplerate)  # samples
+    hop_len = overlap_to_hoplen(conf.spec.overlap_frac, nfft)  # samples
     chunksize = time_window * data.grid.samplerate  # samples
     n_chunks = np.ceil(data.grid.rec.shape[0] / chunksize).astype(int)
 
     rprint(
-        f"Dividing recording of duration {data.grid.rec.shape[0] / data.grid.samplerate} into {n_chunks} chunks of {time_window} seconds each."
+        "Dividing recording of duration"
+        f"{data.grid.rec.shape[0] / data.grid.samplerate} into {n_chunks}"
+        f"chunks of {time_window} seconds each.",
     )
 
     bbox_dfs = []
@@ -524,13 +534,15 @@ def convert(
 
 
 def convert_cli(
-    input: pathlib.Path, output: pathlib.Path, label_mode: str
+    path: pathlib.Path,
+    output: pathlib.Path,
+    label_mode: str,
 ) -> None:
     """Parse all datasets in a directory and convert them to a YOLO dataset.
 
     Parameters
     ----------
-    - `input` : `pathlib.Path`
+    - `path` : `pathlib.Path`
         The root directory of the datasets.
 
     Returns
@@ -538,10 +550,10 @@ def convert_cli(
     - `None`
     """
     make_file_tree(output)
-    config = load_config(str(input / "chirpdetector.toml"))
+    config = load_config(str(path / "chirpdetector.toml"))
 
-    for path in track(list(input.iterdir()), description="Building datasets"):
-        if path.is_file():
+    for p in track(list(path.iterdir()), description="Building datasets"):
+        if p.is_file():
             continue
-        data = load(path, grid=True)
+        data = load(p, grid=True)
         convert(data, config, output, label_mode)

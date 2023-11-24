@@ -37,7 +37,9 @@ def bandpass_filter(
 
 
 def envelope(
-    signal: np.ndarray, samplerate: float, cutoff_frequency: float
+    signal: np.ndarray,
+    samplerate: float,
+    cutoff_frequency: float,
 ) -> np.ndarray:
     """Calculate the envelope of a signal using a lowpass filter.
 

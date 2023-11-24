@@ -25,11 +25,12 @@ gridtools = {path = "../gridtools", develop = true}
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^3.5.0"
 pytest-coverage = "^0.0"
-mypy = "^1.7.1"
 pytest = "^7.4.3"
 ruff = "^0.1.6"
 isort = "^5.12.0"
 black = "^23.11.0"
+types-toml = "^0.10.8.7"
+pyright = "^1.1.337"
 
 [tool.poetry.scripts]
 chirpdetector = "chirpdetector.chirpdetector:cli"
@@ -37,51 +38,61 @@ cpd = "chirpdetector.chirpdetector:cli"
 
 [tool.ruff]
 line-length = 79
-exclude = [
-    ".bzr",
-    ".direnv",
-    ".eggs",
-    ".git",
-    ".git-rewrite",
-    ".hg",
-    ".mypy_cache",
-    ".nox",
-    ".pants.d",
-    ".pytype",
-    ".ruff_cache",
-    ".svn",
-    ".tox",
-    ".venv",
-    "__pypackages__",
-    "_build",
-    "buck-out",
-    "build",
-    "dist",
-    "node_modules",
-    "venv",
-]
 
 [tool.ruff.lint]
 select = [
-    "A",  # prevent using keywords that clobber python builtins
-    "B",  # bugbear: security warnings
-    "E",  # pycodestyle
-    "F",  # pyflakes
-    "ISC",  # implicit string concatenation
-    "UP",  # alert you when better syntax is available in your python version
-    "RUF",  # the ruff developer's own rules
+    "W", # pycodestyle
+    "E", # pycodestyle
+    "F", # Pyflakes
+    "UP", # pyupgrade
+    "B", # flake8-bugbear
+    "SIM", # flake8-simplify
+    "ANN", # flake8-annotations
+    "A", # flake8-builtins
+    "COM", # flake8-commas
+    "C4", # flake8-comprehensions
+    "EM", # flake8-error-msg
+    "EXE", # flake8-executable
+    "ICN", # flake8-import-conventions
+    "PT", # flake8-pytest-style
+    "Q", # flake8-quotes
+    "RET", # flake8-return
+    "SIM", # flake8-simplify
+    "ARG", # flake8-unused-arguments
+    "PTH", # flake8-use-pathlib
+    "PD", # pandas-vet
+    "PL", # pylint
+    "TRY", # tryceratops
+    "NPY", # numpy-specific
+    "I", # isort
+    "C90", # complexity (McCabe)
+    "N", # pep8-naming
+    "D", # pydocstyle
+]
+ignore = [
+    "COM812", # missing trailing comma
+    "TD002", # missing todo author
+    "TD003", # missing todo link
 ]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
-[tool.black]
-line-length = 79
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+
+[tool.black]
+line-length = 79
+
+[tool.pyright]
+include = ["chirpdetector", "tests"]
+defineConstant = { DEBUG = true }
+reportMissingImports = true
+reportMissingTypeStubs = false
+pythonVersion = "3.11"
+pythonPlatform = "Linux"
 
 [build-system]
 requires = ["poetry-core"]

@@ -123,7 +123,7 @@ def main():
     boxes to test if everything is working as expected.
     """
     config = load_config(
-        "/home/weygoldt/Projects/mscthesis/src/chirpdetector/chirpdetector/config.toml"
+        "/home/weygoldt/Projects/mscthesis/src/chirpdetector/chirpdetector/config.toml",
     )
     dataset = CustomDataset(
         config.train.datapath,
@@ -142,8 +142,8 @@ def main():
         for s, t in zip(samples, targets):
             _, ax = plt.subplots()
             ax.imshow(s.permute(1, 2, 0), aspect="auto")
-            for (x0, y0, x1, y1), l in zip(t["boxes"], t["labels"]):
-                print(x0, y0, x1, y1, l)
+            for (x0, y0, x1, y1), lbl in zip(t["boxes"], t["labels"]):
+                print(x0, y0, x1, y1, lbl)
                 ax.add_patch(
                     Rectangle(
                         (x0, y0),
@@ -153,7 +153,7 @@ def main():
                         color="white",
                         linewidth=2,
                         zorder=10,
-                    )
+                    ),
                 )
             plt.show()
 

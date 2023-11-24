@@ -46,14 +46,16 @@ def test_numpy_to_pil():
     array = np.zeros((10, 10, 10))
     try:
         img = numpy_to_pil(array)
-        assert False
     except ValueError:
-        assert True
+        pass
+    else:
+        raise AssertionError("ValueError not raised")
 
     # Sad path without data
     array = np.zeros((0, 0))
     try:
         img = numpy_to_pil(array)
-        assert False
     except ValueError:
-        assert True
+        pass
+    else:
+        raise AssertionError("ValueError not raised")
