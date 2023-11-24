@@ -1,11 +1,9 @@
-#! /usr/bin/env python3
-
 """Detect chirps on a spectrogram."""
 
 import pathlib
 import shutil
 
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -31,7 +29,7 @@ from .utils.logging import make_logger
 
 # Use non-gui backend for matplotlib to
 # avoid memory leaks
-matplotlib.use("Agg")
+mpl.use("Agg")
 
 # initialize the progress bar
 prog = Progress(
@@ -95,10 +93,16 @@ def float_index_interpolation(
     array([12.5, 16. , 22.5])
     """
     # Check if the values are within the range of the index array
-    if np.any(values < np.min(index_arr)) or np.any(
-        values > np.max(index_arr),
+    if np.any(values < (np.min(index_arr) - 1)) or np.any(
+        values > (np.max(index_arr) + 1),
     ):
-        raise ValueError("Values outside the range of index array")
+        msg = (
+            "Values outside the range of index array\n"
+            f"Target values: {values}\n"
+            f"Index array: {index_arr}\n"
+            f"Data array: {data_arr}"
+        )
+        raise ValueError(msg)
 
     # Find the indices corresponding to the values
     lower_indices = np.floor(values).astype(int)
@@ -106,40 +110,15 @@ def float_index_interpolation(
 
     # Ensure upper indices are within the array bounds
     upper_indices = np.minimum(upper_indices, len(index_arr) - 1)
+    lower_indices = np.minimum(lower_indices, len(index_arr) - 1)
 
     # Calculate the interpolation weights
     weights = values - lower_indices
 
     # Linear interpolation
-    interpolated_values = (1 - weights) * data_arr[
-        lower_indices
-    ] + weights * data_arr[upper_indices]
-
-    return interpolated_values
-
-
-# def flip_boxes(boxes: np.ndarray, img_height: int) -> np.ndarray:
-#     """Flip the boxes vertically.
-#
-#     Parameters
-#     ----------
-#     - `boxes` : `numpy.ndarray`
-#         The boxes to be flipped.
-#     - `img_height` : `int`
-#         The height of the image.
-#
-#     Returns
-#     -------
-#     - `numpy.ndarray`
-#         The flipped boxes.
-#     """
-#
-#     boxes[:, 1], boxes[:, 3] = (
-#         img_height - boxes[:, 3],
-#         img_height - boxes[:, 1],
-#     )
-#
-#     return boxes
+    return (1 - weights) * data_arr[lower_indices] + weights * data_arr[
+        upper_indices
+    ]
 
 
 def coords_to_mpl_rectangle(boxes: np.ndarray) -> np.ndarray:
@@ -161,10 +140,20 @@ def coords_to_mpl_rectangle(boxes: np.ndarray) -> np.ndarray:
     - `numpy.ndarray`
         The converted boxes.
     """
-    if len(boxes.shape) == 1:
-        raise ValueError("The boxes array must be 2-dimensional.")
-    if boxes.shape[1] != 4:
-        raise ValueError("The boxes array must have 4 columns.")
+    boxes_dims = 2
+    if len(boxes.shape) != boxes_dims:
+        msg = (
+            "The boxes array must be 2-dimensional.\n"
+            f"Shape of boxes: {boxes.shape}"
+        )
+        raise ValueError(msg)
+    boxes_cols = 4
+    if boxes.shape[1] != boxes_cols:
+        msg = (
+            "The boxes array must have 4 columns.\n"
+            f"Shape of boxes: {boxes.shape}"
+        )
+        raise ValueError(msg)
 
     new_boxes = np.zeros_like(boxes)
     new_boxes[:, 0] = boxes[:, 0]
@@ -236,7 +225,7 @@ def plot_detections(
                 f"{scores[i]:.2f}",
                 color="black",
                 fontsize=8,
-                bbox=dict(facecolor="white", alpha=1),
+                bbox={"facecolor":"white", "alpha":1},
             )
     plt.axis("off")
     plt.savefig(save_path, dpi=300, bbox_inches="tight", pad_inches=0)
@@ -258,11 +247,20 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     """
     # make sure the spectrogram is a tensor
     if not isinstance(spec, torch.Tensor):
-        raise TypeError("The spectrogram must be a torch.Tensor.")
+        msg = (
+            "The spectrogram must be a torch.Tensor.\n"
+            f"Type of spectrogram: {type(spec)}"
+        )
+        raise TypeError(msg)
 
     # make sure the spectrogram is 2-dimensional
-    if len(spec.size()) != 2:
-        raise ValueError("The spectrogram must be a 2-dimensional matrix.")
+    spec_dims = 2
+    if len(spec.size()) != spec_dims:
+        msg = (
+            "The spectrogram must be a 2-dimensional matrix.\n"
+            f"Shape of spectrogram: {spec.size()}"
+        )
+        raise ValueError(msg)
 
     # make sure the spectrogram contains some data
     if (
@@ -270,7 +268,12 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
         - np.min(spec.detach().cpu().numpy())
         == 0
     ):
-        raise ValueError("The spectrogram must contain some data.")
+        msg = (
+            "The spectrogram must contain some data.\n"
+            f"Max value: {np.max(spec.detach().cpu().numpy())}\n"
+            f"Min value: {np.min(spec.detach().cpu().numpy())}"
+        )
+        raise ValueError(msg)
 
     # Get the dimensions of the original matrix
     original_shape = spec.size()
@@ -291,9 +294,7 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     )
 
     # make sure image is float32
-    scaled_tensor = normalized_tensor.float()
-
-    return scaled_tensor
+    return normalized_tensor.float()
 
 
 def detect_chirps(conf: Config, data: Dataset) -> None:
@@ -406,6 +407,8 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         spec_freqs = spec_freqs[
             (spec_freqs >= flims[0]) & (spec_freqs <= flims[1])
         ]
+        print(len(spec_freqs))
+        print(np.shape(spec))
 
         # make a path to save the spectrogram
         path = data.path / "chirpdetections"
@@ -422,8 +425,6 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         with torch.inference_mode():
             outputs = model([img])
 
-        plot_detections(img, outputs[0], conf.det.threshold, path, conf)
-
         # put the boxes, scores and labels into the dataset
         bboxes = outputs[0]["boxes"].detach().cpu().numpy()
         scores = outputs[0]["scores"].detach().cpu().numpy()
@@ -433,6 +434,9 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         bboxes = bboxes[scores > conf.det.threshold]
         labels = labels[scores > conf.det.threshold]
         scores = scores[scores > conf.det.threshold]
+
+        if np.any(scores > conf.det.threshold):
+            plot_detections(img, outputs[0], conf.det.threshold, path, conf)
 
         # save the bboxes to a dataframe
         bbox_df = pd.DataFrame(
@@ -445,25 +449,25 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         # convert x values to time on spec_times
         spec_times_index = np.arange(0, len(spec_times))
         bbox_df["t1"] = float_index_interpolation(
-            bbox_df["x1"].values,
+            bbox_df["x1"].to_numpy(),
             spec_times_index,
             spec_times,
         )
         bbox_df["t2"] = float_index_interpolation(
-            bbox_df["x2"].values,
+            bbox_df["x2"].to_numpy(),
             spec_times_index,
             spec_times,
         )
 
         # convert y values to frequency on spec_freqs
-        spec_freqs_index = np.arange(0, len(spec_freqs))
+        spec_freqs_index = np.arange(len(spec_freqs))
         bbox_df["f1"] = float_index_interpolation(
-            bbox_df["y1"].values,
+            bbox_df["y1"].to_numpy(),
             spec_freqs_index,
             spec_freqs,
         )
         bbox_df["f2"] = float_index_interpolation(
-            bbox_df["y2"].values,
+            bbox_df["y2"].to_numpy(),
             spec_freqs_index,
             spec_freqs,
         )
@@ -473,21 +477,21 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
 
     # concatenate all dataframes
     bbox_df = pd.concat(bbox_dfs)
-    bbox_df.reset_index(inplace=True, drop=True)
+    bbox_reset = bbox_df.reset_index(drop=True)
 
     # sort the dataframe by t1
-    bbox_df.sort_values(by="t1", inplace=True)
+    bbox_sorted = bbox_reset.sort_values(by="t1")
 
     # sort the columns
-    bbox_df = bbox_df[
+    bbox_sorted = bbox_sorted[
         ["label", "score", "x1", "y1", "x2", "y2", "t1", "f1", "t2", "f2"]
     ]
 
     # save the dataframe
-    bbox_df.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
+    bbox_sorted.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
 
 
-def detect_cli(path):
+def detect_cli(input_path: str) -> None:
     """Terminal interface for the detection function.
 
     Parameters
@@ -499,8 +503,8 @@ def detect_cli(path):
     - `None`
     """
     # make the global logger object
-    global logger  # pylint: disable=global-statement
-    path = pathlib.Path(path)
+    # global logger  # pylint: disable=global-statement
+    path = pathlib.Path(input_path)
     logger = make_logger(__name__, path / "chirpdetector.log")
     datasets = [folder for folder in path.iterdir() if folder.is_dir()]
     confpath = path / "chirpdetector.toml"
@@ -509,23 +513,24 @@ def detect_cli(path):
     if confpath.exists():
         config = load_config(str(confpath))
     else:
-        raise FileNotFoundError(
+        msg = (
             "The configuration file could not be found in the specified path."
             "Please run `chirpdetector copyconfig` and change the "
-            "configuration file to your needs.",
+            "configuration file to your needs."
         )
+        raise FileNotFoundError(msg)
 
     # detect chirps in all datasets in the specified path
     # and show a progress bar
     prog.console.rule("Starting detection")
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
-        for dataset in datasets:
+        for dataset in datasets[1:]:
             msg = f"Detecting chirps in {dataset.name}..."
             prog.console.log(msg)
             logger.info(msg)
 
-            data = load(dataset, grid=True)
+            data = load(dataset)
             detect_chirps(config, data)
             prog.update(task, advance=1)
         prog.update(task, completed=len(datasets))

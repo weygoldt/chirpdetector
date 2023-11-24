@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Functions and classes for converting data."""
 
 import pathlib
@@ -38,10 +36,11 @@ def make_file_tree(path: Union[pathlib.Path, str]) -> None:
         path = pathlib.Path(path)
 
     if path.parent.exists() and path.parent.is_file():
-        raise ValueError(
+        msg = (
             f"Parent directory of {path} is a file. "
-            "Please specify a directory.",
+            "Please specify a directory."
         )
+        raise ValueError(msg)
 
     if path.exists():
         shutil.rmtree(path)
@@ -67,17 +66,18 @@ def numpy_to_pil(img: np.ndarray) -> Image.Image:
     PIL.Image
         The converted image.
     """
-    if len(img.shape) != 2:
-        raise ValueError("Image must be 2D")
+    img_dimens = 2
+    if len(img.shape) != img_dimens:
+        msg = f"Image must be {img_dimens}D"
+        raise ValueError(msg)
 
     if img.max() == img.min():
-        raise ValueError("Image must have more than one value")
+        msg = "Image must have more than one value"
+        raise ValueError(msg)
 
     img = np.flipud(img)
-    img = np.uint8((img - img.min()) / (img.max() - img.min()) * 255)
-    img = Image.fromarray(img)
-
-    return img
+    intimg = np.uint8((img - img.min()) / (img.max() - img.min()) * 255)
+    return Image.fromarray(intimg)
 
 
 def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
@@ -147,13 +147,12 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
             boxes.append((t_center, f_center, bbox_width, bbox_height))
             ids.append(fish_id)
 
-    df = pd.DataFrame(
+    dataframe = pd.DataFrame(
         boxes,
         columns=["t_center", "f_center", "width", "height"],
     )
-    df["fish_id"] = ids
-
-    return df
+    dataframe["fish_id"] = ids
+    return dataframe
 
 
 def synthetic_labels(
@@ -165,8 +164,8 @@ def synthetic_labels(
     spec_freqs: np.ndarray,
     imgname: str,
     chunk_no: int,
-    img: Image,
-) -> Union[Tuple[pd.DataFrame, Image], Tuple[None, None]]:
+    img: Image.Image,
+) -> Union[Tuple[pd.DataFrame, Image.Image], Tuple[None, None]]:
     """Generate labels of a simulated dataset.
 
     Parameters
@@ -250,7 +249,7 @@ def synthetic_labels(
     bboxes["chunk_id"] = chunk_no
 
     # put them into a dataframe to save for eahc spectrogram
-    df = pd.DataFrame(
+    dataframe = pd.DataFrame(
         {
             "cx": centerx_norm,
             "cy": centery_norm,
@@ -260,13 +259,13 @@ def synthetic_labels(
     )
 
     # add as first colum instance id
-    df.insert(0, "instance_id", np.ones_like(lxs, dtype=int))
+    dataframe.insert(0, "instance_id", np.ones_like(lxs, dtype=int))
 
     # stash the bboxes dataframe for this chunk
     bboxes["image"] = imgname
 
     # save dataframe for every spec without headers as txt
-    df.to_csv(
+    dataframe.to_csv(
         output / "labels" / f"{chunk.path.name}.txt",
         header=False,
         index=False,
@@ -308,13 +307,13 @@ def detected_labels(
     source_dataset = "_".join(source_dataset)
     source_dataset = chunk.path.parent / source_dataset
 
-    df = pd.read_csv(source_dataset / "chirpdetector_bboxes.csv")
+    dataframe = pd.read_csv(source_dataset / "chirpdetector_bboxes.csv")
 
     # get chunk start and stop time
     start, stop = spec_times[0], spec_times[-1]
 
     # get the bboxes for this chunk
-    bboxes = df[(df.t1 >= start) & (df.t2 <= stop)]
+    bboxes = dataframe[(dataframe.t1 >= start) & (dataframe.t2 <= stop)]
 
     # get the x and y coordinates of the bboxes in pixels as dataframe
     bboxes_xy = bboxes[["x1", "y1", "x2", "y2"]]
@@ -529,7 +528,7 @@ def convert(
 
     # save the classes.txt file
     classes = ["__background__", "chirp"]
-    with open(dataroot / "classes.txt", "w") as f:
+    with pathlib.Path.open(dataroot / "classes.txt", "w") as f:
         f.write("\n".join(classes))
 
 

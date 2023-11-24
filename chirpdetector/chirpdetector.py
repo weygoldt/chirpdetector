@@ -106,8 +106,8 @@ def show(mode: str, input_path: pathlib.Path, n_images: int) -> None:
 
 @cli.command()
 @click.option(
-    "--path",
-    "-p",
+    "--input_path",
+    "-i",
     type=click.Path(
         exists=True,
         file_okay=False,
