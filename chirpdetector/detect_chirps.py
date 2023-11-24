@@ -363,6 +363,21 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         # create a subset from the grid dataset
         if idx2 > data.grid.rec.shape[0]:
             idx2 = data.grid.rec.shape[0] - 1
+
+        # This bit should alleviate the edge effects of the tracks 
+        # by limiting the start and stop times of the spectrogram
+        # to the start and stop times of the track.
+        start_t = idx1 / data.grid.samplerate
+        stop_t = idx2 / data.grid.samplerate
+        if data.track.times[-1] < stop_t:
+            stop_t = data.track.times[-1]
+            idx2 = int(stop_t * data.grid.samplerate)
+        if data.track.times[0] > start_t:
+            start_t = data.track.times[0]
+            idx1 = int(start_t * data.grid.samplerate)
+        if start_t > data.track.times[-1] or stop_t < data.track.times[0]:
+            continue
+
         chunk = subset(data, idx1, idx2, mode="index")
 
         # compute the spectrogram for each electrode of the current chunk
