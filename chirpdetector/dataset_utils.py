@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-
 """Utility functions for training datasets in the YOLO format."""
 
 import pathlib
 import shutil
 
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
@@ -26,8 +24,7 @@ def load_img(path: pathlib.Path) -> np.ndarray:
         The image as a numpy array.
     """
     img = Image.open(path)
-    img = np.asarray(img)
-    return img
+    return np.asarray(img)
 
 
 def plot_yolo_dataset(path: pathlib.Path, n: int) -> None:
@@ -42,7 +39,7 @@ def plot_yolo_dataset(path: pathlib.Path, n: int) -> None:
     -------
     None
     """
-    matplotlib.use("TkAgg")
+    mpl.use("TkAgg")
     labelpath = path / "labels"
     imgpath = path / "images"
 
@@ -175,11 +172,14 @@ def merge_yolo_datasets(
     output = pathlib.Path(output)
 
     if not dataset1.exists():
-        raise FileNotFoundError(f"{dataset1} does not exist.")
+        msg = f"{dataset1} does not exist."
+        raise FileNotFoundError(msg)
     if not dataset2.exists():
-        raise FileNotFoundError(f"{dataset2} does not exist.")
+        msg = f"{dataset2} does not exist."
+        raise FileNotFoundError(msg)
     if output.exists():
-        raise FileExistsError(f"{output} already exists.")
+        msg = f"{output} already exists."
+        raise FileExistsError(msg)
 
     output_images = output / "images"
     output_images.mkdir(parents=True, exist_ok=False)

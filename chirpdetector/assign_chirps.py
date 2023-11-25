@@ -171,8 +171,8 @@ def clean_bboxes(data: Dataset, chirp_df: pd.DataFrame) -> pd.DataFrame:
 
     # track filter: remove all chirp bboxes that do not overlap with
     # the range spanned by the min and max of the wavetracker frequency tracks
-    minf = np.min(data.track.freqs)
-    maxf = np.max(data.track.freqs)
+    minf = np.min(data.track.freqs).astype(float)
+    maxf = np.max(data.track.freqs).astype(float)
     # maybe add some more cleaning here, such
     # as removing chirps that are too short or too long
     return track_filter(chirp_df_nms, minf, maxf)
@@ -578,7 +578,7 @@ def assign_cli(path: pathlib.Path) -> None:
             logger.info(msg)
             prog.console.log(msg)
 
-            data = load(rec, grid=True)
+            data = load(rec)
             chirp_df = pd.read_csv(rec / "chirpdetector_bboxes.csv")
             assign_data, chirp_df, data = extract_assignment_data(
                 data, chirp_df

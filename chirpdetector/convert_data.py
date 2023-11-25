@@ -24,7 +24,7 @@ from .utils.configfiles import Config, load_config
 con = Console()
 
 
-def make_file_tree(path: Union[pathlib.Path, str]) -> None:
+def make_file_tree(path: pathlib.Path) -> None:
     """Build a file tree for the training dataset.
 
     Parameters
@@ -32,9 +32,6 @@ def make_file_tree(path: Union[pathlib.Path, str]) -> None:
     path : pathlib.Path
         The root directory of the dataset.
     """
-    if not isinstance(path, pathlib.Path):
-        path = pathlib.Path(path)
-
     if path.parent.exists() and path.parent.is_file():
         msg = (
             f"Parent directory of {path} is a file. "
@@ -447,6 +444,7 @@ def convert(
         chunk = subset(data, idx1, idx2, mode="index")
 
         # compute the spectrogram for each electrode of the current chunk
+        spec = None
         for el in range(n_electrodes):
             # get the signal for the current electrode
             sig = chunk.grid.rec[:, el]
@@ -454,7 +452,7 @@ def convert(
             # compute the spectrogram for the current electrode
             chunk_spec, _, _ = spectrogram(
                 data=sig.copy(),
-                samplingrate=data.grid.rec.samplerate,
+                samplingrate=data.grid.samplerate,
                 nfft=nfft,
                 hop_length=hop_len,
             )
@@ -465,6 +463,10 @@ def convert(
                 spec = chunk_spec
             else:
                 spec += chunk_spec
+
+        if spec is None:
+            msg = "Failed to compute spectrogram."
+            raise ValueError(msg)
 
         # normalize spectrogram by the number of electrodes
         # the spec is still a tensor
@@ -554,5 +556,5 @@ def convert_cli(
     for p in track(list(path.iterdir()), description="Building datasets"):
         if p.is_file():
             continue
-        data = load(p, grid=True)
+        data = load(p)
         convert(data, config, output, label_mode)

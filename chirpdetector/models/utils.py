@@ -1,8 +1,4 @@
-#!/usr/bin/env python3
-
-"""
-Load, save and handle models.
-"""
+"""Load, save and handle models."""
 
 import albumentations as A
 import torch
@@ -11,7 +7,7 @@ import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 
-def get_device():
+def get_device() -> torch.device:
     """Check if a CUDA-enabled GPU is available, and return the correct device.
 
     Returns
@@ -78,9 +74,7 @@ def get_transforms(width: int, height: int, train: bool) -> A.Compose:
 
 
 def collate_fn(batch: list) -> tuple:
-    """
-    Since each image may have a different number of objects, we need a collate
-    function (to be passed to the DataLoader).
+    """Collate function (to be passed to the DataLoader).
 
     Parameters
     ----------
@@ -113,7 +107,8 @@ def load_fasterrcnn(num_classes: int) -> torch.nn.Module:
         Adapted FasterRCNN Model
     """
     if not isinstance(num_classes, int):
-        raise TypeError("num_classes must be an integer")
+        msg = "num_classes must be an integer"
+        raise TypeError(msg)
 
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
         weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT,

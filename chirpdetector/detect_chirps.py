@@ -506,7 +506,7 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     bbox_sorted.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
 
 
-def detect_cli(input_path: str) -> None:
+def detect_cli(input_path: pathlib.Path) -> None:
     """Terminal interface for the detection function.
 
     Parameters

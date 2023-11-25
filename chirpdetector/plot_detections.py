@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
-
 """Functions to visualize detections on images."""
 
 import pathlib
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 import torch
@@ -83,7 +83,7 @@ def plot_detections(
             # compute the spectrogram for the current electrode
             chunk_spec, _, _ = spectrogram(
                 data=sig.copy(),
-                samplingrate=data.grid.rec.samplerate,
+                samplingrate=data.grid.samplerate,
                 nfft=nfft,
                 hop_length=hop_len,
             )
@@ -119,18 +119,15 @@ def plot_detections(
         ]
 
         # get t1, t2, f1, f2 from chunk_df
-        bboxes = chunk_df[["score", "t1", "f1", "t2", "f2"]].values
+        bboxes = chunk_df[["score", "t1", "f1", "t2", "f2"]].to_numpy()
 
         # get chirp times and chirp ids
         chirp_times = chunk_df["envelope_trough_time"]
         chirp_ids = chunk_df["assigned_track"]
 
-        import matplotlib
+        mpl.use("TkAgg")
 
-        matplotlib.use("TkAgg")
-        from matplotlib.patches import Rectangle
-
-        fig, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
+        _, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
 
         # plot bounding boxes
         ax.imshow(
@@ -173,7 +170,7 @@ def plot_detections(
             )
 
         # plot chirp times and frequency traces
-        for idx, track_id in enumerate(np.unique(data.track.idents)):
+        for track_id in np.unique(data.track.idents):
             ctimes = chirp_times[chirp_ids == track_id]
 
             freqs = data.track.freqs[data.track.idents == track_id]
@@ -190,8 +187,8 @@ def plot_detections(
             # get freqs where times are closest to ctimes
             cfreqs = np.zeros_like(ctimes)
             for i, ctime in enumerate(ctimes):
-                idx = np.argmin(np.abs(times - ctime))
-                cfreqs[i] = freqs[idx]
+                indx = np.argmin(np.abs(times - ctime))
+                cfreqs[i] = freqs[indx]
 
             ax.plot(
                 times,
@@ -250,6 +247,6 @@ def plot_detections_cli(path: pathlib.Path) -> None:
         Path to the config file.
     """
     conf = load_config(path.parent / "chirpdetector.toml")
-    data = load(path, grid=True)
+    data = load(path)
     chirp_df = pd.read_csv(path / "chirpdetector_bboxes.csv")
     plot_detections(data, chirp_df, conf)

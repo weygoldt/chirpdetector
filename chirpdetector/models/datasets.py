@@ -1,11 +1,7 @@
-#! /usr/bin/env python3
-
-"""
-Dataset classes to train and test the model.
-"""
+"""Dataset classes to train and test the model."""
 
 import pathlib
-from typing import List, Union
+from typing import List, Union, Self
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,16 +17,14 @@ from .utils import collate_fn
 
 
 class CustomDataset(Dataset):
-    """
-    Custom dataset class for the training and testing data.
-    """
+    """Custom dataset class for the training and testing data."""
 
     def __init__(
-        self,
+        self: Self,
         path: str,
         classes: List[str],
         transforms: Union[torchvision.transforms.Compose, None] = None,
-    ):
+    ) -> None:
         # initialize the variables
         self.transforms = transforms
         self.path = pathlib.Path(path)
@@ -42,8 +36,8 @@ class CustomDataset(Dataset):
         self.image_paths = list(self.image_dir.glob("*.png"))
         self.images = sorted([str(x.name) for x in self.image_paths])
 
-    def __getitem__(self, idx):
-        # get the path of the image and load it
+    def __getitem__(self: Self, idx: int) -> tuple:
+        """Get image and target at index idx."""
         image_name = self.images[idx]
         image_path = self.image_dir / image_name
         img = Image.open(image_path)
@@ -102,26 +96,15 @@ class CustomDataset(Dataset):
         # apply the image transforms
         if self.transforms:
             raise NotImplementedError
-
-            # sample = self.transforms(
-            #     image=img,
-            #     bboxes=target["boxes"],
-            #     labels=labels,
-            # )
-            # img = sample["image"]
-            # target["boxes"] = torch.Tensor(sample["bboxes"])
-
         return img, target
 
-    def __len__(self):
+    def __len__(self: Self) -> int:
+        """Print length of dataset (number of images)."""
         return len(self.images)
 
 
-def main():
-    """
-    Instantiate the CustomDataset class and visualize the images and bounding
-    boxes to test if everything is working as expected.
-    """
+def main() -> None:
+    """Instantiate the CustomDataset class and visualize it."""
     config = load_config(
         "/home/weygoldt/Projects/mscthesis/src/chirpdetector/chirpdetector/config.toml",
     )
