@@ -91,6 +91,7 @@ def plot_detections(
             idx2 = data.grid.rec.shape[0] - 1
         chunk = subset(data, idx1, idx2, mode="index")
 
+        # dont plot chunks without chirps
         if len(chunk.com.chirp.times) == 0:
             continue
 
@@ -163,7 +164,6 @@ def plot_detections(
             vmin=-80,
             vmax=-45,
         )
-        idx = 0
         for bbox in bboxes:
             ax.add_patch(
                 Rectangle(
@@ -205,16 +205,24 @@ def plot_detections(
             # get freqs where times are closest to ctimes
             cfreqs = np.zeros_like(ctimes)
             for i, ctime in enumerate(ctimes):
-                indx = np.argmin(np.abs(times - ctime))
-                cfreqs[i] = freqs[indx]
+                try:
+                    indx = np.argmin(np.abs(times - ctime))
+                    cfreqs[i] = freqs[indx]
+                except ValueError:
+                    msg = (
+                        "Failed to find track time closest to chirp time "
+                        f"in chunk {chunk_no}, check the plots."
+                    )
+                    prog.console.log(msg)
 
-            ax.plot(
-                times,
-                freqs,
-                lw=2,
-                color="black",
-                label="Frequency traces",
-            )
+            if len(times) != 0:
+                ax.plot(
+                    times,
+                    freqs,
+                    lw=2,
+                    color="black",
+                    label="Frequency traces",
+                )
 
             ax.scatter(
                 ctimes,

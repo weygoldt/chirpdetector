@@ -251,11 +251,13 @@ def make_indices(
     # determine start and stop index of time window on raw data
     # using bounding box start and stop times of chirp detection
     diffr = chirp_df.t2.to_numpy()[idx] - chirp_df.t1.to_numpy()[idx]
-    t1 = chirp_df.t1.to_numpy()[idx] - 0.2 * diffr
-    t2 = chirp_df.t2.to_numpy()[idx] + 0.2 * diffr
+    t1 = chirp_df.t1.to_numpy()[idx] - 0.5 * diffr
+    t2 = chirp_df.t2.to_numpy()[idx] + 0.5 * diffr
+
     start_idx = int(np.round(t1 * data.grid.samplerate))
     stop_idx = int(np.round(t2 * data.grid.samplerate))
     center_idx = int(np.round(chirp * data.grid.samplerate))
+
     return start_idx, stop_idx, center_idx
 
 
@@ -284,8 +286,8 @@ def get_env_trough(
     env = env / np.max(np.abs(raw))
 
     # cut of the first and last 20% of the envelope
-    env[: int(0.2 * len(env))] = np.nan
-    env[int(0.8 * len(env)) :] = np.nan
+    env[: int(0.25 * len(env))] = np.nan
+    env[int(0.75 * len(env)) :] = np.nan
 
     # find troughs in the envelope and compute trough prominences
     peaks, params = find_peaks(-env, prominence=1e-3)
