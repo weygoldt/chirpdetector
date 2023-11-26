@@ -145,8 +145,6 @@ def plot_detections(
         chirp_times = chunk_df["envelope_trough_time"]
         chirp_ids = chunk_df["assigned_track"]
 
-        mpl.use("TkAgg")
-
         _, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
 
         # plot bounding boxes

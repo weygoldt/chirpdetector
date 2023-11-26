@@ -13,6 +13,8 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from scipy.signal import find_peaks
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 
 from .utils.filters import bandpass_filter, envelope
 from .utils.logging import make_logger
@@ -324,11 +326,7 @@ def extract_envelope_trough(
     - `proms`: `np.ndarray`
         Prominences of the envelope troughs
     """
-    (
-        start_idx,
-        _,
-        stop_idx,
-    ) = indices
+    start_idx, stop_idx, _= indices
 
     # determine bandpass cutoffs above and below baseline frequency
     lower_f = best_freq - 15
@@ -354,6 +352,11 @@ def extract_envelope_trough(
         cutoff_frequency=50,
     )
     peaks, proms = get_env_trough(env, raw_filtered)
+    # mpl.use("TkAgg")
+    # plt.plot(env)
+    # plt.plot(raw_filtered)
+    # plt.plot(peaks, env[peaks], "x")
+    # plt.show()
     return peaks, proms
 
 
@@ -409,6 +412,7 @@ def extract_assignment_data(
             # check if chirp overlaps with track
             f1 = chirp_df.f1.to_numpy()[idx]
             f2 = chirp_df.f2.to_numpy()[idx]
+            f2 = f1 + (f2 - f1) * 0.5 # range is the lower half of the bbox
             if (f1 > best_freq) or (f2 < best_freq):
                 peak_distances.append(np.nan)
                 peak_prominences.append(np.nan)
@@ -424,7 +428,6 @@ def extract_assignment_data(
             )
 
             indices = (start_idx, stop_idx, center_idx)
-
             peaks, proms = extract_envelope_trough(
                 data,
                 best_electrode,
