@@ -18,6 +18,23 @@ from gridtools.utils.spectrograms import (
 
 from .utils.configfiles import Config, load_config
 
+from rich.progress import MofNCompleteColumn, Progress, SpinnerColumn, BarColumn, TimeElapsedColumn
+from rich.console import Console
+
+console = Console()
+prog = Progress(
+    SpinnerColumn(),
+    "[progress.description]{task.description}",
+    BarColumn(),
+    "[progress.percentage]{task.percentage:>3.0f}%",
+    TimeElapsedColumn(),
+    MofNCompleteColumn(),
+    console=console,
+)
+
+
+
+
 
 def plot_detections(
     data: Dataset,
@@ -73,6 +90,9 @@ def plot_detections(
         if idx2 > data.grid.rec.shape[0]:
             idx2 = data.grid.rec.shape[0] - 1
         chunk = subset(data, idx1, idx2, mode="index")
+
+        if len(chunk.com.chirp.times) == 0:
+            continue
 
         # compute the spectrogram for each electrode of the current chunk
         spec = torch.zeros((len(spec_freqs), len(spec_times)))
@@ -237,6 +257,22 @@ def plot_detections(
             bbox_inches="tight",
         )
 
+        plt.close()
+        plt.clf()
+        plt.cla()
+        plt.close("all")
+
+def clean_plots_cli(path: pathlib.Path) -> None:
+    """Remove all plots from the chirpdetections folder.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Path to the config file.
+    """
+    savepath = path / "chirpdetections"
+    for f in savepath.iterdir():
+        f.unlink()
 
 def plot_detections_cli(path: pathlib.Path) -> None:
     """Plot detections on images.
@@ -250,3 +286,39 @@ def plot_detections_cli(path: pathlib.Path) -> None:
     data = load(path)
     chirp_df = pd.read_csv(path / "chirpdetector_bboxes.csv")
     plot_detections(data, chirp_df, conf)
+
+def plot_all_detections_cli(path: pathlib.Path) -> None:
+    """Plot detections on images.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Path to the config file.
+    """
+    conf = load_config(path / "chirpdetector.toml")
+
+    dirs = [dataset for dataset in path.iterdir() if dataset.is_dir()]
+    with prog:
+        task = prog.add_task("Plotting detections...", total=len(dirs))
+        for dataset in dirs:
+            prog.console.log(f"Plotting detections for {dataset.name}")
+            data = load(dataset)
+            chirp_df = pd.read_csv(dataset / "chirpdetector_bboxes.csv")
+            plot_detections(data, chirp_df, conf)
+            prog.advance(task)
+
+def clean_all_plots_cli(path: pathlib.Path) -> None:
+    """Remove all plots from the chirpdetections folder.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Path to the config file.
+    """
+    dirs = [dataset for dataset in path.iterdir() if dataset.is_dir()]
+    with prog:
+        task = prog.add_task("Cleaning plots...", total=len(dirs))
+        for dataset in dirs:
+            prog.console.log(f"Cleaning plots for {dataset.name}")
+            clean_plots_cli(dataset)
+            prog.advance(task)

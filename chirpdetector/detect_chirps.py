@@ -422,8 +422,6 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         spec_freqs = spec_freqs[
             (spec_freqs >= flims[0]) & (spec_freqs <= flims[1])
         ]
-        print(len(spec_freqs))
-        print(np.shape(spec))
 
         # make a path to save the spectrogram
         path = data.path / "chirpdetections"
@@ -450,8 +448,8 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         labels = labels[scores > conf.det.threshold]
         scores = scores[scores > conf.det.threshold]
 
-        if np.any(scores > conf.det.threshold):
-            plot_detections(img, outputs[0], conf.det.threshold, path, conf)
+        # if np.any(scores > conf.det.threshold):
+        #     plot_detections(img, outputs[0], conf.det.threshold, path, conf)
 
         # save the bboxes to a dataframe
         bbox_df = pd.DataFrame(

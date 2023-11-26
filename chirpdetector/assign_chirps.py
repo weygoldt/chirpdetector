@@ -25,7 +25,6 @@ prog = Progress(
     TimeElapsedColumn(),
 )
 
-
 def non_max_suppression_fast(
     chirp_df: pd.DataFrame,
     overlapthresh: float,

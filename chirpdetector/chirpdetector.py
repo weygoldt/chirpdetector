@@ -18,7 +18,7 @@ from .dataset_utils import (
     subset_yolo_dataset,
 )
 from .detect_chirps import detect_cli
-from .plot_detections import plot_detections_cli
+from .plot_detections import plot_detections_cli, plot_all_detections_cli, clean_plots_cli, clean_all_plots_cli
 from .train_model import train_cli
 from .utils.configfiles import copy_config
 
@@ -250,10 +250,40 @@ def assign(path: pathlib.Path) -> None:
     required=True,
     help="Path to the dataset.",
 )
-def plot(path: pathlib.Path) -> None:
-    """Detect chirps on a spectrogram."""
-    plot_detections_cli(path)
+@click.option(
+    "--all",
+    "-a",
+    is_flag=True,
+    default=False,
+    help="Whether to iterate over multiple datasets.",
+)
+@click.option(
+    "--clean",
+    "-c",
+    is_flag=True,
+    default=False,
+    help="Just delete plots in the current dataset.",
+)
+def plot(path: pathlib.Path, all: bool, clean: bool) -> None:
+    """Plot detected chirps on a spectrogram.
 
+    You can supply a path to a **single** recording and plot all chirp
+    detections for it or delete all plots if you supply the `--clean` option.
+
+    Alternatively, you can supply a path to a **folder** containing multiple
+    recordings and plot all chirp detections for all recordings if you supply
+    the `--all` option. You can also delete all plots for all recordings if
+    you supply the `--all` and `--clean` options.
+    """
+    if clean:
+        if all:
+            clean_all_plots_cli(path)
+        else:
+            clean_plots_cli(path)
+    elif all:
+        plot_all_detections_cli(path)
+    else:
+        plot_detections_cli(path)
 
 @cli.group()
 def yoloutils() -> None:
