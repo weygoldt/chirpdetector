@@ -538,7 +538,7 @@ def detect_cli(input_path: pathlib.Path) -> None:
     prog.console.rule("Starting detection")
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
-        for dataset in datasets[1:]:
+        for dataset in datasets:
             msg = f"Detecting chirps in {dataset.name}..."
             prog.console.log(msg)
             logger.info(msg)
