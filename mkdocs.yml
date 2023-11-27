@@ -42,6 +42,7 @@ plugins:
         python:
           paths: [src]
   - search
+  - glightbox
   
 extra:
   generator: false
@@ -57,6 +58,11 @@ markdown_extensions:
   - def_list
   - pymdownx.tasklist:
       custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 repo_url: https://github.com/weygoldt/chirpdetector
 repo_name: weygoldt/chirpdetector

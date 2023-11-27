@@ -529,13 +529,13 @@ license = ["ukkonen"]
 
 [[package]]
 name = "idna"
-version = "3.5"
+version = "3.6"
 description = "Internationalized Domain Names in Applications (IDNA)"
 optional = false
 python-versions = ">=3.5"
 files = [
-    {file = "idna-3.5-py3-none-any.whl", hash = "sha256:79b8f0ac92d2351be5f6122356c9a592c96d81c9a79e4b488bf2a6a15f88057a"},
-    {file = "idna-3.5.tar.gz", hash = "sha256:27009fe2735bf8723353582d48575b23c533cc2c2de7b5a68908d91b5eb18d08"},
+    {file = "idna-3.6-py3-none-any.whl", hash = "sha256:c05567e9c24a6b9faaa835c4821bad0590fbb9d5779e7caa6e1cc4978e7eb24f"},
+    {file = "idna-3.6.tar.gz", hash = "sha256:9ecdbbd083b06798ae1e86adcbfe8ab1479cf864e4ee30fe4e46a003d12491ca"},
 ]
 
 [[package]]
@@ -887,6 +887,17 @@ python-versions = ">=3.7"
 files = [
     {file = "mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"},
     {file = "mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba"},
+]
+
+[[package]]
+name = "mkdocs-glightbox"
+version = "0.3.5"
+description = "MkDocs plugin supports image lightbox with GLightbox."
+optional = false
+python-versions = "*"
+files = [
+    {file = "mkdocs-glightbox-0.3.5.tar.gz", hash = "sha256:f572256cca17c912da50a045129026566a79b8c6477e1170258ccc0ac5b162da"},
+    {file = "mkdocs_glightbox-0.3.5-py3-none-any.whl", hash = "sha256:096c2753cf4f46f548b02070a2ff5dd8b823a431ce17873a62dcef304cf3364c"},
 ]
 
 [[package]]
@@ -2249,4 +2260,4 @@ test = ["covdefaults (>=2.3)", "coverage (>=7.2.7)", "coverage-enable-subprocess
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.13"
-content-hash = "9d78a6ce5301dbd9f1e826ab41cde207b6b50eb9efe765a470d37c5bb909b73a"
+content-hash = "a2ebd8a25f76d71437f9b2e1c09e75206ba43381f5e654b06c4876640eee15b7"

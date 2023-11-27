@@ -1,1 +1,52 @@
-This module is currently work in progress. Please come back later.
+# Contributing
+
+We are thrilled to have you join in making this project even better. Please feel free to browse through the resources and guidelines provided here, and let us know if there is anything specific you would like to contribute or discuss. 
+
+If you would like to help to develop this package you can skim through the to-do list below as well as the contribution guidelines. Just fork the project, add your code and send a pull request. We are always happy to get some help :thumbsup: !
+
+If you encountered an issue using the `chirpdetector`, feel free to open an issue [here](https://github.com/weygoldt/chirpdetector/issues).
+
+## Contributors guidelines 
+
+I try our best to adhere to good coding practices and catch up on writing tests 
+for this package. As I am currently the only one working on it, here is some 
+documentation of the development packages I use:
+
+- `pre-commit` for pre-commit hooks
+- `pytest` and `pytest-coverage` for unit tests
+- `ruff` for linting and formatting 
+- `pyright` for static type checking
+
+Before every commit, a pre-commit hook runs all these packages on the code base
+and refuses a push if errors are raised. If you want to contribute, please 
+make sure that your code is proberly formatted and run the tests before issuing 
+a pull request. The formatting guidelines should be automatically picked up by your 
+`ruff` installaton from the `pyproject.toml` file.
+
+## To Do 
+
+After the first release, this section will be removed an tasks will be organized
+as github issues. Until them, if you fixed something, please check it off on this
+list before opening a pull request.
+
+- [ ] Refactor train, detect, convert. All into much smaller functions. Move accesory functions to utils 
+- [ ] Move hardcoded params from assignment algo into config.toml
+- [ ] Resolve all pylint and mypy errors and warnings.. and ruff warnings ... etc
+- [ ] Fix make test, fails after ruff run
+- [ ] Build github actions CI/CD pipeline for codecov etc.
+- [x] Move the dataconverter from `gridtools` to `chirpdetector`
+- [x] Extend the dataconverter to just output the spectrograms so that hand-labelling can be done in a separate step
+- [x] Add a main script so that the cli is `chirpdetector <task> --<flag> <args>`
+- [x] Improve simulation of chirps to include more realistic noise, undershoot and maybe even phasic-tonic evolution of the frequency of the big chirps
+- [x] make the `copyconfig` script more
+- [x] start writing the chirp assignment algorithm
+- [x] Move all the pprinting and logging constructors to a separate module and build a unified console object so that saving logs to file is easier, also log to file as well
+- [ ] Split the messy training loop into functions 
+- [x] Add label-studio 
+- [x] Supply scripts to convert completely unannotated or partially annotated data to the label-studio format to make manual labeling easier
+- [x] Make possible to output detections as a yolo dataset 
+- [x] Look up how to convert a yolo dataset to a label-studio input so we can label pre-annotated data, facilitating a full human-in-the-loop approach
+- [x] Add augmentation transforms to the dataset class and add augmentations to the simulation in `gridtools`. Note to this: Unnessecary, using real data.
+- [x] Change bbox to actual yolo format, not the weird one I made up (which is x1, y1, x2, y2 instead of x1, y1, w, h). This is why the label-studio export is not working.
+- [x] Port cli to click, works better
+- [x] Try clustering the detected chirp windows on a spectrogram, could be interesting

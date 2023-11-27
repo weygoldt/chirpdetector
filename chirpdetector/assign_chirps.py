@@ -29,9 +29,10 @@ def non_max_suppression_fast(
     chirp_df: pd.DataFrame,
     overlapthresh: float,
 ) -> list:
-    """Raster implementation of non-maximum suppression.
+    """Faster implementation of non-maximum suppression.
 
     To remove overlapping bounding boxes.
+    Is a slightly modified version of https://pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/.
 
     Parameters
     ----------
@@ -45,9 +46,6 @@ def non_max_suppression_fast(
     - `pick`: `list`
         List of indices of bboxes to keep
     """
-    # slightly modified version of
-    # https://pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/
-
     # convert boxes to list of tuples and then to numpy array
     boxes = chirp_df[["t1", "f1", "t2", "f2"]].to_numpy()
 
@@ -102,7 +100,7 @@ def non_max_suppression_fast(
     return pick
 
 
-def track_filter(
+def remove_non_overlapping_boxes(
     chirp_df: pd.DataFrame,
     minf: float,
     maxf: float,
@@ -174,7 +172,7 @@ def clean_bboxes(data: Dataset, chirp_df: pd.DataFrame) -> pd.DataFrame:
     maxf = np.max(data.track.freqs).astype(float)
     # maybe add some more cleaning here, such
     # as removing chirps that are too short or too long
-    return track_filter(chirp_df_nms, minf, maxf)
+    return remove_non_overlapping_boxes(chirp_df_nms, minf, maxf)
 
 
 def cleanup(chirp_df: pd.DataFrame, data: Dataset) -> pd.DataFrame:
@@ -262,7 +260,7 @@ def make_indices(
 def get_env_trough(
     env: np.ndarray,
     raw: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Get the envelope troughs and their prominences.
 
     Parameters
@@ -278,6 +276,8 @@ def get_env_trough(
         Indices of the envelope troughs
     - `proms`: `np.ndarray`
         Prominences of the envelope troughs
+    - `env`: `np.ndarray`
+        Envelope of the filtered signal
     """
     # normalize the envelope using the amplitude of the raw signal
     # to preserve the amplitude of the envelope
@@ -290,7 +290,7 @@ def get_env_trough(
     # find troughs in the envelope and compute trough prominences
     peaks, params = find_peaks(-env, prominence=1e-3)
     proms = params["prominences"]
-    return peaks, proms
+    return peaks, proms, env
 
 
 def extract_envelope_trough(
@@ -299,7 +299,7 @@ def extract_envelope_trough(
     second_best_electrode: int,
     best_freq: float,
     indices: Tuple[int, int, int],
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Extract envelope troughs.
 
     Extracts a snippet from the raw data around the chirp time and computes
@@ -325,6 +325,8 @@ def extract_envelope_trough(
         Indices of the envelope troughs
     - `proms`: `np.ndarray`
         Prominences of the envelope troughs
+    - `env`: `np.ndarray`
+        Envelope of the filtered signal
     """
     start_idx, stop_idx, _= indices
 
@@ -351,13 +353,13 @@ def extract_envelope_trough(
         samplerate=data.grid.samplerate,
         cutoff_frequency=50,
     )
-    peaks, proms = get_env_trough(env, raw_filtered)
+    peaks, proms, env = get_env_trough(env, raw_filtered)
     # mpl.use("TkAgg")
     # plt.plot(env)
     # plt.plot(raw_filtered)
     # plt.plot(peaks, env[peaks], "x")
     # plt.show()
-    return peaks, proms
+    return peaks, proms, env
 
 
 def extract_assignment_data(
@@ -392,6 +394,7 @@ def extract_assignment_data(
     peak_prominences = []  # prominence of trough in envelope
     peak_distances = []  # distance of trough to chirp center
     peak_times = []  # time of trough in envelope, should be close to chirp
+    envs = []  # envelope of filtered signal
 
     for fish_id in data.track.ids:
         # get chirps, times and freqs and powers for this track
@@ -431,7 +434,7 @@ def extract_assignment_data(
             )
 
             indices = (start_idx, stop_idx, center_idx)
-            peaks, proms = extract_envelope_trough(
+            peaks, proms, env = extract_envelope_trough(
                 data,
                 best_electrode,
                 second_best_electrode,
@@ -460,6 +463,7 @@ def extract_assignment_data(
             )
             chirp_indices.append(idx)
             track_ids.append(fish_id)
+            envs.append(env)
 
     peak_prominences = np.array(peak_prominences)
     peak_distances = (
@@ -468,6 +472,7 @@ def extract_assignment_data(
     peak_times = np.array(peak_times)
     chirp_indices = np.array(chirp_indices)
     track_ids = np.array(track_ids)
+    envs = np.array(envs)
 
     assignment_data = {
         "proms": peak_prominences,
@@ -475,6 +480,7 @@ def extract_assignment_data(
         "ptimes": peak_times,
         "cindices": chirp_indices,
         "track_ids": track_ids,
+        "envs": envs,
     }
     return (
         assignment_data,
@@ -510,6 +516,7 @@ def assign_chirps(
     peak_times = assign_data["ptimes"]
     chirp_indices = assign_data["cindices"]
     track_ids = assign_data["track_ids"]
+    envs = assign_data["envs"]
 
     # compute cost function.
     # this function is high when the trough prominence is high
@@ -526,12 +533,15 @@ def assign_chirps(
     # is bad. this is more like a "gain function"
     chosen_tracks = []
     chosen_track_times = []
+    chirp_envs = []
+    non_chirp_envs = []
     for idx in np.unique(chirp_indices):
         candidate_tracks = track_ids[chirp_indices == idx]
         candidate_costs = cost[chirp_indices == idx]
         candidate_times = peak_times[chirp_indices == idx]
         chosen_tracks.append(candidate_tracks[np.argmax(candidate_costs)])
         chosen_track_times.append(candidate_times[np.argmax(candidate_costs)])
+    # TODO: Save envs do disk for plotting
 
     # store chosen tracks in chirp_df
     chirp_df["assigned_track"] = chosen_tracks

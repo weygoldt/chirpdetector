@@ -206,9 +206,9 @@ fsspec==2023.10.0 ; python_version >= "3.11" and python_version < "3.13" \
     --hash=sha256:330c66757591df346ad3091a53bd907e15348c2ba17d63fd54f5c39c4457d2a5 \
     --hash=sha256:346a8f024efeb749d2a5fca7ba8854474b1ff9af7c3faaf636a4548781136529
 gridtools @ file:///home/weygoldt/Projects/mscthesis/src/gridtools ; python_version >= "3.11" and python_version < "3.13"
-idna==3.5 ; python_version >= "3.11" and python_version < "3.13" \
-    --hash=sha256:27009fe2735bf8723353582d48575b23c533cc2c2de7b5a68908d91b5eb18d08 \
-    --hash=sha256:79b8f0ac92d2351be5f6122356c9a592c96d81c9a79e4b488bf2a6a15f88057a
+idna==3.6 ; python_version >= "3.11" and python_version < "3.13" \
+    --hash=sha256:9ecdbbd083b06798ae1e86adcbfe8ab1479cf864e4ee30fe4e46a003d12491ca \
+    --hash=sha256:c05567e9c24a6b9faaa835c4821bad0590fbb9d5779e7caa6e1cc4978e7eb24f
 imageio==2.33.0 ; python_version >= "3.11" and python_version < "3.13" \
     --hash=sha256:39999d05eb500089e60be467dd7d618f56e142229b44c3961c2b420eeb538d7e \
     --hash=sha256:d580d6576d0ae39c459a444a23f6f61fe72123a3df2264f5fce8c87784a4be2e
