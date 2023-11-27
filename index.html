@@ -53,7 +53,18 @@
     
     
     
-  </head>
+   <link href="assets/stylesheets/glightbox.min.css" rel="stylesheet"/><style>
+        html.glightbox-open { overflow: initial; height: 100%; }
+        .gslide-title { margin-top: 0px; user-select: text; }
+        .gslide-desc { color: #666; user-select: text; }
+        .gslide-image img { background: white; }
+        
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color);}
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color);}
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color);}
+            </style> <script src="assets/javascripts/glightbox.min.js"></script></head>
   
   
     
@@ -73,11 +84,6 @@
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
-      
-        
-        <a href="#the-problem" class="md-skip">
-          Skip to content
-        </a>
       
     </div>
     <div data-md-component="announce">
@@ -413,17 +419,6 @@
       
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Introduction
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="." class="md-nav__link md-nav__link--active">
         
   
@@ -433,64 +428,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-problem" class="md-nav__link">
-    The Problem
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-solution" class="md-nav__link">
-    The Solution
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#development" class="md-nav__link">
-    Development
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#todo" class="md-nav__link">
-    TODO
-  </a>
-  
-    <nav class="md-nav" aria-label="TODO">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#urgent" class="md-nav__link">
-    Urgent!!!
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1024,55 +961,6 @@
   
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-problem" class="md-nav__link">
-    The Problem
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-solution" class="md-nav__link">
-    The Solution
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#development" class="md-nav__link">
-    Development
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#todo" class="md-nav__link">
-    TODO
-  </a>
-  
-    <nav class="md-nav" aria-label="TODO">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#urgent" class="md-nav__link">
-    Urgent!!!
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -1089,80 +977,22 @@
   
 
 
-<!-- PROJECT LOGO -->
-<div align="center">
-  <a href="https://github.com/weygoldt/chirpdetector">
-    <img src="assets/logo.svg" alt="Logo" width="100" height="100">
-  </a>
+<p align="center">
+    <a class="glightbox" href="assets/logo.png" data-type="image" data-width="100%" data-height="auto" data-desc-position="bottom"><img src="assets/logo.png" width="80" /></a>
+    <h1 align="center"><b>Chirpdetector</b></h1>
+</p>
+<p align="center">
+    Detect communication signals of electric fish using deep neural networks 🐟⚡🧠 </br>
+    This project is still <b><i>work in progress</b></i> and will approximately be released in spring of 2024.
+</p>
 
-<!-- <br /> -->
-<!-- <h1 align="center">Chirpdetector</h1> -->
+<!-- ![Codecov](https://img.shields.io/codecov/c/github/weygoldt/chirpdetector) -->
 
-  <p align="center">
-    Detect brief communication signals of wave-type weakly electric fish using deep neural networks.
-    <br />
-    <a href="https://weygoldt.com/chirpdetector"><strong>Explore the docs »</strong></a>
-    <br />
-    <br />
-    <a href="https://weygoldt.com/chirpdetector/demo">View Demo</a>
-    |
-    <a href="https://github.com/weygoldt/chirpdetector/issues">Report Bug</a>
-    |
-    <a href="https://github.com/weygoldt/chirpdetector/issues">Request Feature</a>
-  </p>
-</div>
+<hr />
+<p> <h2 align="center">Why? 🤨</h2> </p>
 
-<p><img alt="Codecov" src="https://img.shields.io/codecov/c/github/weygoldt/chirpdetector" /></p>
-<p><strong>This project is still work in progress and will approximately be released in spring of 2024.</strong></p>
-<h2 id="the-problem">The Problem</h2>
-<p>Chirps are by far the most thoroughly studied communication signal of weakly electric, if not all fish. But as soon as the electric fields of more than one fish is recorded on the same electrode, detecting chirps becomes so hard, that most of the research to date analyzes this signal in isolated individuals. This is not particularly advantageous if the focus lies on the communication aspect of this signal. </p>
-<h2 id="the-solution">The Solution</h2>
-<p>To tackle this isse, this package provides an interface to detect chirps of multiple fish on spectrogram images. This enables the quantitative analysis of chirping between freely interacting fish for the first time.</p>
-<h2 id="development">Development</h2>
-<p>I try my best to adhere to good coding practices and catch up on writing tests 
-for this package. As I am currently the only one working on it, here is some 
-documentation of the development packages I use:</p>
-<ul>
-<li><code>pre-commit</code> for pre-commit hooks</li>
-<li><code>pytest</code> and <code>pytest-coverage</code> for unit tests</li>
-<li><code>ruff</code> for linting and formatting </li>
-<li><code>black</code> for linting and formatting </li>
-<li><code>isort</code> to sort imports</li>
-<li><code>pyright</code> for static type checking</li>
-</ul>
-<p>Before every commit, a pre-commit hook runs all these packages on the code base
-and refuses a push if errors are raised. If you want to contribute, please 
-make sure that your code is proberly formatted and run the tests before issuing 
-a pull request.</p>
-<h2 id="todo">TODO</h2>
-<h3 id="urgent">Urgent!!!</h3>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Refactor train, detect, convert. All into much smaller functions. Move accesory functions to utils </li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Move hardcoded params from assignment algo into config.toml</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Resolve all pylint and mypy errors and warnings.. and ruff warnings ... etc</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Fix make test, fails after ruff run</li>
-<li class="task-list-item">
-<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Build github actions CI/CD pipeline for codecov etc.</p>
-</li>
-<li class="task-list-item">
-<p><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Move the dataconverter from <code>gridtools</code> to <code>chirpdetector</code></p>
-</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Extend the dataconverter to just output the spectrograms so that hand-labelling can be done in a separate step</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Add a main script so that the cli is <code>chirpdetector &lt;task&gt; --&lt;flag&gt; &lt;args&gt;</code></li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Improve simulation of chirps to include more realistic noise, undershoot and maybe even phasic-tonic evolution of the frequency of the big chirps</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> make the <code>copyconfig</code> script more</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> start writing the chirp assignment algorithm</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Move all the pprinting and logging constructors to a separate module and build a unified console object so that saving logs to file is easier, also log to file as well</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Split the messy training loop into functions </li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Add label-studio </li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Supply scripts to convert completely unannotated or partially annotated data to the label-studio format to make manual labeling easier</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Make possible to output detections as a yolo dataset </li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Look up how to convert a yolo dataset to a label-studio input so we can label pre-annotated data, facilitating a full human-in-the-loop approach</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Add augmentation transforms to the dataset class and add augmentations to the simulation in <code>gridtools</code>. Note to this: Unnessecary, using real data.</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Change bbox to actual yolo format, not the weird one I made up (which is x1, y1, x2, y2 instead of x1, y1, w, h). This is why the label-studio export is not working.</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Port cli to click, works better</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Try clustering the detected chirp windows on a spectrogram, could be interesting</li>
-</ul>
+<p>Chirps are by far the most thoroughly researched communication signal of electric, probably even all fish. But detecting chirps becomes hard when more than one fish is recorded. As a result, most of the research to date analyzes this signal in isolated individuals. This is <strong>not</strong> good.</p>
+<p>To tackle this isse, this package provides a simple toolbox to detect chirps of multiple fish on spectrograms. This enables true quantitative analyses of chirping between freely behaving fish for the first time.</p>
 
 
 
@@ -1234,5 +1064,5 @@ a pull request.</p>
       <script src="assets/javascripts/bundle.aecac24b.min.js"></script>
       
     
-  </body>
+  <script>document$.subscribe(() => {const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});})</script></body>
 </html>

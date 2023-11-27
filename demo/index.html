@@ -55,7 +55,18 @@
     
     
     
-  </head>
+   <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"/><style>
+        html.glightbox-open { overflow: initial; height: 100%; }
+        .gslide-title { margin-top: 0px; user-select: text; }
+        .gslide-desc { color: #666; user-select: text; }
+        .gslide-image img { background: white; }
+        
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color);}
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color);}
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color);}
+            </style> <script src="../assets/javascripts/glightbox.min.js"></script></head>
   
   
     
@@ -75,6 +86,11 @@
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
+      
+        
+        <a href="#detecting-chirps-with-a-few-terminal-commands" class="md-skip">
+          Skip to content
+        </a>
       
     </div>
     <div data-md-component="announce">
@@ -455,6 +471,8 @@
       
       <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
       
+      
+        
       
       
       <a href="./" class="md-nav__link md-nav__link--active">
@@ -951,6 +969,8 @@
   
   
   
+    
+  
   
 </nav>
                   </div>
@@ -968,9 +988,28 @@
   
 
 
-  <h1>Demo</h1>
-
-
+<h1 id="detecting-chirps-with-a-few-terminal-commands">Detecting chirps with a few terminal commands</h1>
+<p>Once everything is set up correctly, detecting chirps is a breeze.
+The terminal utility can be called by <code>chirpdetector</code> or simply <code>cpd</code>.</p>
+<p>Simply run 
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cpd<span class="w"> </span>detect<span class="w"> </span>--path<span class="w"> </span><span class="s2">&quot;/path/to/dataset&quot;</span>
+</span></code></pre></div>
+And the bounding boxes will be computed and saved to a <code>.csv</code> file. Then run 
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cpd<span class="w"> </span>assign<span class="w"> </span>--path<span class="w"> </span><span class="s2">&quot;/path/to/dataset&quot;</span>
+</span></code></pre></div>
+to assing each detected chirp to a fundamental frequency of a fish. The results
+will be added to the <code>.csv</code> file in the dataset. To check if this went well, 
+you can run 
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cpd<span class="w"> </span>plot<span class="w"> </span>--path<span class="w"> </span><span class="s2">&quot;/path/to/dataset&quot;</span>
+</span></code></pre></div>
+And the spectrograms, bounding boxes, and assigned chirps of all the detected 
+chirps will be plotted and saved as <code>.png</code> images into a subfolder of your
+dataset.</p>
+<p>The result will look something like this:</p>
+<figure>
+<p><a class="glightbox" href="../assets/plot.png" data-type="image" data-width="100%" data-height="auto" data-desc-position="bottom"><img alt="Image title" src="../assets/plot.png" width="auto" /></a>
+    <figcaption>15 seconds of a recording containing two chirping fish with bounding boxes around chirps and dots indicating to which frequency they are assigned to.</figcaption></p>
+</figure>
 
 
 
@@ -1058,5 +1097,5 @@
       <script src="../assets/javascripts/bundle.aecac24b.min.js"></script>
       
     
-  </body>
+  <script>document$.subscribe(() => {const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});})</script></body>
 </html>
