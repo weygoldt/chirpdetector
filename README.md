@@ -13,7 +13,7 @@
     <a href="https://weygoldt.com/chirpdetector"><strong>Explore the docs »</strong></a>
     <br />
     <br />
-    <a href="https://weygoldt.com/chirpdetector">View Demo</a>
+    <a href="https://weygoldt.com/chirpdetector/demo">View Demo</a>
     |
     <a href="https://github.com/weygoldt/chirpdetector/issues">Report Bug</a>
     |
@@ -23,6 +23,8 @@
 
 ![Codecov](https://img.shields.io/codecov/c/github/weygoldt/chirpdetector)
 
+**This project is still work in progress and will approximately be released in spring of 2024.**
+
 ## The Problem
 
 Chirps are by far the most thoroughly studied communication signal of weakly electric, if not all fish. But as soon as the electric fields of more than one fish is recorded on the same electrode, detecting chirps becomes so hard, that most of the research to date analyzes this signal in isolated individuals. This is not particularly advantageous if the focus lies on the communication aspect of this signal. 
@@ -31,7 +33,6 @@ Chirps are by far the most thoroughly studied communication signal of weakly ele
 
 To tackle this isse, this package provides an interface to detect chirps of multiple fish on spectrogram images. This enables the quantitative analysis of chirping between freely interacting fish for the first time.
 
-This project is still work in progress and will approximately be released in spring of 2024.
 
 ## Development
 

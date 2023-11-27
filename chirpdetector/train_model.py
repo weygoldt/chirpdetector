@@ -1,6 +1,7 @@
-#! /usr/bin/env python3
+"""# Train the *faster-R-CNN* model.
 
-"""Train and test the neural network specified in the config file."""
+Train and test the neural network specified in the config file.
+"""
 
 import pathlib
 from typing import List

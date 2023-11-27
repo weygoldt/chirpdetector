@@ -13,8 +13,6 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from scipy.signal import find_peaks
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 
 from .utils.filters import bandpass_filter, envelope
 from .utils.logging import make_logger
@@ -403,6 +401,9 @@ def extract_assignment_data(
         ]
         freq = data.track.freqs[data.track.idents == fish_id]
         powers = data.track.powers[data.track.idents == fish_id, :]
+
+        if len(time) == 0:
+            continue # skip if no track is found
 
         for idx, chirp in enumerate(chirps):
             # find the closest time, freq and power to the chirp time

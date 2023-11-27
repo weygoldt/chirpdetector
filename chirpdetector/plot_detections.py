@@ -3,8 +3,6 @@
 import pathlib
 
 import matplotlib.pyplot as plt
-import matplotlib as mpl
-from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 import torch
@@ -15,11 +13,17 @@ from gridtools.utils.spectrograms import (
     overlap_to_hoplen,
     spectrogram,
 )
+from matplotlib.patches import Rectangle
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
+)
 
 from .utils.configfiles import Config, load_config
-
-from rich.progress import MofNCompleteColumn, Progress, SpinnerColumn, BarColumn, TimeElapsedColumn
-from rich.console import Console
 
 console = Console()
 prog = Progress(

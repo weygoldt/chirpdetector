@@ -364,7 +364,7 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         if idx2 > data.grid.rec.shape[0]:
             idx2 = data.grid.rec.shape[0] - 1
 
-        # This bit should alleviate the edge effects of the tracks 
+        # This bit should alleviate the edge effects of the tracks
         # by limiting the start and stop times of the spectrogram
         # to the start and stop times of the track.
         start_t = idx1 / data.grid.samplerate

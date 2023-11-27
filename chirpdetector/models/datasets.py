@@ -1,7 +1,7 @@
 """Dataset classes to train and test the model."""
 
 import pathlib
-from typing import List, Union, Self
+from typing import List, Self, Union
 
 import matplotlib.pyplot as plt
 import numpy as np

@@ -18,7 +18,12 @@ from .dataset_utils import (
     subset_yolo_dataset,
 )
 from .detect_chirps import detect_cli
-from .plot_detections import plot_detections_cli, plot_all_detections_cli, clean_plots_cli, clean_all_plots_cli
+from .plot_detections import (
+    clean_all_plots_cli,
+    clean_plots_cli,
+    plot_all_detections_cli,
+    plot_detections_cli,
+)
 from .train_model import train_cli
 from .utils.configfiles import copy_config
 
