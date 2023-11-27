@@ -379,6 +379,8 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
             continue
 
         chunk = subset(data, idx1, idx2, mode="index")
+        if len(chunk.track.indices) == 0:
+            continue
 
         # compute the spectrogram for each electrode of the current chunk
         spec = torch.zeros((len(spec_freqs), len(spec_times)))
