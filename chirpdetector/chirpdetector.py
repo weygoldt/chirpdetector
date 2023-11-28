@@ -51,7 +51,7 @@ def add_version(f: Callable) -> Callable:
     message="Chirpdetector, version %(version)s",
 )
 @add_version
-def cli() -> None:
+def chirpdetector() -> None:
     """Detect chirps of fish on a spectrogram.
 
     The chirpdetector command line tool is a collection of commands that
@@ -78,7 +78,7 @@ def cli() -> None:
     """
 
 
-@cli.command()
+@chirpdetector.command()
 @click.argument("mode", type=click.Choice(["train", "detected"]))
 @click.option(
     "--path",
@@ -109,7 +109,7 @@ def show(mode: str, input_path: pathlib.Path, n_images: int) -> None:
         plot_yolo_dataset(input_path, n_images)
 
 
-@cli.command()
+@chirpdetector.command()
 @click.option(
     "--input_path",
     "-i",
@@ -128,7 +128,7 @@ def copyconfig(input_path: pathlib.Path) -> None:
     copy_config(str(input_path))
 
 
-@cli.command()
+@chirpdetector.command()
 @click.option(
     "--input_path",
     "-i",
@@ -176,7 +176,7 @@ def convert(
     convert_cli(input_path, output_path, labels)
 
 
-@cli.command()
+@chirpdetector.command()
 @click.option(
     "--config_path",
     "-c",
@@ -203,7 +203,7 @@ def train(config_path: pathlib.Path, mode: str) -> None:
     train_cli(config_path, mode)
 
 
-@cli.command()
+@chirpdetector.command()
 @click.option(
     "--path",
     "-p",
@@ -222,7 +222,7 @@ def detect(path: pathlib.Path) -> None:
     detect_cli(path)
 
 
-@cli.command()
+@chirpdetector.command()
 @click.option(
     "--path",
     "-p",
@@ -241,7 +241,7 @@ def assign(path: pathlib.Path) -> None:
     assign_cli(path)
 
 
-@cli.command()
+@chirpdetector.command()
 @click.option(
     "--path",
     "-p",
@@ -290,7 +290,7 @@ def plot(path: pathlib.Path, all: bool, clean: bool) -> None:
     else:
         plot_detections_cli(path)
 
-@cli.group()
+@chirpdetector.group()
 def yoloutils() -> None:
     """Utilities to manage YOLO-style training datasets."""
     pass
@@ -406,4 +406,4 @@ def merge(
 
 
 if __name__ == "__main__":
-    cli()
+    chirpdetector()

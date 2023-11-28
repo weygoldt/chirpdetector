@@ -1,11 +1,12 @@
 """Assign chirps detected on a spectrogram to wavetracker tracks."""
 
 import pathlib
-from typing import Dict, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 from gridtools.datasets import Dataset, load
+from pydantic import BaseModel, ConfigDict
 from rich.progress import (
     MofNCompleteColumn,
     Progress,
@@ -16,8 +17,6 @@ from scipy.signal import find_peaks
 
 from .utils.filters import bandpass_filter, envelope
 from .utils.logging import make_logger
-from pydantic import BaseModel, ConfigDict
-from typing import List, Any, Optional
 
 # initialize the progress bar
 prog = Progress(
@@ -26,6 +25,8 @@ prog = Progress(
     MofNCompleteColumn(),
     TimeElapsedColumn(),
 )
+
+# TODO: Update docstrings in this module
 
 class ChirpAssignmentData(BaseModel):
     """Data needed for chirp assignment."""
@@ -47,7 +48,9 @@ def non_max_suppression_fast(
     """Faster implementation of non-maximum suppression.
 
     To remove overlapping bounding boxes.
-    Is a slightly modified version of https://pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/.
+    Is a slightly modified version of
+    https://pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/
+    .
 
     Parameters
     ----------
@@ -316,6 +319,7 @@ def extract_assignment_data(
     """Get envelope troughs to determine chirp assignment.
 
     This algorigthm assigns chirps to wavetracker tracks by a series of steps:
+
     1. clean the chirp bboxes
     2. for each fish track, filter the signal on the best electrode
     3. find troughs in the envelope of the filtered signal
@@ -412,16 +416,25 @@ def extract_assignment_data(
                 / data.grid.samplerate
             )
 
+            # store data in assignment data object
             tot_idx = outer_idx * len(chirps) + inner_idx
             ad.env_trough_times[tot_idx] = trough_time
             ad.env_trough_prominences[tot_idx] = proms[closest_trough_idx]
-            ad.env_trough_distances[tot_idx] = distances[closest_trough_idx]
+            ad.env_trough_distances[tot_idx] = distances[closest_trough_idx] + 1
             ad.env_trough_indices[tot_idx] = troughs[closest_trough_idx]
             center_env_start= len(ad.envs[0,:]) // 2 - len(env) // 2
             center_env_stop = len(ad.envs[0,:]) // 2 + len(env) // 2 + 1
 
+            # if the envelope is even, add a nan to the end
+            # otherwise it cant be centered in the array
             if len(env) % 2 == 0:
                 env = np.concatenate((env, np.array([np.nan])))
+
+            # center the env in the array and cut off the ends
+            # if it is larger
+            if len(env) > len(ad.envs[0,:]):
+                env = env[len(env) // 2 - len(ad.envs[0,:]) // 2:
+                          len(env) // 2 + len(ad.envs[0,:]) // 2 + 1]
 
             if len(env) != center_env_stop - center_env_start:
                 print("env", len(env))
@@ -472,31 +485,37 @@ def assign_chirps(
     )
 
     # set cost to zero for cases where no peak was found
-    # cost[np.isnan(cost)] = 0
+    cost[np.isnan(cost)] = 0
 
     # for each chirp, choose the track where the cost is highest
     # TODO: to avoid confusion make a cost function where high is good and low
     # is bad. this is more like a "gain function"
-    print('Assigning chirps')
-    chosen_tracks = []
-    chosen_track_times = []
-    chosen_chirp_envs = []
-    non_chosen_chirp_envs = []
+    chosen_tracks = [] # the assigned ids
+    chosen_env_times= [] # the times of the envelope troughs
+    chosen_chirp_envs = [] # here go the full envelopes of the chosen chirps
+    non_chosen_chirp_envs = [] # here go the full envelopes of nonchosen chirps
     for idx in np.unique(ad.bbox_index):
         candidate_tracks = ad.track_ids[ad.bbox_index == idx]
         candidate_costs = cost[ad.bbox_index == idx]
         candidate_times = ad.env_trough_times[ad.bbox_index == idx]
         candidate_envs = ad.envs[ad.bbox_index == idx, :]
 
-        if np.all(np.isnan(candidate_costs)):
-            print("No chirp found for bbox", idx)
+        if np.all(np.isnan(candidate_times)):
+            chosen_tracks.append(np.nan)
+            chosen_env_times.append(np.nan)
             continue
 
         chosen_index = np.argmax(candidate_costs)
         non_chosen_indices = np.arange(len(candidate_costs)) != chosen_index
 
-        chosen_tracks.append(candidate_tracks[chosen_index])
-        chosen_track_times.append(candidate_times[chosen_index])
+        env_time = candidate_times[chosen_index]
+        chosen_env_times.append(env_time)
+        if np.isnan(env_time):
+            chosen_tracks.append(np.nan)
+            print(f"candidate costs: {candidate_costs}")
+            print(f"candidate times: {candidate_times}")
+        else:
+            chosen_tracks.append(candidate_tracks[chosen_index])
 
         cenv = candidate_envs[chosen_index, :]
         ncenv = candidate_envs[non_chosen_indices, :]
@@ -507,40 +526,46 @@ def assign_chirps(
                 continue
             non_chosen_chirp_envs.append(env)
 
-    print('Finished assigning chirps')
-
-    chosen_env = np.array(chosen_chirp_envs)
-    print(chosen_env.shape)
-
-    non_chosen_env = np.array(non_chosen_chirp_envs)
-    print(non_chosen_env.shape)
-
-    # TODO: Save envs do disk for plotting
-    import matplotlib.pyplot as plt
-    import matplotlib as mpl
-    mpl.use("TkAgg")
-
-    fig, ax = plt.subplots(1,2)
-    for env in chosen_env:
-        ax[0].plot(env, alpha=0.05, c="k")
-
-    for env in non_chosen_env:
-        ax[1].plot(env, c="k", alpha=0.05)
-    plt.show()
-
-    # # store chosen tracks in chirp_df
-    # chirp_df["assigned_track"] = chosen_tracks
+    # print('Finished assigning chirps')
     #
-    # # store chirp time estimated from envelope trough in chirp_df
-    # chirp_df["envelope_trough_time"] = chosen_track_times
+    # chosen_env = np.array(chosen_chirp_envs)
+    # print(chosen_env.shape)
     #
-    # # save chirp_df
-    # chirp_df.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
+    # non_chosen_env = np.array(non_chosen_chirp_envs)
+    # print(non_chosen_env.shape)
     #
-    # # save old format:
-    # np.save(data.path / "chirp_ids_rcnn.npy", chosen_tracks)
-    # np.save(data.path / "chirp_times_rcnn.npy", chosen_track_times)
+    # # TODO: Save envs do disk for plotting
+    # import matplotlib.pyplot as plt
+    # import matplotlib as mpl
+    # mpl.use("TkAgg")
     #
+    # fig, ax = plt.subplots(1,2)
+    # for env in chosen_env:
+    #     ax[0].plot(env, alpha=0.05, c="k")
+    #
+    # for env in non_chosen_env:
+    #     ax[1].plot(env, c="k", alpha=0.05)
+    # plt.show()
+    #
+    # store chosen tracks in chirp_df
+    chirp_df["assigned_track"] = chosen_tracks
+
+    # store chirp time estimated from envelope trough in chirp_df
+    chirp_df["envelope_trough_time"] = chosen_env_times
+
+    # save chirp_df
+    chirp_df.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
+
+    # save old format:
+    chosen_tracks = np.array(chosen_tracks)
+    chosen_env_times = np.array(chosen_env_times)
+    chosen_tracks = chosen_tracks[~np.isnan(chosen_tracks)].astype(int)
+    chosen_env_times = chosen_env_times[~np.isnan(chosen_env_times)].astype(
+        float
+    )
+    np.save(data.path / "chirp_ids_rcnn.npy", chosen_tracks)
+    np.save(data.path / "chirp_times_rcnn.npy", chosen_env_times)
+
 
 def assign_cli(path: pathlib.Path) -> None:
     """Assign chirps to wavetracker tracks.
