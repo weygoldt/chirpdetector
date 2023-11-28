@@ -71,7 +71,7 @@ nav:
     - 'Home': 
       - 'Introduction': 'index.md'  
       - 'How it works': 'how_it_works.md'
-    - 'Demo': 'demo.md'
+      - 'Demo': 'demo.md'
     - 'Getting started':
       - 'Installation': 'installation.md'
       - 'Setup': 'setup.md'
