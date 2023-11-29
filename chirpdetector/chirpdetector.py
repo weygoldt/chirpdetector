@@ -250,7 +250,7 @@ def assign(path: pathlib.Path) -> None:
     default=False,
     help="Just delete plots in the current dataset.",
 )
-def plot(path: pathlib.Path, all: bool, clean: bool) -> None:
+def plot(path: pathlib.Path, all: bool, clean: bool) -> None:  # noqa
     """Plot detected chirps on a spectrogram.
 
     You can supply a path to a **single** recording and plot all chirp

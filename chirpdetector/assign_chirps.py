@@ -497,7 +497,7 @@ def assign_chirps(
     chosen_tracks = []  # the assigned ids
     chosen_env_times = []  # the times of the envelope troughs
     chosen_chirp_envs = []  # here go the full envelopes of the chosen chirps
-    non_chosen_chirp_envs = []  # here go the full envelopes of nonchosen chirps
+    non_chosen_chirp_envs = []  # here go full envelopes of nonchosen chirps
     for idx in np.unique(ad.bbox_index):
         candidate_tracks = ad.track_ids[ad.bbox_index == idx]
         candidate_costs = cost[ad.bbox_index == idx]

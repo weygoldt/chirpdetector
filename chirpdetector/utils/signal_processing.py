@@ -1,6 +1,10 @@
-"""A module containing filter functions"""
+"""Utilities for signal processing."""
 
+import pathlib
+
+import torch
 import numpy as np
+
 from scipy.signal import butter, sosfiltfilt
 
 
