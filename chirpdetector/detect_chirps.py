@@ -10,10 +10,8 @@ import pandas as pd
 import torch
 from gridtools.datasets import Dataset, load, subset
 from gridtools.utils.spectrograms import (
-    decibel,
     freqres_to_nfft,
     overlap_to_hoplen,
-    spectrogram,
 )
 from matplotlib.patches import Rectangle
 from rich.progress import (
@@ -26,6 +24,11 @@ from rich.progress import (
 from .models.utils import get_device, load_fasterrcnn
 from .utils.configfiles import Config, load_config
 from .utils.logging import make_logger
+from .utils.signal_processing import (
+    compute_sum_spectrogam,
+    make_chunk_indices,
+    make_spectrogram_axes,
+)
 
 # Use non-gui backend for matplotlib to
 # avoid memory leaks
@@ -297,6 +300,54 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     return normalized_tensor.float()
 
 
+def pixel_bbox_to_time_frequency(
+    bbox_df: pd.DataFrame,
+    spec_times: np.ndarray,
+    spec_freqs: np.ndarray,
+) -> pd.DataFrame:
+    """Convert pixel coordinates to time and frequency.
+
+    Parameters
+    ----------
+    - `bbox_df` : `pandas.DataFrame`
+        The dataframe containing the bounding boxes.
+    - `spec_times` : `numpy.ndarray`
+        The time axis of the spectrogram.
+    - `spec_freqs` : `numpy.ndarray`
+        The frequency axis of the spectrogram.
+
+    Returns
+    -------
+    - `pandas.DataFrame`
+        The dataframe with the converted bounding boxes.
+    """
+    # convert x values to time on spec_times
+    spec_times_index = np.arange(0, len(spec_times))
+    bbox_df["t1"] = float_index_interpolation(
+        bbox_df["x1"].to_numpy(),
+        spec_times_index,
+        spec_times,
+    )
+    bbox_df["t2"] = float_index_interpolation(
+        bbox_df["x2"].to_numpy(),
+        spec_times_index,
+        spec_times,
+    )
+    # convert y values to frequency on spec_freqs
+    spec_freqs_index = np.arange(len(spec_freqs))
+    bbox_df["f1"] = float_index_interpolation(
+        bbox_df["y1"].to_numpy(),
+        spec_freqs_index,
+        spec_freqs,
+    )
+    bbox_df["f2"] = float_index_interpolation(
+        bbox_df["y2"].to_numpy(),
+        spec_freqs_index,
+        spec_freqs,
+    )
+    return bbox_df
+
+
 def detect_chirps(conf: Config, data: Dataset) -> None:
     """Detect chirps on a spectrogram.
 
@@ -311,9 +362,6 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     -------
     - `None`
     """
-    # get the number of electrodes
-    n_electrodes = data.grid.rec.shape[1]
-
     # load the model and the checkpoint, and set it to evaluation mode
     device = get_device()
     model = load_fasterrcnn(num_classes=len(conf.hyper.classes))
@@ -327,11 +375,18 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     # make spec config
     nfft = freqres_to_nfft(conf.spec.freq_res, data.grid.samplerate)  # samples
     hop_len = overlap_to_hoplen(conf.spec.overlap_frac, nfft)  # samples
-    chunksize = conf.spec.time_window * data.grid.samplerate  # samples
+    chunksize = int(conf.spec.time_window * data.grid.samplerate)  # samples
     nchunks = np.ceil(data.grid.rec.shape[0] / chunksize).astype(int)
     window_overlap_samples = int(conf.spec.spec_overlap * data.grid.samplerate)
 
+    # make a list to store the bboxes in for each chunk
     bbox_dfs = []
+
+    # get the frequency limits of the spectrogram
+    flims = (
+        np.min(data.track.freqs) - conf.spec.freq_pad,
+        np.max(data.track.freqs) + conf.spec.freq_pad,
+    )
 
     # iterate over the chunks
     overwritten = False
@@ -339,87 +394,54 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         # get start and stop indices for the current chunk
         # including some overlap to compensate for edge effects
         # this diffrers for the first and last chunk
+        idx1, idx2 = make_chunk_indices(
+            n_chunks=nchunks,
+            current_chunk=chunk_no,
+            chunksize=chunksize,
+            window_overlap_samples=window_overlap_samples,
+            max_end=data.grid.rec.shape[0],
+        )
 
-        if chunk_no == 0:
-            idx1 = int(chunk_no * chunksize)
-            idx2 = int((chunk_no + 1) * chunksize + window_overlap_samples)
-        elif chunk_no == nchunks - 1:
-            idx1 = int(chunk_no * chunksize - window_overlap_samples)
-            idx2 = int((chunk_no + 1) * chunksize)
-        else:
-            idx1 = int(chunk_no * chunksize - window_overlap_samples)
-            idx2 = int((chunk_no + 1) * chunksize + window_overlap_samples)
-
-        # idx1 and idx2 now determine the window I cut out of the raw signal
-        # to compute the spectrogram of.
-
-        # compute the time and frequency axes of the spectrogram now that we
-        # include the start and stop indices of the current chunk and thus the
-        # right start and stop time. The `spectrogram` function does not know
-        # about this and would start every time axis at 0.
-        spec_times = np.arange(idx1, idx2 + 1, hop_len) / data.grid.samplerate
-        spec_freqs = np.arange(0, nfft / 2 + 1) * data.grid.samplerate / nfft
-
-        # create a subset from the grid dataset
-        if idx2 > data.grid.rec.shape[0]:
-            idx2 = data.grid.rec.shape[0] - 1
-
-        # This bit should alleviate the edge effects of the tracks
-        # by limiting the start and stop times of the spectrogram
-        # to the start and stop times of the track.
+        # compute window boundaries in seconds
         start_t = idx1 / data.grid.samplerate
         stop_t = idx2 / data.grid.samplerate
+
+        # if the stop time of the current chunk is larger than the last time
+        # of the track, move it back
         if data.track.times[-1] < stop_t:
             stop_t = data.track.times[-1]
             idx2 = int(stop_t * data.grid.samplerate)
+
+        # if the start time of the current chunk is smaller than the
+        # start time of the track, move it forward
         if data.track.times[0] > start_t:
             start_t = data.track.times[0]
             idx1 = int(start_t * data.grid.samplerate)
+
+        # if the current chunk is outside the track, skip it
         if start_t > data.track.times[-1] or stop_t < data.track.times[0]:
             continue
 
+        # make a subset of for the current chunk
         chunk = subset(data, idx1, idx2, mode="index")
+
+        # skip if there is no wavetracker tracking data in the current chunk
         if len(chunk.track.indices) == 0:
             continue
 
         # compute the spectrogram for each electrode of the current chunk
-        spec = torch.zeros((len(spec_freqs), len(spec_times)))
-        for el in range(n_electrodes):
-            # get the signal for the current electrode
-            sig = chunk.grid.rec[:, el]
+        spec = compute_sum_spectrogam(chunk, nfft, hop_len)
 
-            # compute the spectrogram for the current electrode
-            chunk_spec, _, _ = spectrogram(
-                data=sig.copy(),
-                samplingrate=data.grid.rec.samplerate,
-                nfft=nfft,
-                hop_length=hop_len,
-            )
-
-            # sum spectrogram over all electrodes
-            # the spec is a tensor
-            if el == 0:
-                spec = chunk_spec
-            else:
-                spec += chunk_spec
-
-        # normalize spectrogram by the number of electrodes
-        # the spec is still a tensor
-        spec /= n_electrodes
-
-        # convert the spectrogram to dB
-        # .. still a tensor
-        spec = decibel(spec)
-
-        # cut off everything outside the upper frequency limit
-        # the spec is still a tensor
-        # TODO: THIS IS SKETCHY AS HELL! As a result, only time and frequency
-        # bounding boxes can be used later! The spectrogram limits change
-        # for every window!
-        flims = (
-            np.min(chunk.track.freqs) - conf.spec.freq_pad,
-            np.max(chunk.track.freqs) + conf.spec.freq_pad,
+        # compute the time and frequency axes of the spectrogam
+        spec_times, spec_freqs = make_spectrogram_axes(
+            start=idx1,
+            stop=idx2,
+            nfft=nfft,
+            hop_length=hop_len,
+            samplerate=data.grid.samplerate,
         )
+
+        # cut off everything outside the frequency limits
         spec = spec[(spec_freqs >= flims[0]) & (spec_freqs <= flims[1]), :]
         spec_freqs = spec_freqs[
             (spec_freqs >= flims[0]) & (spec_freqs <= flims[1])
@@ -431,7 +453,7 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
             shutil.rmtree(path)
             overwritten = True
         path.mkdir(exist_ok=True)
-        path /= f"chunk{chunk_no:05d}.png"
+        path /= f"chirpdetector_chunk{chunk_no:05d}.png"
 
         # add the 3 channels, normalize to 0-1, etc
         img = spec_to_image(spec)
@@ -450,8 +472,8 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         labels = labels[scores > conf.det.threshold]
         scores = scores[scores > conf.det.threshold]
 
-        # if np.any(scores > conf.det.threshold):
-        #     plot_detections(img, outputs[0], conf.det.threshold, path, conf)
+        if np.any(scores > conf.det.threshold):
+            plot_detections(img, outputs[0], conf.det.threshold, path, conf)
 
         # save the bboxes to a dataframe
         bbox_df = pd.DataFrame(
@@ -461,33 +483,10 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         bbox_df["score"] = scores
         bbox_df["label"] = labels
 
-        # convert x values to time on spec_times
-        spec_times_index = np.arange(0, len(spec_times))
-        bbox_df["t1"] = float_index_interpolation(
-            bbox_df["x1"].to_numpy(),
-            spec_times_index,
-            spec_times,
-        )
-        bbox_df["t2"] = float_index_interpolation(
-            bbox_df["x2"].to_numpy(),
-            spec_times_index,
-            spec_times,
-        )
+        # convert the pixel coordinates to time and frequency
+        bbox_df = pixel_bbox_to_time_frequency(bbox_df, spec_times, spec_freqs)
 
-        # convert y values to frequency on spec_freqs
-        spec_freqs_index = np.arange(len(spec_freqs))
-        bbox_df["f1"] = float_index_interpolation(
-            bbox_df["y1"].to_numpy(),
-            spec_freqs_index,
-            spec_freqs,
-        )
-        bbox_df["f2"] = float_index_interpolation(
-            bbox_df["y2"].to_numpy(),
-            spec_freqs_index,
-            spec_freqs,
-        )
-
-        # save df to list
+        # save df to list of dfs
         bbox_dfs.append(bbox_df)
 
     # concatenate all dataframes

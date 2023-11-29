@@ -1,8 +1,4 @@
-#! /usr/bin/env python3
-
-"""
-Read, write and handle files, such as configuration files, model files, etc.
-"""
+"""Read, write and handle config files."""
 
 import pathlib
 import shutil
@@ -10,8 +6,6 @@ from typing import List, Union
 
 import toml
 from pydantic import BaseModel, ConfigDict
-
-# from .logging import make_logger
 
 
 class Hyperparams(BaseModel):
@@ -69,8 +63,7 @@ class Config(BaseModel):
 
 
 def copy_config(path: str) -> None:
-    """Copy the default config file from the package root directory into a
-    specified path.
+    """Copy the default config file from the package into a specified path.
 
     Parameters
     ----------
@@ -83,11 +76,12 @@ def copy_config(path: str) -> None:
     """
     origin = pathlib.Path(__file__).parent.parent / "config.toml"
     if not origin.exists():
-        raise FileNotFoundError(
+        msg = (
             "Could not find the default config file. "
             "Please make sure that the file 'config.toml' exists in "
-            "the package root directory.",
+            "the package root directory."
         )
+        raise FileNotFoundError(msg)
 
     destination = pathlib.Path(path)
 
@@ -95,13 +89,18 @@ def copy_config(path: str) -> None:
         shutil.copy(origin, destination / "chirpdetector.toml")
 
     elif destination.is_file():
-        raise FileExistsError(
+        msg = (
             "The specified path already exists and is a file. "
-            "Please specify a directory or a non-existing path.",
+            "Please specify a directory or a non-existing path."
         )
+        raise FileExistsError(msg)
 
     elif not destination.exists():
-        raise FileNotFoundError("Please specify an existing directory.")
+        msg = (
+            "The specified path does not exist. "
+            "Please specify a directory or a non-existing path."
+        )
+        raise FileNotFoundError(msg)
 
 
 def load_config(path: Union[str, pathlib.Path]) -> Config:
@@ -123,7 +122,7 @@ def load_config(path: Union[str, pathlib.Path]) -> Config:
     fi = Finetune(**file["finetuning"])
     det = Detection(**file["detection"])
     spec = Spectrogram(**file["spectrogram"])
-    config = Config(
+    return Config(
         path=str(path),
         hyper=hy,
         train=tr,
@@ -131,4 +130,3 @@ def load_config(path: Union[str, pathlib.Path]) -> Config:
         det=det,
         spec=spec,
     )
-    return config

@@ -1,8 +1,4 @@
-#!/usr/bin/env python
-
-"""
-Logging utilities used in all modules.
-"""
+"""Logging utilities used in all modules."""
 
 import logging
 import pathlib

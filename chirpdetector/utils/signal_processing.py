@@ -2,12 +2,11 @@
 
 from typing import Tuple, TypeVar
 
-import torch
 import numpy as np
-from scipy.signal import butter, sosfiltfilt
+import torch
 from gridtools.datasets import Dataset
-from gridtools.utils.spectrogram import compute_spectrogram, to_decibel, sint
-
+from gridtools.utils.spectrograms import compute_spectrogram, sint, to_decibel
+from scipy.signal import butter, sosfiltfilt
 
 ArrayLike = TypeVar("ArrayLike", np.ndarray, torch.Tensor)
 
