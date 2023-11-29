@@ -1,12 +1,9 @@
-"""# Train the *faster-R-CNN* model.
-
-Train and test the neural network specified in the config file.
-"""
+"""Train and test the neural network."""
 
 import pathlib
 from typing import List
 
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -28,7 +25,7 @@ from .utils.configfiles import Config, load_config
 from .utils.logging import make_logger
 
 # Use non-gui backend to prevent memory leaks
-matplotlib.use("Agg")
+mpl.use("Agg")
 
 # Initialize the logger and progress bar
 con = Console()
@@ -46,7 +43,7 @@ def save_model(
     epoch: int,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
-    path: str,
+    path: pathlib.Path,
 ) -> None:
     """Save the model state dict.
 
@@ -58,7 +55,7 @@ def save_model(
         The model to save.
     - `optimizer`: `torch.optim.Optimizer`
         The optimizer to save.
-    - `path`: `str`
+    - `path`: `pathlib.Path`
         The path to save the model to.
 
     Returns
@@ -222,13 +219,13 @@ def train_epoch(
     train_loss = []
 
     for samples, targets in dataloader:
-        images = list(sample.to(device) for sample in samples)
-        targets = [
+        images = [sample.to(device) for sample in samples]
+        bboxes = [
             {k: v.to(device) for k, v in t.items() if k != "image_name"}
             for t in targets
         ]
 
-        loss_dict = model(images, targets)
+        loss_dict = model(images, bboxes)
         losses = sum(loss for loss in loss_dict.values())
         train_loss.append(losses.item())
 
@@ -262,14 +259,14 @@ def val_epoch(
     """
     val_loss = []
     for samples, targets in dataloader:
-        images = list(sample.to(device) for sample in samples)
-        targets = [
+        images = [sample.to(device) for sample in samples]
+        bboxes = [
             {k: v.to(device) for k, v in t.items() if k != "image_name"}
             for t in targets
         ]
 
         with torch.inference_mode():
-            loss_dict = model(images, targets)
+            loss_dict = model(images, bboxes)
 
         losses = sum(loss for loss in loss_dict.values())
         val_loss.append(losses.item())
@@ -304,10 +301,11 @@ def train(config: Config, mode: str = "pretrain") -> None:
 
     # Check if the path to the data actually exists
     if not pathlib.Path(datapath).exists():
-        raise FileNotFoundError(f"Path {datapath} does not exist.")
+        msg = f"Path {datapath} does not exist."
+        raise FileNotFoundError(msg)
 
     # Initialize the logger and progress bar, make the logger global
-    global logger
+    # global logger
     logger = make_logger(
         __name__,
         pathlib.Path(config.path).parent / "chirpdetector.log",

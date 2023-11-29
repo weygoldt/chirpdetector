@@ -2,6 +2,7 @@
 
 import pathlib
 import shutil
+from typing import Tuple
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -348,6 +349,37 @@ def pixel_bbox_to_time_frequency(
     return bbox_df
 
 
+def cut_spec_to_frequency_limits(
+    spec: torch.Tensor,
+    spec_freqs: np.ndarray,
+    flims: tuple[float, float],
+) -> Tuple[torch.Tensor, np.ndarray]:
+    """Cut off everything outside the frequency limits.
+
+    Parameters
+    ----------
+    - `spec` : `torch.Tensor`
+        The spectrogram.
+    - `spec_freqs` : `numpy.ndarray`
+        The frequency axis of the spectrogram.
+    - `flims` : `tuple[float, float]`
+        The frequency limits.
+
+    Returns
+    -------
+    - `torch.Tensor`
+        The cut spectrogram.
+    - `numpy.ndarray`
+        The cut frequency axis.
+    """
+    # cut off everything outside the frequency limits
+    spec = spec[(spec_freqs >= flims[0]) & (spec_freqs <= flims[1]), :]
+    spec_freqs = spec_freqs[
+        (spec_freqs >= flims[0]) & (spec_freqs <= flims[1])
+    ]
+    return spec, spec_freqs
+
+
 def detect_chirps(conf: Config, data: Dataset) -> None:
     """Detect chirps on a spectrogram.
 
@@ -402,25 +434,17 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
             max_end=data.grid.rec.shape[0],
         )
 
-        # compute window boundaries in seconds
-        start_t = idx1 / data.grid.samplerate
-        stop_t = idx2 / data.grid.samplerate
-
         # if the stop time of the current chunk is larger than the last time
         # of the track, move it back
-        if data.track.times[-1] < stop_t:
-            stop_t = data.track.times[-1]
-            idx2 = int(stop_t * data.grid.samplerate)
+        # if data.track.times[-1] < stop_t:
+        #     stop_t = data.track.times[-1]
+        #     idx2 = int(stop_t * data.grid.samplerate)
 
         # if the start time of the current chunk is smaller than the
         # start time of the track, move it forward
-        if data.track.times[0] > start_t:
-            start_t = data.track.times[0]
-            idx1 = int(start_t * data.grid.samplerate)
-
-        # if the current chunk is outside the track, skip it
-        if start_t > data.track.times[-1] or stop_t < data.track.times[0]:
-            continue
+        # if data.track.times[0] > start_t:
+        #     start_t = data.track.times[0]
+        #     idx1 = int(start_t * data.grid.samplerate)
 
         # make a subset of for the current chunk
         chunk = subset(data, idx1, idx2, mode="index")
@@ -442,18 +466,11 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         )
 
         # cut off everything outside the frequency limits
-        spec = spec[(spec_freqs >= flims[0]) & (spec_freqs <= flims[1]), :]
-        spec_freqs = spec_freqs[
-            (spec_freqs >= flims[0]) & (spec_freqs <= flims[1])
-        ]
-
-        # make a path to save the spectrogram
-        path = data.path / "chirpdetections"
-        if path.exists() and overwritten is False:
-            shutil.rmtree(path)
-            overwritten = True
-        path.mkdir(exist_ok=True)
-        path /= f"chirpdetector_chunk{chunk_no:05d}.png"
+        spec, spec_freqs = cut_spec_to_frequency_limits(
+            spec=spec,
+            spec_freqs=spec_freqs,
+            flims=flims,
+        )
 
         # add the 3 channels, normalize to 0-1, etc
         img = spec_to_image(spec)
@@ -472,6 +489,13 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         labels = labels[scores > conf.det.threshold]
         scores = scores[scores > conf.det.threshold]
 
+        # make a path to save the spectrogram
+        path = data.path / "chirpdetections"
+        if path.exists() and overwritten is False:
+            shutil.rmtree(path)
+            overwritten = True
+        path.mkdir(exist_ok=True)
+        path /= f"cpd_detected_{chunk_no:05d}.png"
         if np.any(scores > conf.det.threshold):
             plot_detections(img, outputs[0], conf.det.threshold, path, conf)
 

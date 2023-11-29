@@ -15,8 +15,8 @@ from rich.progress import (
 )
 from scipy.signal import find_peaks
 
-from .utils.signal_processing import bandpass_filter, envelope
 from .utils.logging import make_logger
+from .utils.signal_processing import bandpass_filter, envelope
 
 # initialize the progress bar
 prog = Progress(

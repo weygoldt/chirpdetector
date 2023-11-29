@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchvision
-import torchvision.transforms.functional as F
+import torchvision.transforms.functional as F  # noqa N812
 from matplotlib.patches import Rectangle
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset

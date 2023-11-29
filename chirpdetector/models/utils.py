@@ -1,6 +1,6 @@
 """Load, save and handle models."""
 
-import albumentations as A
+import albumentations as A  # noqa: N812
 import torch
 import torch.nn
 import torchvision
