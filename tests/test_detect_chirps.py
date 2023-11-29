@@ -1,3 +1,5 @@
+"""Tests for the detect_chirps module."""
+
 import numpy as np
 import torch
 
@@ -131,7 +133,7 @@ def test_spec_to_image() -> None:
     # Sad path: Wrong type:
     spec = np.array([[1, 1, 1], [1, 1, 1]])
     try:
-        spec_to_image(spec) # type: ignore
+        spec_to_image(spec)  # type: ignore
     except TypeError:
         pass
     else:

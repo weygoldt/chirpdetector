@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Test the gridtools.models.utils module."""
 
 import torch
@@ -12,18 +10,14 @@ from chirpdetector.models.utils import (
 )
 
 
-def test_get_device():
-    """
-    Test the get_device function
-    """
+def test_get_device() -> None:
+    """Test the get_device function."""
     device = str(get_device())
-    assert device == "cuda" or device == "cpu" or device == "mps"
+    assert device in ["cuda", "cpu", "mps"]
 
 
-def test_get_transforms():
-    """
-    Test the get_transforms function
-    """
+def test_get_transforms() -> None:
+    """Test the get_transforms function."""
     # Happy path train
     transforms = get_transforms(10, 10, True)
     assert transforms is not None
@@ -38,39 +32,38 @@ def test_get_transforms():
     except AssertionError:
         pass
     else:
-        raise AssertionError("Expected TypeError")
+        msg = "Expected AssertionError"
+        raise AssertionError(msg)
 
     # Sad path wrong height
     try:
-        transforms = get_transforms(10, 10.0, True)
+        transforms = get_transforms(10, 10.0, True)  # type: ignore
     except AssertionError:
         pass
     else:
-        raise AssertionError("Expected TypeError")
+        msg = "Expected AssertionError"
+        raise AssertionError(msg)
 
     # Sad path wrong train
     try:
-        transforms = get_transforms(10, 10, 0)
+        transforms = get_transforms(10, 10, 0)  # type: ignore
     except AssertionError:
         pass
     else:
-        raise AssertionError("Expected TypeError")
+        msg = "Expected AssertionError"
+        raise AssertionError(msg)
 
 
-def test_collate_fn():
-    """
-    Test the collate_fn function
-    """
+def test_collate_fn() -> None:
+    """Test the collate_fn function."""
     argument = [[1, 1, 1], [2, 2, 2]]
     expected = ((1, 2), (1, 2), (1, 2))
     actual = collate_fn(argument)
     assert actual == expected
 
 
-def test_load_fasterrcnn():
-    """
-    Test the load_fasterrcnn function
-    """
+def test_load_fasterrcnn() -> None:
+    """Test the load_fasterrcnn function."""
     # Happy path
     model = load_fasterrcnn(2)
     assert model is not None
@@ -78,8 +71,9 @@ def test_load_fasterrcnn():
 
     # Sad path
     try:
-        model = load_fasterrcnn(2.0)
+        model = load_fasterrcnn(2.0)  # type: ignore
     except TypeError:
         pass
     else:
-        raise AssertionError("Expected TypeError")
+        msg = "Expected TypeError"
+        raise AssertionError(msg)

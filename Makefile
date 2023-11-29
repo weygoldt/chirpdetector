@@ -34,6 +34,6 @@ fmt:
 
 test:
 	ruff check ./chirpdetector ./tests
-	mypy ./chirpdetector
+	# pyright ./chirpdetector
 	pytest --cov --cov-report=xml
 

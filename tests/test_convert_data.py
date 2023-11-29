@@ -1,8 +1,9 @@
 """Test the convert_data module."""
 
+import pathlib
+
 import numpy as np
 from PIL import Image
-import pathlib
 
 from chirpdetector.convert_data import make_file_tree, numpy_to_pil
 
@@ -22,7 +23,7 @@ def test_make_file_tree(tmp_path: pathlib.Path) -> None:
 
     # Sad path with str
     try:
-        make_file_tree(str(tmp_path)) # type: ignore
+        make_file_tree(str(tmp_path))  # type: ignore
     except TypeError:
         pass
     else:

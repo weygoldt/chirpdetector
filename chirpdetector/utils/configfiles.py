@@ -62,12 +62,12 @@ class Config(BaseModel):
     spec: Spectrogram
 
 
-def copy_config(path: str) -> None:
+def copy_config(destination: pathlib.Path) -> None:
     """Copy the default config file from the package into a specified path.
 
     Parameters
     ----------
-    - `path`: `str`
+    - `destination`: `str`
         Path to the directory where the config file should be copied to.
 
     Returns
@@ -82,8 +82,6 @@ def copy_config(path: str) -> None:
             "the package root directory."
         )
         raise FileNotFoundError(msg)
-
-    destination = pathlib.Path(path)
 
     if destination.is_dir():
         shutil.copy(origin, destination / "chirpdetector.toml")
