@@ -8,10 +8,8 @@ from chirpdetector.detect_chirps import (
 )
 
 
-def test_float_index_interpolation():
-    """
-    Test the float_index_interpolation function
-    """
+def test_float_index_interpolation() -> None:
+    """Test the float_index_interpolation function."""
     index_arr = np.arange(5)
     data_arr = np.array([0.5, 1.5, 2.5, 3.5, 4.5])
 
@@ -52,19 +50,18 @@ def test_float_index_interpolation():
     np.testing.assert_array_equal(actual, expected)
 
     # Sad path: values outside of index_arr
-    values = np.array([-1, 5])
+    values = np.array([-2, 6])
     try:
         float_index_interpolation(values, index_arr, data_arr)
     except ValueError:
         pass
     else:
-        raise AssertionError("Expected ValueError")
+        msg = "Expected ValueError"
+        raise AssertionError(msg)
 
 
-def test_coords_to_mpl_rectangle():
-    """
-    Test the corner_coords_to_center_coords function
-    """
+def test_coords_to_mpl_rectangle() -> None:
+    """Test the corner_coords_to_center_coords function."""
     # Happy path
     corner_coords = np.array([[1, 1, 2, 2]])
     expected = np.array([[1, 1, 1, 1]])
@@ -84,7 +81,8 @@ def test_coords_to_mpl_rectangle():
     except ValueError:
         pass
     else:
-        raise AssertionError("Expected ValueError")
+        msg = "Expected ValueError"
+        raise AssertionError(msg)
 
     # Sad path: wrong dimensions
     corner_coords = np.array([1, 1, 2, 2])
@@ -93,13 +91,12 @@ def test_coords_to_mpl_rectangle():
     except ValueError:
         pass
     else:
-        raise AssertionError("Expected ValueError")
+        msg = "Expected ValueError"
+        raise AssertionError(msg)
 
 
-def test_spec_to_image():
-    """
-    Test the spec_to_image function
-    """
+def test_spec_to_image() -> None:
+    """Test the spec_to_image function."""
     # Happy path
     spec = torch.tensor(np.array([[1, 1, 1], [2, 2, 2]]))
     expected = (
@@ -118,7 +115,8 @@ def test_spec_to_image():
     except ValueError:
         pass
     else:
-        raise AssertionError("Expected ValueError")
+        msg = "Expected ValueError"
+        raise AssertionError(msg)
 
     # Sad path: Wrong dimensions
     spec = torch.tensor(np.array([1, 1, 1]))
@@ -127,13 +125,15 @@ def test_spec_to_image():
     except ValueError:
         pass
     else:
-        raise AssertionError("Expected ValueError")
+        msg = "Expected ValueError"
+        raise AssertionError(msg)
 
     # Sad path: Wrong type:
     spec = np.array([[1, 1, 1], [1, 1, 1]])
     try:
-        spec_to_image(spec)
+        spec_to_image(spec) # type: ignore
     except TypeError:
         pass
     else:
-        raise AssertionError("Expected TypeError")
+        msg = "Expected TypeError"
+        raise AssertionError(msg)

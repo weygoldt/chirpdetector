@@ -32,6 +32,10 @@ def make_file_tree(path: pathlib.Path) -> None:
     path : pathlib.Path
         The root directory of the dataset.
     """
+    if not isinstance(path, pathlib.Path):
+        msg = f"Path must be a pathlib.Path, not {type(path)}"
+        raise TypeError(msg)
+
     if path.parent.exists() and path.parent.is_file():
         msg = (
             f"Parent directory of {path} is a file. "
