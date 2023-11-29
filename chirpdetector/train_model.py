@@ -274,7 +274,7 @@ def val_epoch(
     return loss_dict, val_loss
 
 
-def train(config: Config, mode: str = "pretrain") -> None:
+def train(config: Config, mode: str = "pretrain") -> None:  # noqa
     """Train the model.
 
     Parameters
@@ -305,7 +305,6 @@ def train(config: Config, mode: str = "pretrain") -> None:
         raise FileNotFoundError(msg)
 
     # Initialize the logger and progress bar, make the logger global
-    # global logger
     logger = make_logger(
         __name__,
         pathlib.Path(config.path).parent / "chirpdetector.log",
@@ -452,11 +451,12 @@ def train(config: Config, mode: str = "pretrain") -> None:
                     progress.console.log(msg)
                     logger.info(msg)
 
+                    modelpath = pathlib.Path(config.hyper.modelpath)
                     save_model(
                         epoch=epoch,
                         model=model,
                         optimizer=optimizer,
-                        path=config.hyper.modelpath,
+                        path=modelpath,
                     )
 
                 # plot the losses for this epoch
