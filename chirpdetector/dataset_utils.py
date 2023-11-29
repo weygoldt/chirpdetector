@@ -44,7 +44,8 @@ def plot_yolo_dataset(path: pathlib.Path, n: int) -> None:
     imgpath = path / "images"
 
     label_paths = np.array(list(labelpath.glob("*.txt")))
-    label_paths = np.random.choice(label_paths, n)
+    rng = np.random.default_rng()
+    label_paths = rng.choice(label_paths, size=n, replace=False)
 
     for lp in label_paths:
         imgp = imgpath / (lp.stem + ".png")
@@ -128,7 +129,8 @@ def subset_yolo_dataset(path: pathlib.Path, img_ext: str, n: int) -> None:
     lbl_path = path / "labels"
 
     images = np.array(img_path.glob(f"*{img_ext}"))
-    np.random.shuffle(images)
+    rng = np.random.default_rng()
+    images = rng.choice(images, size=len(images), replace=False)
 
     images = images[:n]
 
