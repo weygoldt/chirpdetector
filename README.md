@@ -3,7 +3,7 @@
     <img src="assets/logo.png" width="100" />
     <h1 align="center">Chirpdetector</h2>
 </p>
----
+
 <p align="center">Detect communication signals of electric fish using deep neural networks 🐟⚡🧠 </p>
 <!-- <br /> -->
 <!-- <h1 align="center">Chirpdetector</h1> -->
