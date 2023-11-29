@@ -1,11 +1,31 @@
 """Utilities for signal processing."""
 
-import pathlib
+from typing import Tuple, TypeVar
 
 import torch
 import numpy as np
-
 from scipy.signal import butter, sosfiltfilt
+from gridtools.datasets import Dataset
+from gridtools.utils.spectrogram import compute_spectrogram, to_decibel, sint
+
+
+ArrayLike = TypeVar("ArrayLike", np.ndarray, torch.Tensor)
+
+
+def zscore_standardize(array: ArrayLike) -> ArrayLike:
+    """Z-score standardize a matrix.
+
+    Parameters
+    ----------
+    - `array` : `ArrayLike`
+        The spectrogram.
+
+    Returns
+    -------
+    - `ArrayLike`
+        The standardized spectrogram.
+    """
+    return (array - array.mean()) / array.std()
 
 
 def bandpass_filter(
@@ -33,9 +53,7 @@ def bandpass_filter(
         The filtered data
     """
     sos = butter(2, (lowf, highf), "bandpass", fs=samplerate, output="sos")
-    filtered_signal = sosfiltfilt(sos, signal)
-
-    return filtered_signal
+    return sosfiltfilt(sos, signal)
 
 
 def envelope(
@@ -60,6 +78,128 @@ def envelope(
         The envelope of the signal
     """
     sos = butter(2, cutoff_frequency, "lowpass", fs=samplerate, output="sos")
-    envelope = np.sqrt(2) * sosfiltfilt(sos, np.abs(signal))
+    return np.sqrt(2) * sosfiltfilt(sos, np.abs(signal))
 
-    return envelope
+
+def make_chunk_indices(
+    n_chunks: int,
+    current_chunk: int,
+    chunksize: int,
+    window_overlap_samples: int,
+    max_end: int,
+) -> Tuple[int, int]:
+    """Get start and stop indices for the current chunk.
+
+    Parameters
+    ----------
+    - `n_chunks` : `int`
+        The number of chunks.
+    - `current_chunk` : `int`
+        The current chunk number.
+    - `chunksize` : `int`
+        The chunk size in samples.
+    - `window_overlap_samples` : `int`
+        The window overlap in samples.
+    - `max_end` : `int`
+        The maximum end index, i.e. the length of the recording.
+
+    Returns
+    -------
+    - `Tuple[int, int]`
+        The start and stop indices.
+    """
+    if current_chunk == 0:
+        start = sint(current_chunk * chunksize)
+        stop = sint((current_chunk + 1) * chunksize + window_overlap_samples)
+    elif current_chunk == n_chunks - 1:
+        start = sint(current_chunk * chunksize - window_overlap_samples)
+        stop = sint((current_chunk + 1) * chunksize)
+    else:
+        start = sint(current_chunk * chunksize - window_overlap_samples)
+        stop = sint((current_chunk + 1) * chunksize + window_overlap_samples)
+
+    if stop > max_end:
+        stop = max_end
+
+    return start, stop
+
+
+def make_spectrogram_axes(
+    start: int, stop: int, nfft: int, hop_length: int, samplerate: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute the time and frequency axes of a spectrogram.
+
+    Parameters
+    ----------
+    - `start` : `int`
+        The start index.
+    - `stop` : `int`
+        The stop index.
+    - `nfft` : `int`
+        The number of samples in the FFT.
+    - `hop_length` : `int`
+        The hop length in samples.
+    - `samplerate` : `float`
+        The sampling rate.
+
+    Returns
+    -------
+    - `Tuple[np.ndarray, np.ndarray]`
+        The time and frequency axes.
+    """
+    spectrogram_times = np.arange(start, stop + 1, hop_length) / samplerate
+    spectrogram_freqs = np.arange(0, nfft / 2 + 1) * samplerate / nfft
+    return spectrogram_times, spectrogram_freqs
+
+
+def compute_sum_spectrogam(
+    data: Dataset, nfft: int, hop_len: int
+) -> torch.Tensor:
+    """Compute the sum spectrogram of a chunk.
+
+    Parameters
+    ----------
+    - `chunk` : `Dataset`
+        The dataset to make bounding boxes for.
+    - `nfft` : `int`
+        The number of samples in the FFT.
+    - `hop_len` : `int`
+        The hop length in samples.
+
+    Returns
+    -------
+    - `torch.tensor`
+        The sum spectrogram.
+    """
+    n_electrodes = data.grid.rec.shape[1]
+    spectrogram = None
+    for electrode in range(n_electrodes):
+        # get the signal for the current electrode
+        signal = data.grid.rec[:, electrode]
+
+        # compute the spectrogram for the current electrode
+        electrode_spectrogram, _, _ = compute_spectrogram(
+            data=signal.copy(),
+            samplingrate=data.grid.samplerate,
+            nfft=nfft,
+            hop_length=hop_len,
+        )
+
+        # sum spectrogram over all electrodes
+        # the spec is a tensor
+        if electrode == 0:
+            spectrogram = electrode_spectrogram
+        else:
+            spectrogram += electrode_spectrogram
+
+    if spectrogram is None:
+        msg = "Failed to compute spectrogram."
+        raise ValueError(msg)
+
+    # normalize spectrogram by the number of electrodes
+    # the spec is still a tensor
+    spectrogram /= n_electrodes
+
+    # convert the spectrogram to dB
+    # .. still a tensor
+    return to_decibel(spectrogram)

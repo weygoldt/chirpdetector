@@ -2,29 +2,28 @@
 
 import pathlib
 import shutil
-from typing import Tuple, Union, TypeVar
-import torch
+from typing import Union
 
 import numpy as np
 import pandas as pd
 from gridtools.datasets import Dataset, load, subset
 from gridtools.utils.spectrograms import (
-    decibel,
     freqres_to_nfft,
     overlap_to_hoplen,
-    sint,
-    spectrogram,
 )
 from PIL import Image
-from rich import print as rprint
 from rich.console import Console
 from rich.progress import track
-from numpy.typing import NDArray
 
 from .utils.configfiles import Config, load_config
+from .utils.signal_processing import (
+    compute_sum_spectrogam,
+    make_chunk_indices,
+    make_spectrogram_axes,
+    zscore_standardize,
+)
 
 con = Console()
-ArrayLike = TypeVar("ArrayLike", np.ndarray, torch.Tensor)
 
 
 def make_file_tree(path: pathlib.Path) -> None:
@@ -84,7 +83,7 @@ def numpy_to_pil(img: np.ndarray) -> Image.Image:
     return Image.fromarray(intimg)
 
 
-def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
+def bboxes_from_simulated_chirps(data: Dataset, nfft: int) -> pd.DataFrame:
     """Make bounding boxes of simulated chirps using the chirp parameters.
 
     Parameters
@@ -99,11 +98,6 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
     `pandas.DataFrame`
         A dataframe with the bounding boxes.
     """
-    assert hasattr(
-        data.com.chirp,
-        "params",
-    ), "Dataset must have a chirp attribute with a params attribute"
-
     # Time padding is one NFFT window
     pad_time = nfft / data.grid.samplerate
 
@@ -159,39 +153,27 @@ def chirp_bounding_boxes(data: Dataset, nfft: int) -> pd.DataFrame:
     return dataframe
 
 
-def synthetic_labels(
-    output: pathlib.Path,
-    chunk: Dataset,
-    nfft: int,
-    spec: np.ndarray,
+def convert_bboxes_from_simulated_chirps(
+    imgpath: pathlib.Path,
     spectrogram_times: np.ndarray,
     spectrogram_frequencies: np.ndarray,
-    imgname: str,
     current_chunk: int,
-    img: Image.Image,
-) -> Union[Tuple[pd.DataFrame, Image.Image], Tuple[None, None]]:
+    bboxes: pd.DataFrame,
+) -> Union[pd.DataFrame, None]:
     """Generate labels of a simulated dataset.
 
     Parameters
     ----------
-    - `output` : `pathlib.Path`
-        The output directory.
-    - `chunk` : `Dataset`
-        The dataset to make bounding boxes for.
-    - `nfft` : `int`
-        The number of samples in the FFT.
-    - `spec` : `np.ndarray`
-        The spectrogram.
+    - `imgpath` : `pathlib.Path`
+        The path to the image.
     - `spectrogram_times` : `np.ndarray`
         The time axis of the spectrogram.
     - `spectrogram_frequencies` : `np.ndarray`
         The frequency axis of the spectrogram.
-    - `imgname` : `str`
-        The name of the image.
     - `current_chunk` : `int`
         The chunk number.
-    - `img` : `Image`
-        The image.
+    - `bboxes` : `pd.DataFrame`
+        The bounding boxes.
 
     Returns
     -------
@@ -199,13 +181,13 @@ def synthetic_labels(
         A dataframe with the bounding boxes.
     """
     # compute the bounding boxes for this chunk
-    bboxes = chirp_bounding_boxes(chunk, nfft)
 
     if len(bboxes) == 0:
-        return None, None
+        return None
 
     # convert bounding box center coordinates to spectrogram coordinates
-    # find the indices on the spectrogram_times corresponding to the center times
+    # find the indices on the spectrogram_times corresponding to the center
+    # times
     x = np.searchsorted(spectrogram_times, bboxes.t_center)
     y = np.searchsorted(spectrogram_frequencies, bboxes.f_center)
     widths = np.searchsorted(
@@ -222,7 +204,7 @@ def synthetic_labels(
     # In addiotion, an image starts in the top left corner so the bboxes
     # need to be mirrored horizontally.
 
-    y = spec.shape[0] - y  # flip the y values to fit y=0 at the top
+    y = len(spectrogram_frequencies) - y  # flip y values to fit y=0 at top
     lxs, lys = x - widths / 2, y - heights / 2
     rxs, rys = x + widths / 2, y + heights / 2
 
@@ -232,7 +214,7 @@ def synthetic_labels(
     bboxes["lowerright_img_x"] = rxs
     bboxes["lowerright_img_y"] = rys
 
-    # yolo format is centerx, centery, width, height
+    # yolo format is centerx, centery, width, height normalized to image size
     # convert xmin, ymin, xmax, ymax to centerx, centery, width, height
     centerx = (lxs + rxs) / 2
     centery = (lys + rys) / 2
@@ -242,12 +224,13 @@ def synthetic_labels(
     # most deep learning frameworks expect bounding box coordinates
     # as relative to the image size. So we normalize the coordinates
     # to the image size
-    centerx_norm = centerx / spec.shape[1]
-    centery_norm = centery / spec.shape[0]
-    width_norm = width / spec.shape[1]
-    height_norm = height / spec.shape[0]
+    centerx_norm = centerx / len(spectrogram_times)
+    centery_norm = centery / len(spectrogram_frequencies)
+    width_norm = width / len(spectrogram_times)
+    height_norm = height / len(spectrogram_frequencies)
 
     # add them to the bboxes dataframe
+    # theses are the ones that will later make the label files
     bboxes["centerx_norm"] = centerx_norm
     bboxes["centery_norm"] = centery_norm
     bboxes["width_norm"] = width_norm
@@ -256,30 +239,43 @@ def synthetic_labels(
     # add chunk ID to the bboxes dataframe
     bboxes["chunk_id"] = current_chunk
 
-    # put them into a dataframe to save for eahc spectrogram
-    dataframe = pd.DataFrame(
-        {
-            "cx": centerx_norm,
-            "cy": centery_norm,
-            "w": width_norm,
-            "h": height_norm,
-        },
-    )
+    # add the image name to the bboxes dataframe
+    bboxes["image"] = imgpath.name
 
-    # add as first colum instance id
-    dataframe.insert(0, "instance_id", np.ones_like(lxs, dtype=int))
 
-    # stash the bboxes dataframe for this chunk
-    bboxes["image"] = imgname
+def save_labels_for_simulated_chirps(
+    bbox_df: pd.DataFrame, dataset_root: pathlib.Path
+) -> None:
+    """Save the labels for a simulated dataset.
 
-    # save dataframe for every spec without headers as txt
-    dataframe.to_csv(
-        output / "labels" / f"{chunk.path.name}.txt",
-        header=False,
-        index=False,
-        sep=" ",
-    )
-    return bboxes, img
+    Parameters
+    ----------
+    - `bbox_df` : `pd.DataFrame`
+        The bounding boxes.
+    - `dataset_root` : `pathlib.Path`
+        The root directory of the dataset.
+
+    Returns
+    -------
+    - `None`
+    """
+    for img in bbox_df["image"].unique():
+        x = bbox_df["centerx_norm"].loc[bbox_df["image"] == img]
+        y = bbox_df["centery_norm"].loc[bbox_df["image"] == img]
+        w = bbox_df["width_norm"].loc[bbox_df["image"] == img]
+        h = bbox_df["height_norm"].loc[bbox_df["image"] == img]
+
+        # make a dataframe with the labels
+        label_df = pd.DataFrame({"cx": x, "cy": y, "w": w, "h": h})
+        label_df.insert(0, "instance_id", np.ones_like(x, dtype=int))
+
+        # save dataframe for every spec without headers as txt
+        label_df.to_csv(
+            dataset_root / "labels" / f"{img.stem}.txt",
+            header=False,
+            index=False,
+            sep=" ",
+        )
 
 
 def detected_labels(
@@ -356,146 +352,6 @@ def detected_labels(
     )
 
 
-def make_chunk_indices(
-    n_chunks: int,
-    current_chunk: int,
-    chunksize: int,
-    window_overlap_samples: int,
-    max_end: int,
-) -> Tuple[int, int]:
-    """Get start and stop indices for the current chunk.
-
-    Parameters
-    ----------
-    - `n_chunks` : `int`
-        The number of chunks.
-    - `current_chunk` : `int`
-        The current chunk number.
-    - `chunksize` : `int`
-        The chunk size in samples.
-    - `window_overlap_samples` : `int`
-        The window overlap in samples.
-    - `max_end` : `int`
-        The maximum end index, i.e. the length of the recording.
-
-    Returns
-    -------
-    - `Tuple[int, int]`
-        The start and stop indices.
-    """
-    if current_chunk == 0:
-        start = sint(current_chunk * chunksize)
-        stop = sint((current_chunk + 1) * chunksize + window_overlap_samples)
-    elif current_chunk == n_chunks - 1:
-        start = sint(current_chunk * chunksize - window_overlap_samples)
-        stop = sint((current_chunk + 1) * chunksize)
-    else:
-        start = sint(current_chunk * chunksize - window_overlap_samples)
-        stop = sint((current_chunk + 1) * chunksize + window_overlap_samples)
-
-    if stop > max_end:
-        stop = max_end
-
-    return start, stop
-
-
-def make_spectrogram_axes(
-    start: int, stop: int, nfft: int, hop_length: int, samplerate: float
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Compute the time and frequency axes of a spectrogram.
-
-    Parameters
-    ----------
-    - `start` : `int`
-        The start index.
-    - `stop` : `int`
-        The stop index.
-    - `nfft` : `int`
-        The number of samples in the FFT.
-    - `hop_length` : `int`
-        The hop length in samples.
-    - `samplerate` : `float`
-        The sampling rate.
-
-    Returns
-    -------
-    - `Tuple[np.ndarray, np.ndarray]`
-        The time and frequency axes.
-    """
-    spectrogram_times = np.arange(start, stop + 1, hop_length) / samplerate
-    spectrogram_freqs = np.arange(0, nfft / 2 + 1) * samplerate / nfft
-    return spectrogram_times, spectrogram_freqs
-
-
-def compute_sum_spectrogam(
-    data: Dataset, nfft: int, hop_len: int
-) -> torch.Tensor:
-    """Compute the sum spectrogram of a chunk.
-
-    Parameters
-    ----------
-    - `chunk` : `Dataset`
-        The dataset to make bounding boxes for.
-    - `nfft` : `int`
-        The number of samples in the FFT.
-    - `hop_len` : `int`
-        The hop length in samples.
-
-    Returns
-    -------
-    - `torch.tensor`
-        The sum spectrogram.
-    """
-    n_electrodes = data.grid.rec.shape[1]
-    spectrogram = None
-    for electrode in range(n_electrodes):
-        # get the signal for the current electrode
-        signal = data.grid.rec[:, electrode]
-
-        # compute the spectrogram for the current electrode
-        electrode_spectrogram, _, _ = compute_spectrogram(
-            data=signal.copy(),
-            samplingrate=data.grid.samplerate,
-            nfft=nfft,
-            hop_length=hop_len,
-        )
-
-        # sum spectrogram over all electrodes
-        # the spec is a tensor
-        if electrode == 0:
-            spectrogram = electrode_spectrogram
-        else:
-            spectrogram += electrode_spectrogram
-
-    if spectrogram is None:
-        msg = "Failed to compute spectrogram."
-        raise ValueError(msg)
-
-    # normalize spectrogram by the number of electrodes
-    # the spec is still a tensor
-    spectrogram /= n_electrodes
-
-    # convert the spectrogram to dB
-    # .. still a tensor
-    return to_decibel(spectrogram)
-
-
-def zscore_standardize(array: ArrayLike) -> ArrayLike:
-    """Z-score standardize a matrix.
-
-    Parameters
-    ----------
-    - `array` : `ArrayLike`
-        The spectrogram.
-
-    Returns
-    -------
-    - `ArrayLike`
-        The standardized spectrogram.
-    """
-    return (array - array.mean()) / array.std()
-
-
 def convert(
     data: Dataset,
     conf: Config,
@@ -541,19 +397,24 @@ def convert(
     window_overlap = conf.spec.spec_overlap  # seconds
     freq_pad = conf.spec.freq_pad  # Hz
     window_overlap_samples = int(window_overlap * data.grid.samplerate)
+    spectrogram_freq_limits = (
+        np.min(data.track.freqs) - freq_pad,
+        np.max(data.track.freqs) + freq_pad,
+    )
 
     # Spectrogram computation parameters
     nfft = freqres_to_nfft(conf.spec.freq_res, data.grid.samplerate)  # samples
     hop_len = overlap_to_hoplen(conf.spec.overlap_frac, nfft)  # samples
     chunksize = int(time_window * data.grid.samplerate)  # samples
     n_chunks = np.ceil(data.grid.rec.shape[0] / chunksize).astype(int)
-
-    rprint(
+    msg = (
         "Dividing recording of duration"
         f"{data.grid.rec.shape[0] / data.grid.samplerate} into {n_chunks}"
         f"chunks of {time_window} seconds each.",
     )
+    con.log(msg)
 
+    # stash here the dataframes with the bounding boxes
     bbox_dfs = []
 
     # shift the time of the tracks to start at 0
@@ -601,11 +462,6 @@ def convert(
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
 
-        spectrogram_freq_limits = (
-            np.min(chunk.track.freqs) - freq_pad,
-            np.max(chunk.track.freqs) + freq_pad,
-        )
-
         spectrogram = spectrogram[
             (spectrogram_frequencies >= spectrogram_freq_limits[0])
             & (spectrogram_frequencies <= spectrogram_freq_limits[1]),
@@ -620,31 +476,30 @@ def convert(
         # the spec is still a tensor
         spectrogram = zscore_standardize(spectrogram)
 
-        # convert the spectrogram to a PIL image
+        # convert the spectrogram to a PIL image and save
         spectrogram = spectrogram.detach().cpu().numpy()
         img = numpy_to_pil(spectrogram)
+        imgpath = dataroot / "images" / f"{chunk.path.name}.png"
+        img.save(imgpath)
 
-        imgname = f"{chunk.path.name}.png"
         if label_mode == "synthetic":
-            bbox_df, img = synthetic_labels(
-                dataroot,
-                chunk,
-                nfft,
-                spectrogram,
+            bboxes = bboxes_from_simulated_chirps(chunk, nfft)
+            bbox_df = convert_bboxes_from_simulated_chirps(
+                imgpath,
                 spectrogram_times,
                 spectrogram_frequencies,
-                imgname,
                 current_chunk,
-                img,
+                bboxes,
             )
             if bbox_df is None:
                 continue
             bbox_dfs.append(bbox_df)
-        elif label_mode == "detected":
-            detected_labels(dataroot, chunk, imgname, spec, spectrogram_times)
+            save_labels_for_simulated_chirps(bbox_df, dataroot)
 
-        # save image
-        img.save(dataroot / "images" / f"{imgname}")
+        elif label_mode == "detected":
+            detected_labels(
+                dataroot, chunk, imgpath.name, spectrogram, spectrogram_times
+            )
 
     if label_mode == "synthetic":
         bbox_df = pd.concat(bbox_dfs, ignore_index=True)
