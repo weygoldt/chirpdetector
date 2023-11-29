@@ -29,11 +29,11 @@ After the first release, this section will be removed an tasks will be organized
 as github issues. Until them, if you fixed something, please check it off on this
 list before opening a pull request.
 
-- [ ] Split the messy training loop into functions
 - [ ] Move hardcoded params from assignment algo into config.toml
+- [ ] Split the messy training loop into functions
 - [ ] Remove all pyright warnings
-- [ ] Fix make test, fails after ruff run
 - [ ] Build github actions CI/CD pipeline for codecov etc.
+- [x] Fix make test, fails after ruff run
 - [x] Refactor train, detect, convert. All into much smaller functions. Move accesory functions to utils
 - [x] Make complete codebase pass ruff
 - [x] Move the dataconverter from `gridtools` to `chirpdetector`
