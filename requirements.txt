@@ -7,7 +7,7 @@ annotated-types==0.6.0 ; python_version >= "3.11" and python_version < "3.13" \
 argparse==1.4.0 ; python_version >= "3.11" and python_version < "3.13" \
     --hash=sha256:62b089a55be1d8949cd2bc7e0df0bddb9e028faefc8c32038cc84862aefdd6e4 \
     --hash=sha256:c31647edb69fd3d465a847ea3157d37bed1f95f19760b11a47aa91c04b666314
-audioio @ git+https://github.com/janscience/audioio.git@HEAD ; python_version >= "3.11" and python_version < "3.13"
+audioio @ git+https://github.com/janscience/audioio.git@bc10681f1dad3b51b8ba42f61edf74896de8d65d ; python_version >= "3.11" and python_version < "3.13"
 certifi==2023.11.17 ; python_version >= "3.11" and python_version < "3.13" \
     --hash=sha256:9b469f3a900bf28dc19b8cfbf8019bf47f7fdd1a65a1d4ffb98fc14166beb4d1 \
     --hash=sha256:e036ab49d5b79556f99cfc2d9320b34cfbe5be05c5871b51de9329f0603b0474
@@ -865,7 +865,7 @@ sympy==1.12 ; python_version >= "3.11" and python_version < "3.13" \
 threadpoolctl==3.2.0 ; python_version >= "3.11" and python_version < "3.13" \
     --hash=sha256:2b7818516e423bdaebb97c723f86a7c6b0a83d3f3b0970328d66f4d9104dc032 \
     --hash=sha256:c96a0ba3bdddeaca37dc4cc7344aafad41cdb8c313f74fdfe387a867bba93355
-thunderfish @ git+https://github.com/weygoldt/thunderfish.git@HEAD ; python_version >= "3.11" and python_version < "3.13"
+thunderfish @ git+https://github.com/weygoldt/thunderfish.git@d7357879037b8197ccc770173a33179b1beb0250 ; python_version >= "3.11" and python_version < "3.13"
 tifffile==2023.9.26 ; python_version >= "3.11" and python_version < "3.13" \
     --hash=sha256:1de47fa945fddaade256e25ad4f375ae65547f3c1354063aded881c32a64cf89 \
     --hash=sha256:67e355e4595aab397f8405d04afe1b4ae7c6f62a44e22d933fee1a571a48c7ae
