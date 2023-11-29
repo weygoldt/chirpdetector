@@ -28,6 +28,7 @@ prog = Progress(
 
 # TODO: Update docstrings in this module
 
+
 class ChirpAssignmentData(BaseModel):
     """Data needed for chirp assignment."""
 
@@ -143,9 +144,9 @@ def remove_bboxes_outside_range(
     # minf and maxf
 
     # first build a box that spans the entire range
-    range_box = np.array([
-        0, min_frequency, np.max(chirp_dataframe.t2), max_frequency
-    ])
+    range_box = np.array(
+        [0, min_frequency, np.max(chirp_dataframe.t2), max_frequency]
+    )
 
     # now compute the intersection between the range box and each chirp bboxes
     # and keep only those that have an intersection area > 0
@@ -274,7 +275,7 @@ def extract_envelope_trough(
     - `env`: `np.ndarray`
         Envelope of the filtered signal
     """
-    start_idx, stop_idx, _= indices
+    start_idx, stop_idx, _ = indices
 
     # determine bandpass cutoffs above and below baseline frequency
     lower_f = best_freq - 15
@@ -355,7 +356,7 @@ def extract_assignment_data(
         env_trough_prominences=np.full(array_len, np.nan),
         env_trough_distances=np.full(array_len, np.nan),
         env_trough_indices=np.full(array_len, np.nan),
-        envs = np.full((array_len, 20001), np.nan)
+        envs=np.full((array_len, 20001), np.nan),
     )
 
     for outer_idx, fish_id in enumerate(data.track.ids):
@@ -368,7 +369,7 @@ def extract_assignment_data(
         powers = data.track.powers[data.track.idents == fish_id, :]
 
         if len(time) == 0:
-            continue # skip if no track is found
+            continue  # skip if no track is found
 
         for inner_idx, chirp in enumerate(chirps):
             # find the closest time, freq and power to the chirp time
@@ -380,7 +381,7 @@ def extract_assignment_data(
             # check if chirp overlaps with track
             f1 = chirp_df.f1.to_numpy()[inner_idx]
             f2 = chirp_df.f2.to_numpy()[inner_idx]
-            f2 = f1 + (f2 - f1) * 0.5 # range is the lower half of the bbox
+            f2 = f1 + (f2 - f1) * 0.5  # range is the lower half of the bbox
 
             # if chirp does not overlap with track, skip this chirp
             if (f1 > best_freq) or (f2 < best_freq):
@@ -407,23 +408,25 @@ def extract_assignment_data(
                 continue
 
             # compute index to closest peak to chirp center
-            distances = np.abs(troughs - (
-                    chirp_indices_on_raw_data[2] - chirp_indices_on_raw_data[0]
-            ))
+            distances = np.abs(
+                troughs
+                - (chirp_indices_on_raw_data[2] - chirp_indices_on_raw_data[0])
+            )
             closest_trough_idx = np.argmin(distances)
             trough_time = (
-                (chirp_indices_on_raw_data[0] + troughs[closest_trough_idx])
-                / data.grid.samplerate
-            )
+                chirp_indices_on_raw_data[0] + troughs[closest_trough_idx]
+            ) / data.grid.samplerate
 
             # store data in assignment data object
             tot_idx = outer_idx * len(chirps) + inner_idx
             ad.env_trough_times[tot_idx] = trough_time
             ad.env_trough_prominences[tot_idx] = proms[closest_trough_idx]
-            ad.env_trough_distances[tot_idx] = distances[closest_trough_idx] + 1
+            ad.env_trough_distances[tot_idx] = (
+                distances[closest_trough_idx] + 1
+            )
             ad.env_trough_indices[tot_idx] = troughs[closest_trough_idx]
-            center_env_start= len(ad.envs[0,:]) // 2 - len(env) // 2
-            center_env_stop = len(ad.envs[0,:]) // 2 + len(env) // 2 + 1
+            center_env_start = len(ad.envs[0, :]) // 2 - len(env) // 2
+            center_env_stop = len(ad.envs[0, :]) // 2 + len(env) // 2 + 1
 
             # if the envelope is even, add a nan to the end
             # otherwise it cant be centered in the array
@@ -432,9 +435,12 @@ def extract_assignment_data(
 
             # center the env in the array and cut off the ends
             # if it is larger
-            if len(env) > len(ad.envs[0,:]):
-                env = env[len(env) // 2 - len(ad.envs[0,:]) // 2:
-                          len(env) // 2 + len(ad.envs[0,:]) // 2 + 1]
+            if len(env) > len(ad.envs[0, :]):
+                env = env[
+                    len(env) // 2 - len(ad.envs[0, :]) // 2 : len(env) // 2
+                    + len(ad.envs[0, :]) // 2
+                    + 1
+                ]
 
             if len(env) != center_env_stop - center_env_start:
                 print("env", len(env))
@@ -480,9 +486,7 @@ def assign_chirps(
     # (-> chirp with high contrast)
     # and when the trough is close to the chirp center as detected by the
     # r-cnn (-> detected chirp is close to the actual chirp)
-    cost = (
-        ad.env_trough_prominences / ad.env_trough_distances**2
-    )
+    cost = ad.env_trough_prominences / ad.env_trough_distances**2
 
     # set cost to zero for cases where no peak was found
     cost[np.isnan(cost)] = 0
@@ -490,10 +494,10 @@ def assign_chirps(
     # for each chirp, choose the track where the cost is highest
     # TODO: to avoid confusion make a cost function where high is good and low
     # is bad. this is more like a "gain function"
-    chosen_tracks = [] # the assigned ids
-    chosen_env_times= [] # the times of the envelope troughs
-    chosen_chirp_envs = [] # here go the full envelopes of the chosen chirps
-    non_chosen_chirp_envs = [] # here go the full envelopes of nonchosen chirps
+    chosen_tracks = []  # the assigned ids
+    chosen_env_times = []  # the times of the envelope troughs
+    chosen_chirp_envs = []  # here go the full envelopes of the chosen chirps
+    non_chosen_chirp_envs = []  # here go the full envelopes of nonchosen chirps
     for idx in np.unique(ad.bbox_index):
         candidate_tracks = ad.track_ids[ad.bbox_index == idx]
         candidate_costs = cost[ad.bbox_index == idx]

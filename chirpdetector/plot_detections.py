@@ -37,9 +37,6 @@ prog = Progress(
 )
 
 
-
-
-
 def plot_detections(
     data: Dataset,
     chirp_df: pd.DataFrame,
@@ -272,6 +269,7 @@ def plot_detections(
         plt.cla()
         plt.close("all")
 
+
 def clean_plots_cli(path: pathlib.Path) -> None:
     """Remove all plots from the chirpdetections folder.
 
@@ -283,6 +281,7 @@ def clean_plots_cli(path: pathlib.Path) -> None:
     savepath = path / "chirpdetections"
     for f in savepath.iterdir():
         f.unlink()
+
 
 def plot_detections_cli(path: pathlib.Path) -> None:
     """Plot detections on images.
@@ -296,6 +295,7 @@ def plot_detections_cli(path: pathlib.Path) -> None:
     data = load(path)
     chirp_df = pd.read_csv(path / "chirpdetector_bboxes.csv")
     plot_detections(data, chirp_df, conf)
+
 
 def plot_all_detections_cli(path: pathlib.Path) -> None:
     """Plot detections on images.
@@ -316,6 +316,7 @@ def plot_all_detections_cli(path: pathlib.Path) -> None:
             chirp_df = pd.read_csv(dataset / "chirpdetector_bboxes.csv")
             plot_detections(data, chirp_df, conf)
             prog.advance(task)
+
 
 def clean_all_plots_cli(path: pathlib.Path) -> None:
     """Remove all plots from the chirpdetections folder.

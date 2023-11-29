@@ -14,7 +14,6 @@ from .convert_data import convert_cli
 from .dataset_utils import (
     clean_yolo_dataset,
     merge_yolo_datasets,
-    plot_yolo_dataset,
     subset_yolo_dataset,
 )
 from .detect_chirps import detect_cli
@@ -27,8 +26,24 @@ from .plot_detections import (
 from .train_model import train_cli
 from .utils.configfiles import copy_config
 
-click.rich_click.USE_RICH_MARKUP = True
 click.rich_click.USE_MARKDOWN = True
+# click.rich_click.SHOW_ARGUMENTS = True
+# click.rich_click.COMMAND_GROUPS = {
+#     "main": [
+#         {
+#             "name": "Commands for detecting chirps",
+#             "commands": ["copyconfig", "train", "detect", "assign"],
+#         },
+#         {
+#             "name": "Commands for managing datasets",
+#             "commands": ["convert", "datautils"],
+#         },
+#         {
+#             "name": "Commands for visualizations",
+#             "commands": ["show", "plot"],
+#         },
+#     ]
+# }
 
 pyproject = toml.load(pathlib.Path(__file__).parent.parent / "pyproject.toml")
 __version__ = pyproject["tool"]["poetry"]["version"]
@@ -38,7 +53,10 @@ def add_version(f: Callable) -> Callable:
     """Add the version of the chirpdetector to the help heading."""
     doc = f.__doc__
     f.__doc__ = (
-        "Welcome to Chirpdetector Version: " + __version__ + "\n\n" + doc
+        "**Welcome to Chirpdetector Version: "
+        + __version__
+        + " :fish::zap:**\n\n"
+        + doc
     )
     return f
 
@@ -48,19 +66,15 @@ def add_version(f: Callable) -> Callable:
     __version__,
     "-V",
     "--version",
+    prog_name="Chirpdetector",
     message="Chirpdetector, version %(version)s",
 )
 @add_version
 def chirpdetector() -> None:
-    """Detect chirps of fish on a spectrogram.
-
-    The chirpdetector command line tool is a collection of commands that
+    """The chirpdetector command line tool is a collection of commands that
     make it easier to detect chirps of wave-type weakly electric
-    fish on a spectrogram. It provides a set of managing functions e.g.
-    to copy the default config file to your dataset as well as a suite to
-    train, test and use a faster-R-CNN to detect chirps.
+    fish on a spectrogram. The usual workflow is:
 
-    The usual workflow is:
     1. `copyconfig` to copy the configfile to your dataset.
     2. `convert` to convert your dataset to training data.
     3. label your data, e.g. in label-studio.
@@ -72,41 +86,8 @@ def chirpdetector() -> None:
     detection performance.
 
     For more information including a tutorial, see the documentation at
-    https://weygoldt.com/chirpdetector
-
-    Happy chirp detecting :fish::zap:
-    """
-
-
-@chirpdetector.command()
-@click.argument("mode", type=click.Choice(["train", "detected"]))
-@click.option(
-    "--path",
-    "-p",
-    type=click.Path(
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        resolve_path=True,
-        path_type=pathlib.Path,
-    ),
-    required=True,
-    help="Path to the dataset.",
-)
-@click.option(
-    "--n_images",
-    "-n",
-    type=int,
-    required=True,
-    help="Number of images to show.",
-)
-def show(mode: str, input_path: pathlib.Path, n_images: int) -> None:
-    """Visualize chirps on spectrograms.
-
-    ... for the training dataset or detected chirps on wavetracker datasets.
-    """
-    if mode == "train":
-        plot_yolo_dataset(input_path, n_images)
+    *https://weygoldt.com/chirpdetector*
+    """  # noqa
 
 
 @chirpdetector.command()
@@ -290,13 +271,14 @@ def plot(path: pathlib.Path, all: bool, clean: bool) -> None:
     else:
         plot_detections_cli(path)
 
+
 @chirpdetector.group()
-def yoloutils() -> None:
+def datautils() -> None:
     """Utilities to manage YOLO-style training datasets."""
     pass
 
 
-@yoloutils.command()
+@datautils.command()
 @click.option(
     "--path",
     "-p",
@@ -322,7 +304,7 @@ def clean(path: pathlib.Path, img_ext: str) -> None:
     clean_yolo_dataset(path, img_ext)
 
 
-@yoloutils.command()
+@datautils.command()
 @click.option(
     "--path",
     "-p",
@@ -358,7 +340,7 @@ def subset(path: pathlib.Path, img_ext: str, n: int) -> None:
     subset_yolo_dataset(path, img_ext, n)
 
 
-@yoloutils.command()
+@datautils.command()
 @click.option(
     "--dataset1",
     "-d1",

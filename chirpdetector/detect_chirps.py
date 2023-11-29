@@ -225,7 +225,7 @@ def plot_detections(
                 f"{scores[i]:.2f}",
                 color="black",
                 fontsize=8,
-                bbox={"facecolor":"white", "alpha":1},
+                bbox={"facecolor": "white", "alpha": 1},
             )
     plt.axis("off")
     plt.savefig(save_path, dpi=300, bbox_inches="tight", pad_inches=0)

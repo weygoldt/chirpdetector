@@ -4,7 +4,7 @@ theme:
   name: material
   favicon: assets/logo.png
   logo: assets/logo.png
-  palette: 
+  palette:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -34,7 +34,6 @@ theme:
   icon:
     repo: fontawesome/brands/github
 
-
 plugins:
   - mkdocstrings:
       default_handler: python
@@ -43,7 +42,7 @@ plugins:
           paths: [src]
   - search
   - glightbox
-  
+
 extra:
   generator: false
 
@@ -69,28 +68,27 @@ repo_url: https://github.com/weygoldt/chirpdetector
 repo_name: weygoldt/chirpdetector
 
 nav:
-    - 'Home': 
-      - 'Introduction': 'index.md'  
-      - 'How it works': 'how_it_works.md'
-      - 'Demo': 'demo.md'
-    - 'Getting started':
-      - 'Installation': 'installation.md'
-      - 'Setup': 'setup.md'
-      - 'Detection': 'detection.md'
-      - 'Assingment': 'assingment.md'
-      - 'Visualization': 'visualization.md'
-    - 'Custom training':
-      - 'Creating a dataset': 'dataset.md'
-      - 'Labeling a dataset': 'labeling.md'
-      - 'Training': 'training.md'
-      - 'Helper commands': 'yolo-helpers.md'
-    - 'Contributing': 'contributing.md'
-    - 'API Reference':
-      - 'train_model': 'api/train_model.md'
-      - 'detect_chirps': 'api/detect_chirps.md'
-      - 'assign_chirps': 'api/assign_chirps.md'
-      - 'plot_detections': 'api/plot_detections.md'
-      - 'convert_data': 'api/convert_data.md'
-      - 'dataset_utils': 'api/dataset_utils.md'
-      
-
+  - "Home":
+      - "Introduction": "index.md"
+      - "How it works": "how_it_works.md"
+      - "Demo": "demo.md"
+  - "Getting started":
+      - "Installation": "installation.md"
+      - "Setup": "setup.md"
+      - "Detection": "detection.md"
+      - "Assingment": "assingment.md"
+      - "Visualization": "visualization.md"
+  - "Custom training":
+      - "Creating a dataset": "dataset.md"
+      - "Labeling a dataset": "labeling.md"
+      - "Training": "training.md"
+      - "Helper commands": "yolo-helpers.md"
+  - "Contributing": "contributing.md"
+  - "CLI Reference": "cli_reference.md"
+  - "API Reference":
+      - "train_model": "api/train_model.md"
+      - "detect_chirps": "api/detect_chirps.md"
+      - "assign_chirps": "api/assign_chirps.md"
+      - "plot_detections": "api/plot_detections.md"
+      - "convert_data": "api/convert_data.md"
+      - "dataset_utils": "api/dataset_utils.md"
