@@ -1152,24 +1152,24 @@
 
 <h1 id="installation">Installation</h1>
 <h2 id="installing-python">Installing Python</h2>
-<p>This package requires <code>python&gt;=3.11.5</code>, which at the time of publishing, is not 
+<p>This package requires <code>python&gt;=3.11.5</code>, which at the time of publishing, is not
 installed on all systems. The easiest way of installing a specific python
 version isolated from your system environtment is using <a href=""><code>pyenv</code></a>. Follow the
 installation instructions and come back.</p>
 <h2 id="setting-the-local-python-interpreter">Setting the local <code>python</code> interpreter</h2>
 <p>Navigate into your project root directory and run <code>pyenv local 3.11.5</code> to set
-the local python version to <code>3.11.5</code>. </p>
+the local python version to <code>3.11.5</code>.</p>
 <h2 id="creating-a-virtual-environment">Creating a virtual environment</h2>
 <p>Create a virtual environment using <code>python3 -m venv .venv</code>. Now activate it by
-running <code>source .venv/bin/activate</code>. </p>
+running <code>source .venv/bin/activate</code>.</p>
 <p>Alternatively, you can create a virtual environment using <code>pyenv</code> directly,
 wich has the benefit that it is activated automatically as soon as you <code>cd</code>
 into the directory. You can do this by running <code>pyenv virtualenv 3.11.5
-chirpdetection</code> and then running <code>pyenv local chirpdetection</code>. </p>
+chirpdetection</code> and then running <code>pyenv local chirpdetection</code>.</p>
 <h2 id="cloning-the-repository">Cloning the repository</h2>
 <p>As this project, as well as one of its dependencies, is currently under
-development, it is not yet published on <code>pypi</code> and you have to install it 
-from github. To do this, clone this repository, as well as the <code>gridtools</code> 
+development, it is not yet published on <code>pypi</code> and you have to install it
+from github. To do this, clone this repository, as well as the <code>gridtools</code>
 repository like so:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/weygoldt/chirpdetector<span class="w"> </span>chirpdetector
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/weygoldt/gridtools<span class="w"> </span>gridtools
@@ -1177,15 +1177,15 @@ repository like so:</p>
 <p>You should now have a <code>chirpdetector</code> and a <code>gridtools</code> subdirectory in your
 project directory.</p>
 <h2 id="installing-with-pip">Installing with <code>pip</code></h2>
-<p>Now you just have to install the packages locally using pythons package manager 
-<code>pip</code>. First install <code>gridtools</code> and then <code>chirpdetector</code>, otherwise 
+<p>Now you just have to install the packages locally using pythons package manager
+<code>pip</code>. First install <code>gridtools</code> and then <code>chirpdetector</code>, otherwise
 chirpdetector will look for gridtools and exit as it is not installed locally.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>gridtools<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">cd</span><span class="w"> </span>../chirpdetector<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
 </span></code></pre></div>
 <p>If both packages and their dependencies installed correctly, you are all set.
-You can now continue to <a href="../training/">training the detector</a> if you want to 
-train the neural network using your own dataset. In most cases, I recommend to 
+You can now continue to <a href="../training/">training the detector</a> if you want to
+train the neural network using your own dataset. In most cases, I recommend to
 start by downloading a pretrained model instead.</p>
 <h2 id="downloading-the-model">Downloading the model</h2>
 <p>Coming soon</p>
