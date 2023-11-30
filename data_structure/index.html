@@ -9,10 +9,10 @@
       
       
       
-        <link rel="prev" href="../training/">
+        <link rel="prev" href="../demo/">
       
       
-        <link rel="next" href="../contributing/">
+        <link rel="next" href="../installation/">
       
       
       <link rel="icon" href="../assets/logo.png">
@@ -20,7 +20,7 @@
     
     
       
-        <title>Helper commands - chirpdetector</title>
+        <title>Data structure - chirpdetector</title>
       
     
     
@@ -87,6 +87,11 @@
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
       
+        
+        <a href="#data-structure" class="md-skip">
+          Skip to content
+        </a>
+      
     </div>
     <div data-md-component="announce">
       
@@ -116,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Helper commands
+              Data structure
             
           </span>
         </div>
@@ -236,11 +241,13 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../data_structure/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
           
   
   Getting started
@@ -254,12 +261,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../dataset/" class="md-tabs__link">
           
   
@@ -479,6 +484,8 @@
       
   
   
+    
+  
   
     
     
@@ -488,14 +495,12 @@
       
       
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
           <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
@@ -509,7 +514,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Getting started
@@ -520,9 +525,18 @@
                 
   
   
+    
   
-    <li class="md-nav__item">
-      <a href="../data_structure/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -531,6 +545,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -647,8 +662,6 @@
       
   
   
-    
-  
   
     
     
@@ -658,12 +671,14 @@
       
       
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
@@ -677,7 +692,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             Custom training
@@ -748,16 +763,9 @@
                 
   
   
-    
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../yolo-helpers/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -766,7 +774,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -1002,6 +1009,8 @@
   
   
   
+    
+  
   
 </nav>
                   </div>
@@ -1019,9 +1028,31 @@
   
 
 
-  <h1>Helper commands</h1>
-
-<p>Wow, such empty <img alt="😮" class="twemoji" src="https://cdn.jsdelivr.net/gh/jdecked/twemoji@14.1.2/assets/svg/1f62e.svg" title=":open_mouth:" /></p>
+<h1 id="data-structure">Data structure</h1>
+<p>To detect chirps on a recording of single or multiple electrodes, the dataset
+must fulfill the following requirements:</p>
+<ul>
+<li>The dataset is a single directory containing subdirectories for each single
+<code>.raw</code> or <code>.wav</code> file, i.e. for each recording.</li>
+<li>Each raw recording file, i.e. the <code>.raw</code> or <code>.wav</code> file is named <code>traces_grid1.{file_ext}</code>.</li>
+<li>The fundamental frequencies of the fish in the recordings must be already 
+tracked using the <a href="https://github.com/tillraab/wavetracker">wavetracker</a> project.</li>
+</ul>
+<p>An example directory structure could look like the following:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a> dataset_root
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├──  chirpdetector.toml    # the chirpdetector config
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├──  2019-11-25-09_59      # dir of first recording
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│  ├──  fund_v.npy         # wavetracker 
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│  ├──  ident_v.npy        # wavetracker
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  ├──  idx_v.npy          # wavetracker
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  ├──  sign_v.npy         # wavetracker
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  ├──  times.npy          # wavetracker
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│  └──  traces_grid1.wav   # raw recording
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├──  2019-11-26-09_54      # dir of second recording
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│  ├──  fund_v.npy         # ...
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>...
+</span></code></pre></div>
+<p>If these requirements are met, detecting chirps should be no issue.</p>
 
 
 
@@ -1049,7 +1080,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../training/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Training">
+          <a href="../demo/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Demo">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
@@ -1059,20 +1090,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Training
+                Demo
               </div>
             </div>
           </a>
         
         
           
-          <a href="../contributing/" class="md-footer__link md-footer__link--next" aria-label="Next: Contributing">
+          <a href="../installation/" class="md-footer__link md-footer__link--next" aria-label="Next: Installation">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Contributing
+                Installation
               </div>
             </div>
             <div class="md-footer__button md-icon">

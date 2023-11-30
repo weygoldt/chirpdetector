@@ -9,7 +9,7 @@
       
       
       
-        <link rel="prev" href="../demo/">
+        <link rel="prev" href="../data_structure/">
       
       
         <link rel="next" href="../setup/">
@@ -86,6 +86,11 @@
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
+      
+        
+        <a href="#installation" class="md-skip">
+          Skip to content
+        </a>
       
     </div>
     <div data-md-component="announce">
@@ -242,7 +247,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+        <a href="../data_structure/" class="md-tabs__link">
           
   
   Getting started
@@ -520,6 +525,26 @@
                 
   
   
+  
+    <li class="md-nav__item">
+      <a href="../data_structure/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Data structure
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -528,6 +553,19 @@
       <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
       
       
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
       
       <a href="./" class="md-nav__link md-nav__link--active">
         
@@ -538,6 +576,60 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#installing-python" class="md-nav__link">
+    Installing Python
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-the-local-python-interpreter" class="md-nav__link">
+    Setting the local python interpreter
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating-a-virtual-environment" class="md-nav__link">
+    Creating a virtual environment
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloning-the-repository" class="md-nav__link">
+    Cloning the repository
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installing-with-pip" class="md-nav__link">
+    Installing with pip
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -982,6 +1074,51 @@
   
   
   
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#installing-python" class="md-nav__link">
+    Installing Python
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-the-local-python-interpreter" class="md-nav__link">
+    Setting the local python interpreter
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating-a-virtual-environment" class="md-nav__link">
+    Creating a virtual environment
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloning-the-repository" class="md-nav__link">
+    Cloning the repository
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installing-with-pip" class="md-nav__link">
+    Installing with pip
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -999,9 +1136,38 @@
   
 
 
-  <h1>Installation</h1>
-
-<p>Wow, such empty <img alt="😮" class="twemoji" src="https://cdn.jsdelivr.net/gh/jdecked/twemoji@14.1.2/assets/svg/1f62e.svg" title=":open_mouth:" /></p>
+<h1 id="installation">Installation</h1>
+<h2 id="installing-python">Installing Python</h2>
+<p>This package requires <code>python&gt;=3.11.5</code>, which at the time of publishing, is not 
+installed on all systems. The easiest way of installing a specific python
+version isolated from your system environtment is using <a href=""><code>pyenv</code></a>. Follow the
+installation instructions and come back.</p>
+<h2 id="setting-the-local-python-interpreter">Setting the local <code>python</code> interpreter</h2>
+<p>Navigate into your project root directory and run <code>pyenv local 3.11.5</code> to set
+the local python version to <code>3.11.5</code>. </p>
+<h2 id="creating-a-virtual-environment">Creating a virtual environment</h2>
+<p>Create a virtual environment using <code>python3 -m venv .venv</code>. Now activate it by
+running <code>source .venv/bin/activate</code>. </p>
+<p>Alternatively, you can create a virtual environment using <code>pyenv</code> directly,
+wich has the benefit that it is activated automatically as soon as you <code>cd</code>
+into the directory. You can do this by running <code>pyenv virtualenv 3.11.5
+chirpdetection</code> and then running <code>pyenv local chirpdetection</code>. </p>
+<h2 id="cloning-the-repository">Cloning the repository</h2>
+<p>As this project, as well as one of its dependencies, is currently under
+development, it is not yet published on <code>pypi</code> and you have to install it 
+from github. To do this, clone this repository, as well as the <code>gridtools</code> 
+repository like so:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/weygoldt/chirpdetector<span class="w"> </span>chirpdetector
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/weygoldt/gridtools<span class="w"> </span>gridtools
+</span></code></pre></div>
+<p>You should now have a <code>chirpdetector</code> and a <code>gridtools</code> subdirectory in your
+project directory.</p>
+<h2 id="installing-with-pip">Installing with <code>pip</code></h2>
+<p>Now you just have to install the packages locally using pythons package manager 
+<code>pip</code>. First install <code>gridtools</code> and then <code>chirpdetector</code>, otherwise 
+chirpdetector will look for gridtools and exit as it is not installed locally.</p>
+<p>```bash
+cd</p>
 
 
 
@@ -1029,7 +1195,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../demo/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Demo">
+          <a href="../data_structure/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Data structure">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
@@ -1039,7 +1205,7 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Demo
+                Data structure
               </div>
             </div>
           </a>
