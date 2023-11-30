@@ -106,7 +106,7 @@ def chirpdetector() -> None:
 )
 def copyconfig(input_path: pathlib.Path) -> None:
     """Copy the default config file to your dataset."""
-    copy_config(str(input_path))
+    copy_config(input_path)
 
 
 @chirpdetector.command()

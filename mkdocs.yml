@@ -73,6 +73,7 @@ nav:
       - "How it works": "how_it_works.md"
       - "Demo": "demo.md"
   - "Getting started":
+      - "Data structure": "data_structure.md"
       - "Installation": "installation.md"
       - "Setup": "setup.md"
       - "Detection": "detection.md"
