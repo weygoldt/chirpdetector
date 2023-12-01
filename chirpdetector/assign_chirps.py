@@ -233,6 +233,9 @@ def make_chirp_indices_on_raw_data(
     t1 = chirp_df.t1.to_numpy()[idx] - 0.5 * diffr
     t2 = chirp_df.t2.to_numpy()[idx] + 0.5 * diffr
 
+    if t1 < 0:
+        t1 = 0
+
     start_idx = int(np.round(t1 * data.grid.samplerate))
     stop_idx = int(np.round(t2 * data.grid.samplerate))
     center_idx = int(np.round(chirp * data.grid.samplerate))

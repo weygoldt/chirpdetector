@@ -384,8 +384,8 @@ def cut_spec_to_frequency_limits(
 def convert_model_output_to_df(
     outputs: torch.Tensor,
     threshold: float,
-    spec_times: np.ndarray,
-    spec_freqs: np.ndarray,
+    spec_times: list,
+    spec_freqs: list,
 ) -> Tuple[pd.DataFrame, np.ndarray]:
     """Convert the model output to a dataframe.
 
@@ -438,7 +438,9 @@ def convert_model_output_to_df(
     return bbox_df, scores
 
 
-def collect_specs(conf: Config, data: Dataset) -> Tuple[list, list, list]:
+def collect_specs(
+    conf: Config, data: Dataset, t1: float
+) -> Tuple[list, list, list]:
     """Collect the spectrograms of a dataset.
 
     Collec a batch of  sum spectrograms of a certain length (e.g. 15 seconds)
@@ -451,6 +453,8 @@ def collect_specs(conf: Config, data: Dataset) -> Tuple[list, list, list]:
         The configuration object.
     - `data` : `Dataset`
         The gridtools dataset to detect chirps on.
+    - `t1` : `float`
+        The start time of the dataset.
 
     Returns
     -------
@@ -512,6 +516,7 @@ def collect_specs(conf: Config, data: Dataset) -> Tuple[list, list, list]:
             hop_length=hop_len,
             samplerate=data.grid.samplerate,
         )
+        spec_times += t1
 
         # cut off everything outside the frequency limits
         spec, spec_freqs = cut_spec_to_frequency_limits(
@@ -531,7 +536,7 @@ def collect_specs(conf: Config, data: Dataset) -> Tuple[list, list, list]:
     return specs, times, freqs
 
 
-def detect_chirps(conf: Config, data: Dataset) -> None:
+def detect_chirps(conf: Config, data: Dataset) -> None:  # noqa
     """Detect chirps on a spectrogram.
 
     Parameters
@@ -589,14 +594,20 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         total_batch_startt = time.time()
 
         # make a subset of for the current chunk
+        startt = time.time()
         chunk = subset(data, start, stop, mode="index")
+        endt = time.time()
+        msg = f"Creating the batch subset took {endt - startt:.2f} seconds."
+        prog.console.log(msg)
 
         # skip if there is no wavetracker tracking data in the current chunk
         if len(chunk.track.indices) == 0:
             continue
 
         # collect the spectrograms of the current batch
-        specs, spec_times, spec_freqs = collect_specs(conf, chunk)
+        t1 = start / data.grid.samplerate
+        # chunk.track.times = chunk.track.times + t1
+        specs, spec_times, spec_freqs = collect_specs(conf, chunk, t1)
 
         # perform the detection
         startt = time.time()
@@ -636,7 +647,8 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         total_batch_endt = time.time()
         msg = (
             f"Total batch processing time: "
-            f"{total_batch_endt - total_batch_startt:.2f} seconds."
+            f"{total_batch_endt - total_batch_startt:.2f} seconds.\n"
+            "---------------------------------------------------------------"
         )
         prog.console.log(msg)
         logger.debug(msg)
@@ -689,7 +701,11 @@ def detect_cli(input_path: pathlib.Path) -> None:
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
         for dataset in datasets:
+            startt = time.time()
             data = load(dataset)
+            stopt = time.time()
+            msg = f"Loading the dataset took {stopt - startt:.2f} seconds.\n"
+            prog.console.log(msg)
             detect_chirps(config, data)
             prog.update(task, advance=1)
         prog.update(task, completed=len(datasets))
