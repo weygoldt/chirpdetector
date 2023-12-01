@@ -1,7 +1,9 @@
 """Detect chirps on a spectrogram."""
 
+import logging
 import pathlib
 import shutil
+import time
 from typing import Tuple
 
 import matplotlib as mpl
@@ -380,7 +382,46 @@ def cut_spec_to_frequency_limits(
     return spec, spec_freqs
 
 
-def detect_chirps(conf: Config, data: Dataset) -> None:
+def convert_model_output_to_df(
+    outputs: torch.Tensor, threshold: float
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """Convert the model output to a dataframe.
+
+    Parameters
+    ----------
+    - `outputs` : `torch.Tensor`
+        The output of the model.
+    - `threshold` : `float`
+        The threshold for the detections.
+
+    Returns
+    -------
+    - `pandas.DataFrame`
+        The dataframe containing the bounding boxes.
+    - `numpy.ndarray`
+        The scores of the detections.
+    """
+    # put the boxes, scores and labels into the dataset
+    bboxes = outputs[0]["boxes"].detach().cpu().numpy()
+    scores = outputs[0]["scores"].detach().cpu().numpy()
+    labels = outputs[0]["labels"].detach().cpu().numpy()
+
+    # remove all boxes with a score below the threshold
+    bboxes = bboxes[scores > threshold]
+    labels = labels[scores > threshold]
+    scores = scores[scores > threshold]
+
+    # save the bboxes to a dataframe
+    bbox_df = pd.DataFrame(
+        data=bboxes,
+        columns=["x1", "y1", "x2", "y2"],
+    )
+    bbox_df["score"] = scores
+    bbox_df["label"] = labels
+    return bbox_df, scores
+
+
+def detect_chirps(conf: Config, data: Dataset) -> None:  # noqa
     """Detect chirps on a spectrogram.
 
     Parameters
@@ -395,6 +436,7 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     - `None`
     """
     # load the model and the checkpoint, and set it to evaluation mode
+    logger = logging.getLogger(__name__)
     device = get_device()
     model = load_fasterrcnn(num_classes=len(conf.hyper.classes))
     checkpoint = torch.load(
@@ -422,6 +464,9 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
 
     # iterate over the chunks
     overwritten = False
+    msg = f"Detecting chirps in {data.path.name}..."
+    prog.console.log(msg)
+    logger.info(msg)
     for chunk_no in range(nchunks):
         # get start and stop indices for the current chunk
         # including some overlap to compensate for edge effects
@@ -434,18 +479,6 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
             max_end=data.grid.rec.shape[0],
         )
 
-        # if the stop time of the current chunk is larger than the last time
-        # of the track, move it back
-        # if data.track.times[-1] < stop_t:
-        #     stop_t = data.track.times[-1]
-        #     idx2 = int(stop_t * data.grid.samplerate)
-
-        # if the start time of the current chunk is smaller than the
-        # start time of the track, move it forward
-        # if data.track.times[0] > start_t:
-        #     start_t = data.track.times[0]
-        #     idx1 = int(start_t * data.grid.samplerate)
-
         # make a subset of for the current chunk
         chunk = subset(data, idx1, idx2, mode="index")
 
@@ -454,7 +487,12 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
             continue
 
         # compute the spectrogram for each electrode of the current chunk
+        startt = time.time()
         spec = compute_sum_spectrogam(chunk, nfft, hop_len)
+        endt = time.time()
+        msg = f"Computing spectrogram took {endt - startt:.2f} seconds."
+        prog.console.log(msg)
+        logger.debug(msg)
 
         # compute the time and frequency axes of the spectrogam
         spec_times, spec_freqs = make_spectrogram_axes(
@@ -476,18 +514,13 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         img = spec_to_image(spec)
 
         # perform the detection
+        startt = time.time()
         with torch.inference_mode():
             outputs = model([img])
-
-        # put the boxes, scores and labels into the dataset
-        bboxes = outputs[0]["boxes"].detach().cpu().numpy()
-        scores = outputs[0]["scores"].detach().cpu().numpy()
-        labels = outputs[0]["labels"].detach().cpu().numpy()
-
-        # remove all boxes with a score below the threshold
-        bboxes = bboxes[scores > conf.det.threshold]
-        labels = labels[scores > conf.det.threshold]
-        scores = scores[scores > conf.det.threshold]
+        endt = time.time()
+        msg = f"Detection took {endt - startt:.2f} seconds."
+        prog.console.log(msg)
+        logger.debug(msg)
 
         # make a path to save the spectrogram
         path = data.path / "chirpdetections"
@@ -496,16 +529,13 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
             overwritten = True
         path.mkdir(exist_ok=True)
         path /= f"cpd_detected_{chunk_no:05d}.png"
+
+        # put the boxes, scores and labels into the dataset
+        bbox_df, scores = convert_model_output_to_df(
+            outputs, conf.det.threshold
+        )
         if np.any(scores > conf.det.threshold):
             plot_detections(img, outputs[0], conf.det.threshold, path, conf)
-
-        # save the bboxes to a dataframe
-        bbox_df = pd.DataFrame(
-            data=bboxes,
-            columns=["x1", "y1", "x2", "y2"],
-        )
-        bbox_df["score"] = scores
-        bbox_df["label"] = labels
 
         # convert the pixel coordinates to time and frequency
         bbox_df = pixel_bbox_to_time_frequency(bbox_df, spec_times, spec_freqs)
@@ -540,12 +570,9 @@ def detect_cli(input_path: pathlib.Path) -> None:
     -------
     - `None`
     """
-    # make the global logger object
-    # global logger  # pylint: disable=global-statement
-    path = pathlib.Path(input_path)
-    logger = make_logger(__name__, path / "chirpdetector.log")
-    datasets = [folder for folder in path.iterdir() if folder.is_dir()]
-    confpath = path / "chirpdetector.toml"
+    logger = make_logger(__name__, input_path / "chirpdetector.log")
+    datasets = [folder for folder in input_path.iterdir() if folder.is_dir()]
+    confpath = input_path / "chirpdetector.toml"
 
     # load the config file and print a warning if it does not exist
     if confpath.exists():
@@ -561,13 +588,10 @@ def detect_cli(input_path: pathlib.Path) -> None:
     # detect chirps in all datasets in the specified path
     # and show a progress bar
     prog.console.rule("Starting detection")
+    logger.info("Starting detection -----------------------------------------")
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
         for dataset in datasets:
-            msg = f"Detecting chirps in {dataset.name}..."
-            prog.console.log(msg)
-            logger.info(msg)
-
             data = load(dataset)
             detect_chirps(config, data)
             prog.update(task, advance=1)
