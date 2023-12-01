@@ -1,5 +1,7 @@
 """Utilities for signal processing."""
 
+from contextlib import suppress
+from multiprocessing import Pool, set_start_method
 from typing import Tuple, TypeVar
 
 import numpy as np
@@ -149,6 +151,82 @@ def make_spectrogram_axes(
     spectrogram_times = np.arange(start, stop + 1, hop_length) / samplerate
     spectrogram_freqs = np.arange(0, nfft / 2 + 1) * samplerate / nfft
     return spectrogram_times, spectrogram_freqs
+
+
+def compute_spectrogram_worker(
+    args: Tuple[int, np.ndarray, float, int, int]
+) -> torch.Tensor:
+    """Compute the spectrogram for a single electrode.
+
+    Parameters
+    ----------
+    - `args` : `Tuple[int, np.ndarray, float, int, int]`
+        The arguments for the worker.
+
+    Returns
+    -------
+    - `torch.Tensor`
+        The spectrogram.
+    """
+    _, signal, sampling_rate, nfft, hop_len = args
+    electrode_spectrogram, _, _ = compute_spectrogram(
+        data=signal.copy(),
+        samplingrate=sampling_rate,
+        nfft=nfft,
+        hop_length=hop_len,
+    )
+    return electrode_spectrogram
+
+
+def compute_sum_spectrogram_parallel(
+    data: Dataset, nfft: int, hop_len: int
+) -> torch.Tensor:
+    """Compute the sum spectrogram of a chunk.
+
+    Parameters
+    ----------
+    - `data` : `Dataset`
+        The dataset to make bounding boxes for.
+    - `nfft` : `int`
+        The number of samples in the FFT.
+    - `hop_len` : `int`
+
+    Returns
+    -------
+    - `torch.tensor`
+        The sum spectrogram.
+    """
+    with suppress(RuntimeError):
+        set_start_method("spawn")
+
+    n_electrodes = data.grid.rec.shape[1]
+
+    # Create arguments for parallel processing
+    args_list = [
+        (
+            electrode,
+            data.grid.rec[:, electrode],
+            data.grid.samplerate,
+            nfft,
+            hop_len,
+        )
+        for electrode in range(n_electrodes)
+    ]
+
+    # Use multiprocessing to parallelize spectrogram computation
+    with Pool() as pool:
+        electrode_spectrograms = pool.map(
+            compute_spectrogram_worker, args_list
+        )
+
+    # Sum spectrograms over all electrodes
+    spectrogram = torch.sum(torch.stack(electrode_spectrograms), dim=0)
+
+    # Normalize spectrogram by the number of electrodes
+    spectrogram /= n_electrodes
+
+    # Convert the spectrogram to dB
+    return to_decibel(spectrogram)
 
 
 def compute_sum_spectrogam(
