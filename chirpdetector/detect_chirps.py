@@ -4,7 +4,7 @@ import logging
 import pathlib
 import shutil
 import time
-from typing import Tuple
+from typing import Self, Tuple
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -43,6 +43,22 @@ prog = Progress(
     MofNCompleteColumn(),
     TimeElapsedColumn(),
 )
+
+
+class Timer:
+    """A simple timer class."""
+
+    def __enter__(self: Self) -> Self:
+        """Start the timer."""
+        self.start_time = time.time()
+        return self
+
+    def __exit__(
+        self: Self, exc_type: str, exc_value: str, traceback: str
+    ) -> None:
+        """Stop the timer."""
+        self.end_time = time.time()
+        self.execution_time = self.end_time - self.start_time
 
 
 def float_index_interpolation(
@@ -475,8 +491,8 @@ def collect_specs(
 
     # get the frequency limits of the spectrogram
     flims = (
-        np.min(data.track.freqs) - conf.spec.freq_pad,
-        np.max(data.track.freqs) + conf.spec.freq_pad,
+        float(np.min(data.track.freqs) - conf.spec.freq_pad),
+        float(np.max(data.track.freqs) + conf.spec.freq_pad),
     )
 
     # make the start and stop indices for all chunks
@@ -492,7 +508,7 @@ def collect_specs(
     specs, times, freqs = [], [], []
 
     # iterate over the chunks
-    for start, stop in zip(idx1, idx2):
+    for chunk_no, (start, stop) in enumerate(zip(idx1, idx2)):
         # make a subset of for the current chunk
         chunk = subset(data, start, stop, mode="index")
 
@@ -501,10 +517,12 @@ def collect_specs(
             continue
 
         # compute the spectrogram for each electrode of the current chunk
-        startt = time.time()
-        spec = compute_sum_spectrogam(chunk, nfft, hop_len)
-        endt = time.time()
-        msg = f"Computing spectrogram took {endt - startt:.2f} seconds."
+        with Timer() as t:
+            spec = compute_sum_spectrogam(chunk, nfft, hop_len)
+        msg = (
+            f"Computing the sum spectrogram of chunk {chunk_no} took "
+            f"{t.execution_time:.2f} seconds."
+        )
         prog.console.log(msg)
         logger.debug(msg)
 
@@ -536,7 +554,38 @@ def collect_specs(
     return specs, times, freqs
 
 
-def detect_chirps(conf: Config, data: Dataset) -> None:  # noqa
+def handle_dataframes(
+    bbox_dfs: list[pd.DataFrame], output_path: pathlib.Path
+) -> None:
+    """Handle concatenation and saving of dataframes.
+
+    Parameters
+    ----------
+    - `bbox_dfs` : `list[pandas.DataFrame]`
+        The list of dataframes to concatenate.
+    - `output_path` : `pathlib.Path`
+        The path to save the dataframe to.
+
+    Returns
+    -------
+    - `None`
+    """
+    # concatenate all dataframes
+    bbox_df = pd.concat(bbox_dfs)
+    bbox_reset = bbox_df.reset_index(drop=True)
+
+    # sort the dataframe by t1
+    bbox_sorted = bbox_reset.sort_values(by="t1")
+
+    # sort the columns
+    bbox_sorted = bbox_sorted[
+        ["label", "score", "x1", "y1", "x2", "y2", "t1", "f1", "t2", "f2"]
+    ]
+    # save the dataframe
+    bbox_sorted.to_csv(output_path / "chirpdetector_bboxes.csv", index=False)
+
+
+def detect_chirps(conf: Config, data: Dataset) -> None:
     """Detect chirps on a spectrogram.
 
     Parameters
@@ -565,39 +614,38 @@ def detect_chirps(conf: Config, data: Dataset) -> None:  # noqa
         conf.spec.time_window * conf.spec.batch_size
     ) - conf.spec.spec_overlap * (conf.spec.batch_size - 1)
     window_duration_samples = int(window_duration * data.grid.samplerate)
+
     msg = (
         f"Window duration: {window_duration:.2f} seconds.\n"
         f"Window duration in samples: {window_duration_samples} samples."
     )
     prog.console.log(msg)
 
-    # make spec config
-    window_overlap_samples = int(conf.spec.spec_overlap * data.grid.samplerate)
-
     # make start and stop indices for all chunks with overlap
+    window_overlap_samples = int(conf.spec.spec_overlap * data.grid.samplerate)
     idx1 = np.arange(
         0,
-        data.grid.rec.shape[0] - window_duration_samples,
-        window_duration_samples - window_overlap_samples,
+        int(data.grid.rec.shape[0] - window_duration_samples),
+        int(window_duration_samples - window_overlap_samples),
     )
     idx2 = idx1 + window_duration_samples
 
     # make a list to store the bboxes in for each chunk
     bbox_dfs = []
 
-    # iterate over the chunks
     msg = f"Detecting chirps in {data.path.name}..."
     prog.console.log(msg)
     logger.info(msg)
+
+    # iterate over the chunks
     overwritten = False
     for start, stop in zip(idx1, idx2):
         total_batch_startt = time.time()
 
         # make a subset of for the current chunk
-        startt = time.time()
-        chunk = subset(data, start, stop, mode="index")
-        endt = time.time()
-        msg = f"Creating the batch subset took {endt - startt:.2f} seconds."
+        with Timer() as t:
+            chunk = subset(data, start, stop, mode="index")
+        msg = f"Creating the batch subset took {t.execution_time:.2f} seconds."
         prog.console.log(msg)
 
         # skip if there is no wavetracker tracking data in the current chunk
@@ -606,15 +654,12 @@ def detect_chirps(conf: Config, data: Dataset) -> None:  # noqa
 
         # collect the spectrograms of the current batch
         t1 = start / data.grid.samplerate
-        # chunk.track.times = chunk.track.times + t1
         specs, spec_times, spec_freqs = collect_specs(conf, chunk, t1)
 
         # perform the detection
-        startt = time.time()
-        with torch.inference_mode():
+        with Timer() as t, torch.inference_mode():
             outputs = model(specs)
-        endt = time.time()
-        msg = f"Detection took {endt - startt:.2f} seconds."
+        msg = f"Detection took {t.execution_time:.2f} seconds."
         prog.console.log(msg)
         logger.debug(msg)
 
@@ -629,6 +674,11 @@ def detect_chirps(conf: Config, data: Dataset) -> None:  # noqa
         bbox_df, scores = convert_model_output_to_df(
             outputs, conf.det.threshold, spec_times, spec_freqs
         )
+
+        num_chirps = len(scores[scores > conf.det.threshold])
+        msg = f"Number of chirps detected: {num_chirps}"
+        prog.console.log(msg)
+
         # startt = time.time()
         # if np.any(scores > conf.det.threshold):
         #     for spec_no, (img, out) in enumerate(zip(specs,outputs)):
@@ -648,24 +698,12 @@ def detect_chirps(conf: Config, data: Dataset) -> None:  # noqa
         msg = (
             f"Total batch processing time: "
             f"{total_batch_endt - total_batch_startt:.2f} seconds.\n"
-            "---------------------------------------------------------------"
         )
         prog.console.log(msg)
+        prog.console.rule("Next batch")
         logger.debug(msg)
 
-    # concatenate all dataframes
-    bbox_df = pd.concat(bbox_dfs)
-    bbox_reset = bbox_df.reset_index(drop=True)
-
-    # sort the dataframe by t1
-    bbox_sorted = bbox_reset.sort_values(by="t1")
-
-    # sort the columns
-    bbox_sorted = bbox_sorted[
-        ["label", "score", "x1", "y1", "x2", "y2", "t1", "f1", "t2", "f2"]
-    ]
-    # save the dataframe
-    bbox_sorted.to_csv(data.path / "chirpdetector_bboxes.csv", index=False)
+    handle_dataframes(bbox_dfs, data.path)
 
 
 def detect_cli(input_path: pathlib.Path) -> None:
