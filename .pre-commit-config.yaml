@@ -40,3 +40,13 @@ repos:
         args: [--fix]
       - id: ruff-format
         types_or: [python, pyi, jupyter]
+
+  # run unit tests
+  - repo: local
+    hooks:
+      - id: pytest-check
+        name: pytest-check
+        entry: pytest
+        language: system
+        pass_filenames: false
+        always_run: true
