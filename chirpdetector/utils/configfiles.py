@@ -48,6 +48,7 @@ class Spectrogram(BaseModel):
     freq_pad: float
     overlap_frac: float
     spec_overlap: float
+    batch_size: int
 
 
 class Config(BaseModel):
