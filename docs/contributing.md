@@ -33,12 +33,12 @@ list before opening a pull request.
       spectrograms parallely and pipe them all through the detector. And do this
       simulatenously from multiple cores (if the GPU can receive tensors from multiple
       cores).
-- [ ] Check execution time for all the detect functions, got really slow after refactoring for some reason.
 - [ ] Update all the docstrings after refactoring.
 - [ ] Move hardcoded params from assignment algo into config.toml
 - [ ] Split the messy training loop into functions.
 - [ ] Remove all pyright warnings.
 - [ ] Build github actions CI/CD pipeline for codecov etc.
+- [x] Check execution time for all the detect functions, got really slow after refactoring for some reason.
 - [x] Fix make test, fails after ruff run
 - [x] Refactor train, detect, convert. All into much smaller functions. Move accesory functions to utils
 - [x] Make complete codebase pass ruff

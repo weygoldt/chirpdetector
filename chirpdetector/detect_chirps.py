@@ -679,6 +679,7 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         msg = f"Number of chirps detected: {num_chirps}"
         prog.console.log(msg)
 
+        # Plot the spectrograms with bounding boxes (this is slow)
         # startt = time.time()
         # if np.any(scores > conf.det.threshold):
         #     for spec_no, (img, out) in enumerate(zip(specs,outputs)):
