@@ -71,6 +71,7 @@ class PerformanceMetrics(BaseModel):
 
     average_precision: List[float]  # average precision per class
     mean_avg_prec: float  # mean average precision
+    checkpoint: bool = False  # whether this is a checkpoint
 
 
 class FoldMetrics(BaseModel):
@@ -871,7 +872,6 @@ def train(config: Config, mode: str = "pretrain") -> None:  # noqa
                         num_classes=1,
                     )
                     metric_sweep.append(metrics)
-                epoch_metrics.append(metric_sweep)
 
                 # save losses for this epoch
                 epoch_train_loss.append(train_loss)
@@ -885,13 +885,18 @@ def train(config: Config, mode: str = "pretrain") -> None:  # noqa
                 if np.mean(val_loss) < best_val_loss:
                     best_val_loss = sum(val_loss) / len(val_loss)
 
+                    # get the mean average precision
                     ap = np.mean(
                         [metric.mean_avg_prec for metric in metric_sweep]
                     )
 
+                    # write checkpoint to the metrics
+                    for metric in metric_sweep:
+                        metric.checkpoint = True
+
                     msg = (
-                        f"New best validation loss: {best_val_loss:.4f}, "
-                        f"Current AP@.50: {ap:.4f}, "
+                        f"New best validation loss: {best_val_loss:.4f}, \n"
+                        f"Current AP@[.50:.05:.95] {ap:.4f}, \n"
                         "saving model..."
                     )
                     progress.console.log(msg)
@@ -904,6 +909,9 @@ def train(config: Config, mode: str = "pretrain") -> None:  # noqa
                         optimizer=optimizer,
                         path=modelpath,
                     )
+
+                # save the metrics for this epoch
+                epoch_metrics.append(metric_sweep)
 
                 # plot the losses for this epoch
                 plot_epochs(
