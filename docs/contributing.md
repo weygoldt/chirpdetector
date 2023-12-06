@@ -30,7 +30,9 @@ as github issues. Until them, if you fixed something, please check it off on thi
 list before opening a pull request.
 
 - [ ] Write an assingment benchmarking
-- [ ] Write a script to analyze the Json dumps from the training loop
+- [ ] Write an assignmen GUI to create a ground truth
+- [ ] Try a random forest classifier on PCAed envelope extractions to assign chirps
+- [ ] Finish a script to analyze the Json dumps from the training loop
 - [ ] Update all the docstrings after refactoring.
 - [ ] Move hardcoded params from assignment algo into config.toml
 - [ ] Split the messy training loop into functions.
