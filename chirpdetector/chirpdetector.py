@@ -17,6 +17,7 @@ from .dataset_utils import (
     subset_yolo_dataset,
 )
 from .detect_chirps import detect_cli
+from .eval_detection import eval_detection_cli
 from .plot_detections import (
     clean_all_plots_cli,
     clean_plots_cli,
@@ -220,6 +221,25 @@ def detect(path: pathlib.Path) -> None:
 def assign(path: pathlib.Path) -> None:
     """Detect chirps on a spectrogram."""
     assign_cli(path)
+
+
+@chirpdetector.command()
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        path_type=pathlib.Path,
+    ),
+    required=True,
+    help="Path to the dataset.",
+)
+def evaltrain(path: pathlib.Path) -> None:
+    """Detect chirps on a spectrogram."""
+    eval_detection_cli(path)
 
 
 @chirpdetector.command()
