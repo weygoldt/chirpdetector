@@ -2,8 +2,8 @@
 
 import logging
 import pathlib
-import shutil
 import time
+import uuid
 from typing import Self, Tuple
 
 import matplotlib as mpl
@@ -24,12 +24,14 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from .convert_data import make_file_tree, numpy_to_pil
 from .models.utils import get_device, load_fasterrcnn
 from .utils.configfiles import Config, load_config
 from .utils.logging import make_logger
 from .utils.signal_processing import (
     compute_sum_spectrogam,
     make_spectrogram_axes,
+    zscore_standardize,
 )
 
 # Use non-gui backend for matplotlib to
@@ -140,6 +142,88 @@ def float_index_interpolation(
     return (1 - weights) * data_arr[lower_indices] + weights * data_arr[
         upper_indices
     ]
+
+
+def convert_to_training_data(
+    specs: list,
+    outputs: list,
+    path: pathlib.Path,
+    threshold: float = 0.5,
+) -> None:
+    """Convert the model output to training data.
+
+    Parameters
+    ----------
+    - `specs` : `list`
+        The spectrograms.
+    - `outputs` : `list`
+        The output of the model.
+    - `path` : `pathlib.Path`
+        The path to save the training data to.
+    - `threshold` : `float`
+        The threshold for the detections.
+
+    Returns
+    -------
+    - `None`
+    """
+    outpath = path / "training_data"
+    outpath.mkdir(exist_ok=True)
+    make_file_tree(outpath, wipe=False)
+
+    for i, spec_tensor in enumerate(specs):
+        # make spec a 2d array
+        spec = spec_tensor.cpu().numpy()[0]
+        imgname = str(uuid.uuid4())
+
+        # save the specs
+        img = zscore_standardize(spec)
+        img = numpy_to_pil(spec)
+        img_path = outpath / "images" / f"{imgname}.png"
+
+        bboxes = outputs[i]["boxes"].detach().cpu().numpy()
+        scores = outputs[i]["scores"].detach().cpu().numpy()
+        labels = outputs[i]["labels"].detach().cpu().numpy()
+
+        # remove all boxes with a score below the threshold
+        bboxes = bboxes[scores > threshold]
+        labels = labels[scores > threshold]
+        scores = scores[scores > threshold]
+
+        # if there are no detections, skip this spec
+        if len(bboxes) == 0:
+            continue
+
+        img.save(img_path)
+
+        # convert from x1, y1, x2, y2 to centerx, centery, width, height
+        centerx = np.array((bboxes[0] + bboxes[2]) / 2)
+        centery = np.array((bboxes[1] + bboxes[3]) / 2)
+        width = np.array(bboxes[2] - bboxes[0])
+        height = np.array(bboxes[3] - bboxes[1])
+
+        # flip centery because origin is top left
+        centery = spec.shape[0] - centery
+
+        # make relative to image size
+        centerx = centerx / spec.shape[1]
+        centery = centery / spec.shape[0]
+        width = width / spec.shape[1]
+        height = height / spec.shape[0]
+        labels = np.ones_like(centerx, dtype=int)
+
+        # make a new dataframe with the relative coordinates
+        new_bboxes = pd.DataFrame(
+            {"l": labels, "x": centerx, "y": centery, "w": width, "h": height},
+        )
+
+        # save dataframe for every spec without headers as txt
+        new_bboxes.to_csv(
+            outpath / "labels" / f"{imgname}.txt",
+            header=False,
+            index=False,
+            sep=" ",
+        )
 
 
 def coords_to_mpl_rectangle(boxes: np.ndarray) -> np.ndarray:
@@ -585,7 +669,9 @@ def handle_dataframes(
     bbox_sorted.to_csv(output_path / "chirpdetector_bboxes.csv", index=False)
 
 
-def detect_chirps(conf: Config, data: Dataset) -> None:
+def detect_chirps(
+    conf: Config, data: Dataset, make_training_data: bool
+) -> None:
     """Detect chirps on a spectrogram.
 
     Parameters
@@ -638,7 +724,7 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     logger.info(msg)
 
     # iterate over the chunks
-    overwritten = False
+    # overwritten = False
     for start, stop in zip(idx1, idx2):
         total_batch_startt = time.time()
 
@@ -663,13 +749,6 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         prog.console.log(msg)
         logger.debug(msg)
 
-        # make a path to save the spectrogram
-        path = data.path / "chirpdetections"
-        if path.exists() and overwritten is False:
-            shutil.rmtree(path)
-            overwritten = True
-        path.mkdir(exist_ok=True)
-
         # put the boxes, scores and labels into the dataset
         bbox_df, scores = convert_model_output_to_df(
             outputs, conf.det.threshold, spec_times, spec_freqs
@@ -679,7 +758,18 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
         msg = f"Number of chirps detected: {num_chirps}"
         prog.console.log(msg)
 
+        if make_training_data:
+            convert_to_training_data(
+                specs, outputs, data.path, threshold=conf.det.threshold
+            )
+
         # Plot the spectrograms with bounding boxes (this is slow)
+        # # make a path to save the spectrogram
+        # path = data.path / "chirpdetections"
+        # if path.exists() and overwritten is False:
+        #     shutil.rmtree(path)
+        #     overwritten = True
+        # path.mkdir(exist_ok=True)
         # startt = time.time()
         # if np.any(scores > conf.det.threshold):
         #     for spec_no, (img, out) in enumerate(zip(specs,outputs)):
@@ -707,7 +797,7 @@ def detect_chirps(conf: Config, data: Dataset) -> None:
     handle_dataframes(bbox_dfs, data.path)
 
 
-def detect_cli(input_path: pathlib.Path) -> None:
+def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
     """Terminal interface for the detection function.
 
     Parameters
@@ -745,6 +835,6 @@ def detect_cli(input_path: pathlib.Path) -> None:
             stopt = time.time()
             msg = f"Loading the dataset took {stopt - startt:.2f} seconds.\n"
             prog.console.log(msg)
-            detect_chirps(config, data)
+            detect_chirps(config, data, make_training_data)
             prog.update(task, advance=1)
         prog.update(task, completed=len(datasets))

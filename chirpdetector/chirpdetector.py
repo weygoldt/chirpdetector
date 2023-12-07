@@ -199,9 +199,16 @@ def train(config_path: pathlib.Path, mode: str) -> None:
     required=True,
     help="Path to the dataset.",
 )
-def detect(path: pathlib.Path) -> None:
+@click.option(
+    "--make_training_data",
+    "-t",
+    is_flag=True,
+    default=False,
+    help="Whether to make training data. Not recommended for large datasets.",
+)
+def detect(path: pathlib.Path, make_training_data: bool) -> None:
     """Detect chirps on a spectrogram."""
-    detect_cli(path)
+    detect_cli(path, make_training_data)
 
 
 @chirpdetector.command()

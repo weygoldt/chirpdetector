@@ -26,7 +26,7 @@ from .utils.signal_processing import (
 con = Console()
 
 
-def make_file_tree(path: pathlib.Path) -> None:
+def make_file_tree(path: pathlib.Path, wipe: bool = True) -> None:
     """Build a file tree for the training dataset.
 
     Parameters
@@ -45,7 +45,7 @@ def make_file_tree(path: pathlib.Path) -> None:
         )
         raise ValueError(msg)
 
-    if path.exists():
+    if path.exists() and wipe:
         shutil.rmtree(path)
 
     path.mkdir(exist_ok=True, parents=True)
