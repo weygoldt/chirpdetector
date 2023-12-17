@@ -31,6 +31,7 @@ list before opening a pull request.
 
 - [ ] Write an assingment benchmarking
 - [ ] Write an assignmen GUI to create a ground truth
+- [ ] Find out why current assignment algo is failing at raw = raw1 - raw2
 - [ ] Try a random forest classifier on PCAed envelope extractions to assign chirps
 - [ ] Finish a script to analyze the Json dumps from the training loop
 - [ ] Update all the docstrings after refactoring.
