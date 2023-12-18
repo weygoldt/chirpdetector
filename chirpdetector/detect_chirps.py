@@ -5,6 +5,7 @@ import pathlib
 import time
 import uuid
 from typing import Self, Tuple
+import shutil
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -23,6 +24,7 @@ from rich.progress import (
     SpinnerColumn,
     TimeElapsedColumn,
 )
+import h5py
 
 from .convert_data import make_file_tree, numpy_to_pil
 from .models.utils import get_device, load_fasterrcnn
@@ -61,6 +63,33 @@ class Timer:
         """Stop the timer."""
         self.end_time = time.time()
         self.execution_time = self.end_time - self.start_time
+
+
+def clean_up_dir(path: pathlib.Path) -> None:
+    """Clean up the directory. Nothing fancy."""
+    # clean up spectrogramns
+    files = path.glob("chirpdetector*.npy")
+    for file in files:
+        file.unlink()
+    # clean up training data and plotting directories
+    plotdir = path / "chirpdetections"
+    if plotdir.exists():
+        shutil.rmtree(plotdir)
+    traindir = path / "training_data"
+    if traindir.exists():
+        shutil.rmtree(traindir)
+    # clean up chirpdetections
+    files = path.glob("chirp_*_rcnn.npy")
+    for file in files:
+        file.unlink()
+    # clean up the bbox csv
+    files = path.glob("chirpdetector_bboxes.csv")
+    for file in files:
+        file.unlink()
+    # clean up the h5 file
+    files = path.glob("chirpdetector_spec.hdf5")
+    for file in files:
+        file.unlink()
 
 
 def float_index_interpolation(
@@ -177,7 +206,7 @@ def convert_to_training_data(
         imgname = str(uuid.uuid4())
 
         # save the specs
-        img = zscore_standardize(spec)
+        # img = zscore_standardize(spec)
         img = numpy_to_pil(spec)
         img_path = outpath / "images" / f"{imgname}.png"
 
@@ -394,9 +423,10 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     reshaped_tensor = spec.view(desired_shape)
 
     # normalize the spectrogram to be between 0 and 1
-    normalized_tensor = (reshaped_tensor - reshaped_tensor.min()) / (
-        reshaped_tensor.max() - reshaped_tensor.min()
-    )
+    # normalized_tensor = (reshaped_tensor - reshaped_tensor.min()) / (
+    #     reshaped_tensor.max() - reshaped_tensor.min()
+    # )
+    normalized_tensor = reshaped_tensor / 255
 
     # make sure image is float32
     return normalized_tensor.float()
@@ -539,7 +569,7 @@ def convert_model_output_to_df(
 
 
 def collect_specs(
-    conf: Config, data: Dataset, t1: float
+    conf: Config, data: Dataset, t1: float, path: pathlib.Path
 ) -> Tuple[list, list, list]:
     """Collect the spectrograms of a dataset.
 
@@ -573,11 +603,65 @@ def collect_specs(
     chunksize = int(conf.spec.time_window * data.grid.samplerate)  # samples
     window_overlap_samples = int(conf.spec.spec_overlap * data.grid.samplerate)
 
-    # get the frequency limits of the spectrogram
-    flims = (
-        float(np.min(data.track.freqs) - conf.spec.freq_pad),
-        float(np.max(data.track.freqs) + conf.spec.freq_pad),
+    # check if chunksize is a multiple of the hop length
+    if chunksize % hop_len != 0:
+        msg = (
+            "The chunksize must be a multiple of the hop length!\n"
+            f"Chunksize: {chunksize} samples\n"
+            f"Hop length: {hop_len} samples\n"
+            "I will automatically adjust the chunksize!"
+        )
+        prog.console.log(msg)
+        logger.warn(msg)
+
+        # find a new hop length that is a multiple of the chunksize
+        # but close to the old hop length
+        # TODO: make this more efficient
+        while chunksize % hop_len != 0:
+            hop_len -= 1
+
+        msg = f"New hop length: {hop_len} samples"
+        prog.console.log(msg)
+        logger.warn(msg)
+
+    # check if window overlap is a multiple of the hop length
+    if window_overlap_samples % hop_len != 0:
+        msg = (
+            "The window overlap must be a multiple of the hop length!\n"
+            f"Window overlap: {window_overlap_samples} samples\n"
+            f"Hop length: {hop_len} samples\n"
+            "I will automatically adjust the window overlap!\n"
+        )
+        prog.console.log(msg)
+        logger.warn(msg)
+
+        # find a new hop length that is a multiple of the chunksize
+        # but close to the old hop length
+        # TODO: make this more efficient
+        while window_overlap_samples % hop_len != 0:
+            window_overlap_samples += 1
+
+        msg = f"New window overlap: {window_overlap_samples} samples"
+        prog.console.log(msg)
+        logger.warn(msg)
+
+    msg = (
+        f"Spec config:\n"
+        f"nfft: {nfft} samples\n"
+        f"hop_len: {hop_len} samples\n"
+        f"chunksize: {chunksize} samples\n"
+        f"window_overlap_samples: {window_overlap_samples} samples"
     )
+    prog.console.log(msg)
+    logger.debug(msg)
+
+    # get the frequency limits of the spectrogram
+    # TODO: make this the same always
+    # flims = (
+    #     float(np.min(data.track.freqs) - conf.spec.freq_pad),
+    #     float(np.max(data.track.freqs) + conf.spec.freq_pad),
+    # )
+    flims = (400, 1400)
 
     # make the start and stop indices for all chunks
     # including some overlap to compensate for edge effects
@@ -595,10 +679,6 @@ def collect_specs(
     for chunk_no, (start, stop) in enumerate(zip(idx1, idx2)):
         # make a subset of for the current chunk
         chunk = subset(data, start, stop, mode="index")
-
-        # skip if there is no wavetracker tracking data in the current chunk
-        if len(chunk.track.indices) == 0:
-            continue
 
         # compute the spectrogram for each electrode of the current chunk
         with Timer() as t:
@@ -635,7 +715,124 @@ def collect_specs(
         times.append(spec_times)
         freqs.append(spec_freqs)
 
+    save_chirpdetector_spec(
+        times, freqs, specs, path, hop_len, window_overlap_samples
+    )
+
     return specs, times, freqs
+
+
+def save_chirpdetector_spec(
+    spec_times: list,
+    spec_freqs: list,
+    specs: list,
+    output_path: pathlib.Path,
+    hop_len: int,
+    overlap: int,
+) -> None:
+    """Save chirptdetector specs.
+
+    Take the output of `collect_specs` and concatenates the spectrograms
+    and time axes to make one large spectrogram.
+
+    Parameters
+    ----------
+    - `spec_times` : `list`
+        The time axes of the spectrograms.
+    - `spec_freqs` : `list`
+        The frequency axes of the spectrograms.
+    - `specs` : `list`
+        The spectrograms.
+    - `output_path` : `pathlib.Path`
+        The path to save the spectrogram to.
+
+    Returns
+    -------
+    - `None`
+    """
+    start_idx = (overlap / hop_len) / 2
+    if not start_idx.is_integer():
+        msg = (
+            "Overlap must be a multiple of the hop length.\n"
+            f"Overlap: {overlap}\n"
+            f"Hop length: {hop_len}"
+        )
+        raise ValueError(msg)
+    start_idx = int(start_idx)
+    stop_idx = -start_idx
+
+    prog.console.log(f"Overlap: {overlap:.2f} seconds.")
+    prog.console.log(f"Start index: {start_idx}")
+    prog.console.log(f"Stop index: {stop_idx}")
+
+    # convert every spec to 2d numpy array
+    specs = [spec.cpu().numpy()[0] for spec in specs]
+
+    # compute expected spec shape
+    expected_spec_shape = (
+        len(spec_freqs[0]),
+        (len(spec_times[0]) - (2 * start_idx)) * len(specs),
+    )
+
+    # cut off the overlapping regions
+    specs = [spec[:, start_idx:stop_idx] for spec in specs]
+
+    # cut off the overlapping regions on the time axis
+    spec_times = [spec_time[start_idx:stop_idx] for spec_time in spec_times]
+
+    # concatenate the spectrograms
+    spec = np.concatenate(specs, axis=1)
+
+    # concatenate the time axes
+    spec_times = np.concatenate(spec_times)
+
+    # get freqs
+    spec_freqs = spec_freqs[0]
+
+    # check if new spec shape is correct
+    if spec.shape != expected_spec_shape:
+        msg = (
+            "The shape of the concatenated spectrogram is not correct.\n"
+            f"Expected shape: {expected_spec_shape}\n"
+            f"Actual shape: {spec.shape}"
+        )
+        raise ValueError(msg)
+
+    # save the spectrogram
+    specfile = output_path / "chirpdetector_spec.hdf5"
+
+    # dump the shizzle into a hdf5 file
+    if not specfile.exists():
+        chunks = (spec.shape[0], spec.shape[1])
+        maxshape = (None, None)
+        with h5py.File(specfile, "w") as f:
+            f.create_dataset("spec", data=spec, chunks=chunks, maxshape=maxshape)
+            f.create_dataset("times", data=spec_times, chunks=chunks[1], maxshape=(None,))
+            f.create_dataset("freqs", data=spec_freqs)
+    else:
+        with h5py.File(specfile, "a") as f:
+            new_shape = (f["spec"].shape[0], f["spec"].shape[1] + spec.shape[1])
+            f["spec"].resize(new_shape)
+            f["spec"][:, -spec.shape[1] :] = spec
+            f["times"].resize((f["times"].shape[0] + spec_times.shape[0], ))
+            f["times"][-spec_times.shape[0] :] = spec_times
+
+            # load into arrays for plotting for now 
+            disk_spec = f["spec"][:, :]
+            disk_times = f["times"][:]
+            disk_freqs = f["freqs"][:]
+
+        import matplotlib as mpl
+        mpl.use("TkAgg")
+        fig, axes = plt.subplots(2,1)
+        axes[0].imshow(spec[:, :], aspect="auto", origin="lower", extent = [spec_times[0], spec_times[-1], disk_freqs[0], disk_freqs[-1]])
+        axes[1].imshow(disk_spec[:, :], aspect="auto", origin="lower", extent = [disk_times[0], disk_times[-1], disk_freqs[0], disk_freqs[-1]])
+        axes[0].set_title("Current spec")
+        axes[1].set_title("Disk spec")
+        plt.show()
+
+        plt.plot(np.arange(len(disk_times)), disk_times)
+        plt.show()
 
 
 def handle_dataframes(
@@ -697,8 +894,9 @@ def detect_chirps(
     model.to(device).eval()
 
     window_duration = (
-        conf.spec.time_window * conf.spec.batch_size
-    ) - conf.spec.spec_overlap * (conf.spec.batch_size - 1)
+        conf.spec.time_window * conf.spec.batch_size)
+    # ) - conf.spec.spec_overlap * (conf.spec.batch_size - 1)
+
     window_duration_samples = int(window_duration * data.grid.samplerate)
 
     msg = (
@@ -711,9 +909,12 @@ def detect_chirps(
     window_overlap_samples = int(conf.spec.spec_overlap * data.grid.samplerate)
     idx1 = np.arange(
         0,
-        int(data.grid.rec.shape[0] - window_duration_samples),
-        int(window_duration_samples - window_overlap_samples),
+        data.grid.rec.shape[0] - window_duration_samples,
+        window_duration_samples - window_overlap_samples,
     )
+    print(idx1)
+    # TODO: Implement the same checkss as for small chunks. In this stage
+    # there are duplicates in the time array.
     idx2 = idx1 + window_duration_samples
 
     # make a list to store the bboxes in for each chunk
@@ -735,12 +936,14 @@ def detect_chirps(
         prog.console.log(msg)
 
         # skip if there is no wavetracker tracking data in the current chunk
-        if len(chunk.track.indices) == 0:
-            continue
+        # if len(chunk.track.indices) == 0:
+        #     continue
 
         # collect the spectrograms of the current batch
         t1 = start / data.grid.samplerate
-        specs, spec_times, spec_freqs = collect_specs(conf, chunk, t1)
+        specs, spec_times, spec_freqs = collect_specs(
+            conf, chunk, t1, data.path
+        )
 
         # perform the detection
         with Timer() as t, torch.inference_mode():
@@ -764,20 +967,21 @@ def detect_chirps(
             )
 
         # Plot the spectrograms with bounding boxes (this is slow)
-        # # make a path to save the spectrogram
-        # path = data.path / "chirpdetections"
+        # make a path to save the spectrogram
+        # path = data.path / "chirpdetector_spectrograms"
         # if path.exists() and overwritten is False:
         #     shutil.rmtree(path)
         #     overwritten = True
         # path.mkdir(exist_ok=True)
-        # startt = time.time()
-        # if np.any(scores > conf.det.threshold):
-        #     for spec_no, (img, out) in enumerate(zip(specs,outputs)):
-        #         img_no  = chunk_no * len(specs) + spec_no
-        #         img_path = path / f"cpd_detected_{img_no:05d}.png"
-        #         plot_detections(
-        #             img, out, conf.det.threshold, img_path, conf
-        #         )
+        #
+        # with Timer() as t:
+        #     if np.any(scores > conf.det.threshold):
+        #         for spec_no, (img, out) in enumerate(zip(specs,outputs)):
+        #             img_no  = chunk_no * len(specs) + spec_no
+        #             img_path = path / f"cpd_detected_{img_no:05d}.png"
+        #             plot_detections(
+        #                 img, out, conf.det.threshold, img_path, conf
+        #             )
         # endt = time.time()
         # msg = f"Plotting to disk took {endt - startt:.2f} seconds."
         # prog.console.log(msg)
@@ -835,6 +1039,7 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
             stopt = time.time()
             msg = f"Loading the dataset took {stopt - startt:.2f} seconds.\n"
             prog.console.log(msg)
+            clean_up_dir(data.path)
             detect_chirps(config, data, make_training_data)
             prog.update(task, advance=1)
         prog.update(task, completed=len(datasets))
