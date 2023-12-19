@@ -670,7 +670,7 @@ def collect_specs(
         data.grid.rec.shape[0] - chunksize,
         chunksize - window_overlap_samples,
     )
-    idx2 = idx1 + chunksize
+    idx2 = idx1 + chunksize + window_overlap_samples * 2
 
     # save data here
     specs, times, freqs = [], [], []
@@ -715,124 +715,126 @@ def collect_specs(
         times.append(spec_times)
         freqs.append(spec_freqs)
 
-    save_chirpdetector_spec(
-        times, freqs, specs, path, hop_len, window_overlap_samples
-    )
+    # save_chirpdetector_spec(
+    #     times, freqs, specs, path, hop_len, window_overlap_samples
+    # )
 
     return specs, times, freqs
 
 
-def save_chirpdetector_spec(
-    spec_times: list,
-    spec_freqs: list,
-    specs: list,
-    output_path: pathlib.Path,
-    hop_len: int,
-    overlap: int,
-) -> None:
-    """Save chirptdetector specs.
-
-    Take the output of `collect_specs` and concatenates the spectrograms
-    and time axes to make one large spectrogram.
-
-    Parameters
-    ----------
-    - `spec_times` : `list`
-        The time axes of the spectrograms.
-    - `spec_freqs` : `list`
-        The frequency axes of the spectrograms.
-    - `specs` : `list`
-        The spectrograms.
-    - `output_path` : `pathlib.Path`
-        The path to save the spectrogram to.
-
-    Returns
-    -------
-    - `None`
-    """
-    start_idx = (overlap / hop_len) / 2
-    if not start_idx.is_integer():
-        msg = (
-            "Overlap must be a multiple of the hop length.\n"
-            f"Overlap: {overlap}\n"
-            f"Hop length: {hop_len}"
-        )
-        raise ValueError(msg)
-    start_idx = int(start_idx)
-    stop_idx = -start_idx
-
-    prog.console.log(f"Overlap: {overlap:.2f} seconds.")
-    prog.console.log(f"Start index: {start_idx}")
-    prog.console.log(f"Stop index: {stop_idx}")
-
-    # convert every spec to 2d numpy array
-    specs = [spec.cpu().numpy()[0] for spec in specs]
-
-    # compute expected spec shape
-    expected_spec_shape = (
-        len(spec_freqs[0]),
-        (len(spec_times[0]) - (2 * start_idx)) * len(specs),
-    )
-
-    # cut off the overlapping regions
-    specs = [spec[:, start_idx:stop_idx] for spec in specs]
-
-    # cut off the overlapping regions on the time axis
-    spec_times = [spec_time[start_idx:stop_idx] for spec_time in spec_times]
-
-    # concatenate the spectrograms
-    spec = np.concatenate(specs, axis=1)
-
-    # concatenate the time axes
-    spec_times = np.concatenate(spec_times)
-
-    # get freqs
-    spec_freqs = spec_freqs[0]
-
-    # check if new spec shape is correct
-    if spec.shape != expected_spec_shape:
-        msg = (
-            "The shape of the concatenated spectrogram is not correct.\n"
-            f"Expected shape: {expected_spec_shape}\n"
-            f"Actual shape: {spec.shape}"
-        )
-        raise ValueError(msg)
-
-    # save the spectrogram
-    specfile = output_path / "chirpdetector_spec.hdf5"
-
-    # dump the shizzle into a hdf5 file
-    if not specfile.exists():
-        chunks = (spec.shape[0], spec.shape[1])
-        maxshape = (None, None)
-        with h5py.File(specfile, "w") as f:
-            f.create_dataset("spec", data=spec, chunks=chunks, maxshape=maxshape)
-            f.create_dataset("times", data=spec_times, chunks=chunks[1], maxshape=(None,))
-            f.create_dataset("freqs", data=spec_freqs)
-    else:
-        with h5py.File(specfile, "a") as f:
-            new_shape = (f["spec"].shape[0], f["spec"].shape[1] + spec.shape[1])
-            f["spec"].resize(new_shape)
-            f["spec"][:, -spec.shape[1] :] = spec
-            f["times"].resize((f["times"].shape[0] + spec_times.shape[0], ))
-            f["times"][-spec_times.shape[0] :] = spec_times
-
-            # load into arrays for plotting for now 
-            disk_spec = f["spec"][:, :]
-            disk_times = f["times"][:]
-            disk_freqs = f["freqs"][:]
-
-        import matplotlib as mpl
-        mpl.use("TkAgg")
-        fig, axes = plt.subplots(2,1)
-        axes[0].imshow(spec[:, :], aspect="auto", origin="lower", extent = [spec_times[0], spec_times[-1], disk_freqs[0], disk_freqs[-1]])
-        axes[1].imshow(disk_spec[:, :], aspect="auto", origin="lower", extent = [disk_times[0], disk_times[-1], disk_freqs[0], disk_freqs[-1]])
-        axes[0].set_title("Current spec")
-        axes[1].set_title("Disk spec")
-        plt.show()
-
-        plt.plot(np.arange(len(disk_times)), disk_times)
-        plt.show()
+# def save_chirpdetector_spec(
+#     spec_times: list,
+#     spec_freqs: list,
+#     specs: list,
+#     output_path: pathlib.Path,
+#     hop_len: int,
+#     overlap: int,
+# ) -> None:
+#     """Save chirptdetector specs.
+#
+#     Take the output of `collect_specs` and concatenates the spectrograms
+#     and time axes to make one large spectrogram.
+#
+#     Parameters
+#     ----------
+#     - `spec_times` : `list`
+#         The time axes of the spectrograms.
+#     - `spec_freqs` : `list`
+#         The frequency axes of the spectrograms.
+#     - `specs` : `list`
+#         The spectrograms.
+#     - `output_path` : `pathlib.Path`
+#         The path to save the spectrogram to.
+#
+#     Returns
+#     -------
+#     - `None`
+#     """
+#     start_idx = (overlap / hop_len) / 2
+#     if not start_idx.is_integer():
+#         msg = (
+#             "Overlap must be a multiple of the hop length.\n"
+#             f"Overlap: {overlap}\n"
+#             f"Hop length: {hop_len}"
+#         )
+#         raise ValueError(msg)
+#     start_idx = int(start_idx)
+#     stop_idx = -start_idx
+#
+#     prog.console.log(f"Overlap: {overlap:.2f} samples.")
+#     prog.console.log(f"Hop length: {hop_len:.2f} samples.")
+#     prog.console.log(f"Overlap in hop lengths: {overlap / hop_len:.2f}")
+#     prog.console.log(f"Start index: {start_idx}")
+#     prog.console.log(f"Stop index: {stop_idx}")
+#
+#     # convert every spec to 2d numpy array
+#     specs = [spec.cpu().numpy()[0] for spec in specs]
+#
+#     # compute expected spec shape
+#     expected_spec_shape = (
+#         len(spec_freqs[0]),
+#         (len(spec_times[0]) - (2 * start_idx)) * len(specs),
+#     )
+#
+#     # cut off the overlapping regions
+#     specs = [spec[:, start_idx:stop_idx] for spec in specs]
+#
+#     # cut off the overlapping regions on the time axis
+#     spec_times = [spec_time[start_idx:stop_idx] for spec_time in spec_times]
+#
+#     # concatenate the spectrograms
+#     spec = np.concatenate(specs, axis=1)
+#
+#     # concatenate the time axes
+#     spec_times = np.concatenate(spec_times)
+#
+#     # get freqs
+#     spec_freqs = spec_freqs[0]
+#
+#     # check if new spec shape is correct
+#     # if spec.shape != expected_spec_shape:
+#     #     msg = (
+#     #         "The shape of the concatenated spectrogram is not correct.\n"
+#     #         f"Expected shape: {expected_spec_shape}\n"
+#     #         f"Actual shape: {spec.shape}"
+#     #     )
+#     #     raise ValueError(msg)
+#
+#     # save the spectrogram
+#     specfile = output_path / "chirpdetector_spec.hdf5"
+#
+#     # dump the shizzle into a hdf5 file
+#     if not specfile.exists():
+#         chunks = (spec.shape[0], spec.shape[1])
+#         maxshape = (None, None)
+#         with h5py.File(specfile, "w") as f:
+#             f.create_dataset("spec", data=spec, chunks=chunks, maxshape=maxshape)
+#             f.create_dataset("times", data=spec_times, chunks=chunks[1], maxshape=(None,))
+#             f.create_dataset("freqs", data=spec_freqs)
+#     else:
+#         with h5py.File(specfile, "a") as f:
+#             new_shape = (f["spec"].shape[0], f["spec"].shape[1] + spec.shape[1])
+#             f["spec"].resize(new_shape)
+#             f["spec"][:, -spec.shape[1] :] = spec
+#             f["times"].resize((f["times"].shape[0] + spec_times.shape[0], ))
+#             f["times"][-spec_times.shape[0] :] = spec_times
+#
+#             # load into arrays for plotting for now 
+#             disk_spec = f["spec"][:, :]
+#             disk_times = f["times"][:]
+#             disk_freqs = f["freqs"][:]
+#
+#         import matplotlib as mpl
+#         mpl.use("TkAgg")
+#         fig, axes = plt.subplots(2,1)
+#         axes[0].imshow(spec[:, :], aspect="auto", origin="lower", extent = [spec_times[0], spec_times[-1], disk_freqs[0], disk_freqs[-1]])
+#         axes[1].imshow(disk_spec[:, :], aspect="auto", origin="lower", extent = [disk_times[0], disk_times[-1], disk_freqs[0], disk_freqs[-1]])
+#         axes[0].set_title("Current spec")
+#         axes[1].set_title("Disk spec")
+#         plt.show()
+#
+#         plt.plot(np.arange(len(disk_times)), disk_times)
+#         plt.show()
 
 
 def handle_dataframes(
@@ -912,10 +914,9 @@ def detect_chirps(
         data.grid.rec.shape[0] - window_duration_samples,
         window_duration_samples - window_overlap_samples,
     )
-    print(idx1)
     # TODO: Implement the same checkss as for small chunks. In this stage
     # there are duplicates in the time array.
-    idx2 = idx1 + window_duration_samples
+    idx2 = idx1 + window_duration_samples + window_overlap_samples * 2
 
     # make a list to store the bboxes in for each chunk
     bbox_dfs = []
