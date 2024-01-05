@@ -5,7 +5,8 @@ from typing import Tuple
 
 import numpy as np
 import pandas as pd
-from gridtools.datasets import Dataset, load
+from gridtools.datasets import load
+from gridtools.datasets.models import Dataset
 from pydantic import BaseModel, ConfigDict
 from rich.progress import (
     MofNCompleteColumn,

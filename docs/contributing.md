@@ -44,7 +44,7 @@ list before opening a pull request.
       spectrograms parallely and pipe them all through the detector. And do this
       simulatenously from multiple cores (if the GPU can receive tensors from multiple
       cores). - Note: Multiprocessing increased the execution time due to the back and forth
-      between cpu and gpu (at least this is what google sais.) But I batched
+      between cpu and gpu (at least this is what google said.) But I batched
       detection at least.
 - [x] Check execution time for all the detect functions, got really slow after refactoring for some reason.
 - [x] Fix make test, fails after ruff run

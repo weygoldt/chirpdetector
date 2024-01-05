@@ -5,7 +5,8 @@ import pathlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from gridtools.datasets import Dataset, load, subset
+from gridtools.datasets import load, subset
+from gridtools.datasets.models import Dataset
 from gridtools.utils.spectrograms import (
     freqres_to_nfft,
     overlap_to_hoplen,

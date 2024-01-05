@@ -2,17 +2,18 @@
 
 import logging
 import pathlib
+import shutil
 import time
 import uuid
 from typing import Self, Tuple
-import shutil
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from gridtools.datasets import Dataset, load, subset
+from gridtools.datasets import load, subset
+from gridtools.datasets.models import Dataset
 from gridtools.utils.spectrograms import (
     freqres_to_nfft,
     overlap_to_hoplen,
@@ -24,7 +25,6 @@ from rich.progress import (
     SpinnerColumn,
     TimeElapsedColumn,
 )
-import h5py
 
 from .convert_data import make_file_tree, numpy_to_pil
 from .models.utils import get_device, load_fasterrcnn
@@ -33,7 +33,6 @@ from .utils.logging import make_logger
 from .utils.signal_processing import (
     compute_sum_spectrogam,
     make_spectrogram_axes,
-    zscore_standardize,
 )
 
 # Use non-gui backend for matplotlib to
@@ -423,10 +422,11 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     reshaped_tensor = spec.view(desired_shape)
 
     # normalize the spectrogram to be between 0 and 1
-    # normalized_tensor = (reshaped_tensor - reshaped_tensor.min()) / (
-    #     reshaped_tensor.max() - reshaped_tensor.min()
-    # )
-    normalized_tensor = reshaped_tensor / 255
+    normalized_tensor = (reshaped_tensor - reshaped_tensor.min()) / (
+        reshaped_tensor.max() - reshaped_tensor.min()
+    )
+
+    # normalized_tensor = normalized_tensor / 255
 
     # make sure image is float32
     return normalized_tensor.float()
@@ -819,7 +819,7 @@ def collect_specs(
 #             f["times"].resize((f["times"].shape[0] + spec_times.shape[0], ))
 #             f["times"][-spec_times.shape[0] :] = spec_times
 #
-#             # load into arrays for plotting for now 
+#             # load into arrays for plotting for now
 #             disk_spec = f["spec"][:, :]
 #             disk_times = f["times"][:]
 #             disk_freqs = f["freqs"][:]

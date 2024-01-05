@@ -6,7 +6,7 @@ from typing import Tuple, TypeVar
 
 import numpy as np
 import torch
-from gridtools.datasets import Dataset
+from gridtools.datasets.models import Dataset
 from gridtools.utils.spectrograms import compute_spectrogram, sint, to_decibel
 from scipy.signal import butter, sosfiltfilt
 
