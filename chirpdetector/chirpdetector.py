@@ -16,7 +16,7 @@ from .dataset_utils import (
     merge_yolo_datasets,
     subset_yolo_dataset,
 )
-from .detect_chirps import detect_cli
+from .detect_chirps2 import detect_cli
 from .eval_detection import eval_detection_cli
 from .plot_detections import (
     clean_all_plots_cli,
