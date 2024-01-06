@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from rich.console import Console
 
-console = Console()
 
 class ArrayParser:
     """Generate indices to iterate large arrays in batches."""
@@ -17,7 +16,8 @@ class ArrayParser:
         samplingrate: float,
         batchsize: int,
         windowsize: float,
-        overlap: float
+        overlap: float,
+        console: Console
     ) -> None:
         """Initialize DatasetParser.
 
@@ -39,6 +39,7 @@ class ArrayParser:
         self.overlap_seconds = overlap
         self.windowsize_seconds = windowsize
         self.datasetsize_samples = length
+        self.console = console
         self.set_indices()
         self.set_batches()
 
@@ -52,7 +53,7 @@ class ArrayParser:
                 "⚠️ Overlap was not an integer number of samples. "
                 f"Rounded to {self.overlap_seconds} seconds."
             )
-            console.log(msg)
+            self.console.log(msg)
         self.windowsize_samples = self.windowsize_seconds * self.samplingrate
         if self.windowsize_samples % 1 != 0:
             self.windowsize_samples = int(np.round(self.windowsize_samples))
@@ -63,7 +64,7 @@ class ArrayParser:
                 "⚠️ Window size was not an integer number of samples. "
                 f"Rounded to {self.windowsize_seconds} seconds."
             )
-            console.log(msg)
+            self.console.log(msg)
         self.batchsize_samples = self.windowsize_samples * self.batchsize
         self.nbatches = int(np.ceil(
             self.datasetsize_samples / self.batchsize_samples)
@@ -85,7 +86,7 @@ class ArrayParser:
                     "the dataset will be lost."
 
                 )
-                console.log(msg)
+                self.console.log(msg)
 
         msg = (
             "✅ Initialized DatasetParser with "
@@ -93,7 +94,7 @@ class ArrayParser:
             f"Subbatches with {self.windowsize_seconds} seconds windows and "
             f"{self.overlap_seconds} seconds overlap."
         )
-        console.log(msg)
+        self.console.log(msg)
 
 
     def set_batches(self: Self) -> None:
@@ -147,7 +148,7 @@ class ArrayParser:
                 f"{remaining / self.samplingrate} seconds of "
                 "the dataset will be lost."
             )
-            console.log(msg)
+            self.console.log(msg)
 
     def viz(self: Self) -> None:
         """Visualize the batches."""
