@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import time
 import uuid
-from typing import Self, Tuple, List
+from typing import Self, Tuple, List, Any
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -51,8 +51,50 @@ prog = Progress(
     TimeElapsedColumn(),
 )
 
-class ChirpDetector:
-    """Detect chirps on a spectrogram."""
+class BatchBoxPredictor:
+    """Predict boxes for a batch of spectrograms."""
+
+    def __init__(
+        self: Self,
+        cfg: Config,
+        model: torch.nn.Module,
+        logger: logging.Logger,
+    ) -> None:
+        """Initialize the BatchBoxPredictor."""
+        self.cfg = cfg
+        self.model = model
+        self.logger = logger
+        self.device = get_device()
+        self.model.to(self.device).eval()
+
+    def predict(self: Self, batch: List) -> List:
+        """Predict boxes for a batch of spectrograms."""
+        with Timer(prog.console, "Predict boxes"), torch.no_grad():
+            detections = self.model(batch)
+        # TODO: Continue here so that output is always the same
+        # no matter the used model
+
+
+class BatchBoxAssigner:
+    """Assign boxes on a batch of spectrograms to a wavetracker track ID."""
+
+    def __init__(
+        self: Self,
+        cfg: Config,
+        model: torch.nn.Module,
+        logger: logging.Logger,
+    ) -> None:
+        """Initialize the BatchBoxAssigner."""
+        pass
+        # TODO: Implement assignment logic for a single batch here.
+
+    def predict(self: Self, batch: List) -> List:
+        """Predict boxes assignments for a batch of spectrograms."""
+        pass
+
+
+class DatasetParser:
+    """Parse a grid dataset into batches."""
 
     def __init__(
         self: Self,
@@ -77,9 +119,9 @@ class ChirpDetector:
         # Basic setup
         self.cfg = cfg
         self.data = data
-        self.model = model
         self.device = get_device()
         self.logger = logger
+        self.model = model
 
         # Model setup
         self.model.to(self.device).eval()
@@ -97,13 +139,15 @@ class ChirpDetector:
         self.logger.info(msg)
         prog.console.log(msg)
 
-    def detect_chirps(self: Self) -> None:
+    def parse(self: Self) -> None:
         """Detect chirps on the dataset."""
-        prog.console.rule("[bold green]Starting detection")
+        prog.console.rule("[bold green]Starting parser")
 
         for i, batch_indices in enumerate(self.parser.batches):
 
-            batch_names = [
+            # Generate a string handle for each spectrogram
+            # e.g. for filenames in case of saving
+            batch_handles = [
                 f"{self.data.path.name}_batch-{i}_window-{j}"
                 for j in range(len(batch_indices))
             ]
@@ -115,51 +159,35 @@ class ChirpDetector:
             ]
 
             # Compute the spectrograms for the batch
-            batch_specs = make_batch_specs(
-                batch_indices, batch_raw, self.data.grid.samplerate, self.cfg
-            )
-
-            # Add the name to each spec tuple
-            batch_specs = [
-                (name, *spec) for name, spec in zip(batch_names, batch_specs)
-            ]
-
-            # Tile the spectrograms y-axis
-            sliced_specs = tile_batch_specs(batch_specs, self.cfg)
-
-            # Split the list into specs and axes
-            names, specs, times, freqs = zip(*sliced_specs)
-
-            # Convert the spec tensors to PIL images
-            images = [spec_to_image(spec) for spec in specs]
-
-            # Detect chirps on the batch
-            with Timer(prog.console, "Run model") as t, torch.inference_mode():
-                detections = self.model(images)
-
-            # TODO: Continue here
-
-            # Convert detections to (bbox, score, class) tuples
-            detections = [
-                (
-                    detection["boxes"].cpu().numpy(),
-                    detection["scores"].cpu().numpy(),
-                    detection["labels"].cpu().numpy(),
+            with Timer(prog.console, "Compute spectrograms"):
+                handles, specs, times, freqs = make_batch_specs(
+                    batch_indices,
+                    batch_handles,
+                    batch_raw,
+                    self.data.grid.samplerate,
+                    self.cfg
                 )
-                for detection in detections
-            ]
 
-            import matplotlib as mpl
-            mpl.use("TkAgg")
-            fig, ax = plt.subplots()
-            for spec, time, freq in zip(specs, times, freqs):
-                spec = spec.cpu().numpy()
-                ax.pcolormesh(time, freq, spec)
-                ax.axvline(time[0], color="white", lw=1, ls="--")
-                ax.axvline(time[-1], color="white", lw=1, ls="--")
-                ax.axhline(freq[0], color="white", lw=1, ls="--")
-                ax.axhline(freq[-1], color="white", lw=1, ls="--")
-            plt.show()
+            boxpredictor = BatchBoxPredictor()
+            detections = boxpredictor.predict(specs)
+
+            boxassigner = BatchBoxAssigner()
+            assignments = boxassigner.predict(detections)
+
+            # TODO: Save the output from above to a file
+
+            # import matplotlib as mpl
+            # mpl.use("TkAgg")
+            # fig, ax = plt.subplots()
+            # for spec, time, freq in zip(specs, times, freqs):
+            #     spec = spec.cpu().numpy()
+            #     ax.pcolormesh(time, freq, spec[0])
+            #     ax.axvline(time[0], color="white", lw=1, ls="--")
+            #     ax.axvline(time[-1], color="white", lw=1, ls="--")
+            #     ax.axhline(freq[0], color="white", lw=1, ls="--")
+            #     ax.axhline(freq[-1], color="white", lw=1, ls="--")
+            # plt.show()
+
 
 
 def convert_detections(
@@ -182,7 +210,7 @@ def convert_detections(
 
 
 def make_batch_specs(
-        indices: List, batch: List, samplerate: float, cfg: Config
+    indices: List, handles: List, batch: List, samplerate: float, cfg: Config
     ) -> List:
     """Compute the spectrograms for a batch of windows."""
     batch = np.swapaxes(batch, 1, 2)
@@ -222,7 +250,23 @@ def make_batch_specs(
     batch_specs = [
         (spec, *ax) for spec, ax in zip(batch_sum_specs, axes)
     ]
-    return batch_specs
+    # Add the name to each spec tuple
+    batch_specs = [
+        (name, *spec) for name, spec in zip(
+            handles, batch_specs
+        )
+    ]
+
+    # Tile the spectrograms y-axis
+    sliced_specs = tile_batch_specs(batch_specs, cfg)
+
+    # Split the list into specs and axes
+    handles, specs, times, freqs = zip(*sliced_specs)
+
+    # Convert the spec tensors to mimic PIL images
+    images = [spec_to_image(spec) for spec in specs]
+
+    return handles, images, times, freqs
 
 
 def tile_batch_specs(batch_specs: List, cfg: Config) -> List:
