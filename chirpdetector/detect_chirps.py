@@ -396,17 +396,17 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
         raise ValueError(msg)
 
     # make sure the spectrogram contains some data
-    if (
-        np.max(spec.detach().cpu().numpy())
-        - np.min(spec.detach().cpu().numpy())
-        == 0
-    ):
-        msg = (
-            "The spectrogram must contain some data.\n"
-            f"Max value: {np.max(spec.detach().cpu().numpy())}\n"
-            f"Min value: {np.min(spec.detach().cpu().numpy())}"
-        )
-        raise ValueError(msg)
+    # if (
+    #     np.max(spec.detach().cpu().numpy())
+    #     - np.min(spec.detach().cpu().numpy())
+    #     == 0
+    # ):
+    #     msg = (
+    #         "The spectrogram must contain some data.\n"
+    #         f"Max value: {np.max(spec.detach().cpu().numpy())}\n"
+    #         f"Min value: {np.min(spec.detach().cpu().numpy())}"
+    #     )
+    #     raise ValueError(msg)
 
     # Get the dimensions of the original matrix
     original_shape = spec.size()
@@ -425,8 +425,6 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     normalized_tensor = (reshaped_tensor - reshaped_tensor.min()) / (
         reshaped_tensor.max() - reshaped_tensor.min()
     )
-
-    # normalized_tensor = normalized_tensor / 255
 
     # make sure image is float32
     return normalized_tensor.float()

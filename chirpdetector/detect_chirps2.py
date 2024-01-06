@@ -29,6 +29,7 @@ from rich.progress import (
 )
 
 from .convert_data import make_file_tree, numpy_to_pil
+from .detect_chirps import spec_to_image
 from .models.utils import get_device, load_fasterrcnn
 from .utils.configfiles import Config, load_config
 from .utils.logging import make_logger, Timer
@@ -100,16 +101,84 @@ class ChirpDetector:
         """Detect chirps on the dataset."""
         prog.console.rule("[bold green]Starting detection")
 
-        for batch_indices in self.parser.batches:
+        for i, batch_indices in enumerate(self.parser.batches):
 
+            batch_names = [
+                f"{self.data.path.name}_batch-{i}_window-{j}"
+                for j in range(len(batch_indices))
+            ]
+
+            # Get the raw data for the batch
             batch_raw = [
                 np.array(self.data.grid.rec[idxs[0] : idxs[1], :])
                 for idxs in batch_indices
             ]
 
+            # Compute the spectrograms for the batch
             batch_specs = make_batch_specs(
                 batch_indices, batch_raw, self.data.grid.samplerate, self.cfg
             )
+
+            # Add the name to each spec tuple
+            batch_specs = [
+                (name, *spec) for name, spec in zip(batch_names, batch_specs)
+            ]
+
+            # Tile the spectrograms y-axis
+            sliced_specs = tile_batch_specs(batch_specs, self.cfg)
+
+            # Split the list into specs and axes
+            names, specs, times, freqs = zip(*sliced_specs)
+
+            # Convert the spec tensors to PIL images
+            images = [spec_to_image(spec) for spec in specs]
+
+            # Detect chirps on the batch
+            with Timer(prog.console, "Run model") as t, torch.inference_mode():
+                detections = self.model(images)
+
+            # TODO: Continue here
+
+            # Convert detections to (bbox, score, class) tuples
+            detections = [
+                (
+                    detection["boxes"].cpu().numpy(),
+                    detection["scores"].cpu().numpy(),
+                    detection["labels"].cpu().numpy(),
+                )
+                for detection in detections
+            ]
+
+            import matplotlib as mpl
+            mpl.use("TkAgg")
+            fig, ax = plt.subplots()
+            for spec, time, freq in zip(specs, times, freqs):
+                spec = spec.cpu().numpy()
+                ax.pcolormesh(time, freq, spec)
+                ax.axvline(time[0], color="white", lw=1, ls="--")
+                ax.axvline(time[-1], color="white", lw=1, ls="--")
+                ax.axhline(freq[0], color="white", lw=1, ls="--")
+                ax.axhline(freq[-1], color="white", lw=1, ls="--")
+            plt.show()
+
+
+def convert_detections(
+    detections, names, times, freqs, cfg: Config
+    ):
+    """Convert the detections to a pandas DataFrame."""
+    for i in range(len(detections)):
+        t = times[i]
+        f = freqs[i]
+        n = names[i]
+        boxes = detections[i]["boxes"].cpu().numpy()
+        scores = detections[i]["scores"].cpu().numpy()
+        labels = detections[i]["labels"].cpu().numpy()
+
+        boxes = boxes[(scores > cfg.det.threshold) & (labels == 1)]
+        scores = scores[(scores > cfg.det.threshold) & (labels == 1)]
+        labels = labels[(scores > cfg.det.threshold) & (labels == 1)]
+
+
 
 
 def make_batch_specs(
@@ -137,9 +206,9 @@ def make_batch_specs(
     batch_specs_decibel = [
         to_decibel(spec) for spec in batch_specs
     ]
-    batch_specs_decible_cpu = [spec.cpu().numpy() for spec in batch_specs_decibel]
+    # batch_specs_decible_cpu = [spec for spec in batch_specs_decibel]
     batch_sum_specs = [
-        np.sum(spec, axis=0) for spec in batch_specs_decible_cpu
+        torch.sum(spec, dim=0) for spec in batch_specs_decibel
     ]
     axes = [
         make_spectrogram_axes(
@@ -155,6 +224,21 @@ def make_batch_specs(
     ]
     return batch_specs
 
+
+def tile_batch_specs(batch_specs: List, cfg: Config) -> List:
+    """Tile the spectrograms of a batch."""
+    freq_ranges = [(0, 1000), (500, 1500), (1000, 2000)]
+    sliced_specs = []
+    for start, end in freq_ranges:
+        start_idx = np.argmax(batch_specs[0][3] >= start)
+        end_idx = np.argmax(batch_specs[0][3] >= end)
+        suffix = f"_frange-{start}-{end}"
+        sliced_specs.extend([
+            (name + suffix, spec[start_idx:end_idx, :], time, freq[start_idx:end_idx])
+            for name, spec, time, freq in batch_specs
+        ])
+
+    return sliced_specs
 
 def get_faster_rcnn(cfg: Config) -> torch.nn.Module:
     """Load the trained faster R-CNN model."""
