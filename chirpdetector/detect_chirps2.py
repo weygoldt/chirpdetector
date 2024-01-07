@@ -30,6 +30,7 @@ from rich.progress import (
 )
 
 from torchvision.ops import nms
+from gridtools.preprocessing.preprocessing import interpolate_tracks
 
 from .convert_data import make_file_tree, numpy_to_pil
 from .detect_chirps import spec_to_image, float_index_interpolation
@@ -179,9 +180,11 @@ def convert_detections(
         # get the boxes and scores for the current spectrogram
         boxes = detections[i]["boxes"] # bbox coordinates in pixels
         scores = detections[i]["scores"] # confidence scores
+        batch_spec_index = np.ones(len(boxes)) * i
 
         # discard boxes with low confidence
         boxes = boxes[scores >= cfg.det.threshold]
+        batch_spec_index = batch_spec_index[scores >= cfg.det.threshold]
         scores = scores[scores >= cfg.det.threshold]
 
         # add the name to each box
@@ -197,6 +200,7 @@ def convert_detections(
         # put it all into a large dataframe
         dataframe = pd.DataFrame({
             "name": name,
+            "batch_spec_index": batch_spec_index,
             "x1": boxes[:, 0],
             "y1": boxes[:, 1],
             "x2": boxes[:, 2],
@@ -275,6 +279,7 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
         for dataset in datasets:
             data = load(dataset)
+            data = interpolate_tracks(data)
             cpd = ChirpDetector(
                 cfg=config,
                 data=data,
@@ -390,12 +395,7 @@ class TroughBoxAssigner(AbstractBoxAssigner):
         Assignment by checking which of the tracks has a trough in spectrogram
         power in the spectrogram bbox.
         """
-        subdata = subset(
-            self.data,
-            start=self.batch_indices[0][0],
-            stop=self.batch_indices[-1][1],
-            mode="index",
-        )
+        subdata = self.data
 
         # retrieve frequency and time for each fish id
         tracks = [
@@ -410,21 +410,28 @@ class TroughBoxAssigner(AbstractBoxAssigner):
 
         import matplotlib as mpl
         mpl.use("TkAgg")
+        # plt.plot(subdata.track.times)
         for t, f in zip(times, tracks):
             plt.plot(t, f)
         plt.show()
 
+        for i, (spec, time, freq) in enumerate(zip(
+            self.batch_specs, self.batch_times, self.batch_freqs
+        )):
 
-        # interpolate the frequency and time to match the spectrogram
-        # frequency and time
-        tracks = [
-            np.interp(self.batch_freqs, track, times[i])
-            for i, track in enumerate(tracks)
-        ]
-        times = [self.batch_times] * len(tracks)
+            spec = spec.cpu().numpy()
+            spec_boxes = self.batch_detections[
+                self.batch_detections["batch_spec_index"] == i
+            ][["t1", "f1", "t2", "f2"]].to_numpy()
+            plt.pcolormesh(time, freq, spec[0])
 
+            for box in spec_boxes:
+                x1, y1, x2, y2 = box
+                plt.plot([x1, x2], [y1, y2], color="red", lw=1, ls="--")
 
-
+            for track_id, t, f in zip(ids, times, tracks):
+                continue
+            plt.show()
 
 
 
@@ -474,6 +481,8 @@ class ChirpDetector:
     def detect(self: Self) -> None:
         """Detect chirps on the dataset."""
         prog.console.rule("[bold green]Starting parser")
+
+        prog.console.log("Interpolating wavetracker tracks")
 
         for i, batch_indices in enumerate(self.parser.batches):
 
