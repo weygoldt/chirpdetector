@@ -44,6 +44,7 @@ class Spectrogram(BaseModel):
     """Class to store spectrogram parameters."""
 
     time_window: float
+    freq_ranges: List
     freq_res: float
     freq_pad: float
     overlap_frac: float

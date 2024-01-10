@@ -7,7 +7,6 @@ import time
 import uuid
 from typing import Self, Tuple
 
-from numba import jit
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,6 +19,7 @@ from gridtools.utils.spectrograms import (
     overlap_to_hoplen,
 )
 from matplotlib.patches import Rectangle
+from numba import jit
 from rich.progress import (
     MofNCompleteColumn,
     Progress,

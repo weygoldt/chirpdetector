@@ -1,13 +1,12 @@
 """Detect chirps on a spectrogram."""
 
+import gc
 import logging
 import pathlib
 from abc import ABC, abstractmethod
 from typing import List, Self, Tuple
-import gc
 
 import matplotlib as mpl
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -20,16 +19,14 @@ from gridtools.utils.spectrograms import (
     overlap_to_hoplen,
     to_decibel,
 )
-from matplotlib.patches import Rectangle
-from matplotlib.collections import PatchCollection
 from rich.progress import (
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
     TimeElapsedColumn,
 )
-from torchvision.ops import nms
 from scipy.signal import find_peaks
+from torchvision.ops import nms
 
 from .dataset_parser import ArrayParser
 from .detect_chirps import float_index_interpolation, spec_to_image
@@ -184,7 +181,12 @@ def tile_batch_specs(batch_specs: List, cfg: Config) -> List:
     sliced_specs : List
         The tiled spectrograms.
     """
-    freq_ranges = [(0, 1000), (500, 1500), (1000, 2000)]
+    freq_ranges = cfg.spec.freq_ranges
+    # group ranges into tuples of 2 ints
+    freq_ranges = [
+        (freq_ranges[i], freq_ranges[i + 1])
+        for i in range(0, len(freq_ranges), 2)
+    ]
     sliced_specs = []
     for i, (start, end) in enumerate(freq_ranges):
         start_idx = np.argmax(batch_specs[0][3] >= start)
@@ -553,16 +555,7 @@ class TroughBoxAssigner(AbstractBoxAssigner):
         ]]
             for ident in track_ids
         ]
-
-        # Plan: First go though each box and check if there is a track in them.
-        # If there is, compute the power in the box for each track.
-        # If, not skip the box.
-        # Then, check if there is a trough in power for each track.
-        # If there is, assign the box to the track.
-        # If not, skip the box.
-
         assigned_ids = []
-
         for i in range(len(batch_detections)):
 
             # get the current box
@@ -579,29 +572,9 @@ class TroughBoxAssigner(AbstractBoxAssigner):
             box_powers = []
             box_power_times = []
             box_power_ids = []
-            # import matplotlib as mpl
-            # mpl.use("TkAgg")
-            # fig, (ax1, ax2) = plt.subplots(2,1)
-            # colors = ["red", "green", "blue", "yellow", "orange", "purple"]
-            # plot the box and the track
-            # ax1.pcolormesh(
-            #     batch_times[spec_idx],
-            #     batch_freqs[spec_idx],
-            #     batch_specs[spec_idx].cpu().numpy()[0]
-            # )
-            # ax1.add_patch(
-            #     Rectangle(
-            #         (t1, f1),
-            #         t2 - t1,
-            #         f2 - f1,
-            #         fill=False,
-            #         color="white",
-            #         lw=1,
-            #     )
-            # )
-            for j, (track_id, track_freq, track_time) in enumerate(zip(
+            for track_id, track_freq, track_time in zip(
                 track_ids, track_freqs, track_times
-            )):
+            ):
                 # get the time indices for the track
                 # as the dataset is interpolated, time and freq indices
                 # the same
@@ -610,7 +583,6 @@ class TroughBoxAssigner(AbstractBoxAssigner):
 
                 # get the track snippet in the current bbox
                 track_freq_snippet = track_freq[track_t1_idx:track_t2_idx]
-                track_time_snippet = track_time[track_t1_idx:track_t2_idx]
 
                 # Check if the frequency values of the snippet are
                 # inside the bbox
@@ -646,7 +618,6 @@ class TroughBoxAssigner(AbstractBoxAssigner):
                 box_powers.append(spec_powers)
                 box_power_times.append(spec_times)
                 box_power_ids.append(track_id)
-                # ax1.plot(track_time_snippet, track_freq_snippet, color=colors[j])
 
             # shift the track power baseline to same level
             starts = [power[0] for power in box_powers]
@@ -657,9 +628,9 @@ class TroughBoxAssigner(AbstractBoxAssigner):
             # detect peaks in the power
             ids = []
             costs = []
-            for j, (power, time, track_id) in enumerate(zip(
+            for power, time, track_id in zip(
                 box_powers, box_power_times, box_power_ids
-            )):
+            ):
                 peaks, props = find_peaks(-power, prominence=0)
                 proms = props["prominences"]
                 if len(proms) == 0:
@@ -670,9 +641,6 @@ class TroughBoxAssigner(AbstractBoxAssigner):
                 peak = peaks[np.argmax(proms)]
                 prom = proms[np.argmax(proms)]
 
-                # ax2.plot(power, label=track_id, color=colors[j])
-                # ax2.plot(peak, power[peak], "o", color=colors[j])
-
                 # Compute peak distance to box center
                 box_center = (t1 + t2) / 2
                 peak_dist = np.abs(box_center - time[peak])
@@ -681,15 +649,6 @@ class TroughBoxAssigner(AbstractBoxAssigner):
                 # from box center
                 cost = (1 / prom) * peak_dist
 
-                # plot
-                # ax2.text(
-                #     peak,
-                #     power[peak],
-                #     f"{cost:.2f}",
-                #     fontsize=8,
-                #     ha="left",
-                #     va="bottom",
-                # )
                 ids.append(track_id)
                 costs.append(cost)
 
@@ -697,16 +656,9 @@ class TroughBoxAssigner(AbstractBoxAssigner):
             if len(costs) != 0:
                 best_id = ids[np.argmin(costs)]
                 assigned_ids.append(best_id)
-                # print(best_id)
-                # print(colors[np.argmin(costs)])
             else:
                 best_id = np.nan
                 assigned_ids.append(best_id)
-            # plt.close()
-
-            # print("done")
-            # print(len(assigned_ids))
-            # print(len(batch_detections))
 
         batch_detections.loc[:, "track_id"] = assigned_ids
 
@@ -770,6 +722,11 @@ class ChirpDetector:
         bbox_counter = 0
         for i, batch_indices in enumerate(self.parser.batches):
 
+            prog.console.rule(
+                f"[bold green]Batch {i} of {len(self.parser.batches)}"
+            )
+
+            # STEP 0: Create metadata for each batch
             batch_metadata = [{
                 "recording": self.data.path.name,
                 "batch": i,
@@ -812,10 +769,11 @@ class ChirpDetector:
                 # now split the bbox ids in sublists with same length as
                 # detections for each spec
                 split_ids = []
-                for j, prediction in enumerate(predictions):
+                for prediction in predictions:
                     sub_ids = bbox_ids[:len(prediction["boxes"])]
                     bbox_ids = bbox_ids[len(prediction["boxes"]):]
                     split_ids.append(sub_ids)
+
                 batch_df = convert_detections(
                     predictions,
                     split_ids,
@@ -853,7 +811,6 @@ class ChirpDetector:
         # Save the dataframe
         dataframes = pd.concat(dataframes)
         dataframes = dataframes.reset_index(drop=True)
-        # sort by t1
         dataframes = dataframes.sort_values(by=["t1"])
         savepath = self.data.path / "chirpdetector_bboxes.csv"
         dataframes.to_csv(savepath, index=False)

@@ -20,7 +20,8 @@ threshold = 0.9 # threshold for the detection
 
 [spectrogram]
 time_window = 15  # time window in seconds, determines size of the images
-batch_size = 6 # how many spectrograms to detect on at once,
+freq_ranges = [0, 1000, 500, 1500, 1000, 2000] # frequency ranges to split the spectrograms into
+batch_size = 4 # how many spectrograms to detect on at once,
 freq_pad = 600 # padding in Hz so that limits are (lowest fish - padding, highest fish + padding)
 freq_res = 6 # target frequency resolution of the spectrograms in Hz
 overlap_frac = 0.9 # overlap of the fft windows in % 
