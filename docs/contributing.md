@@ -29,6 +29,10 @@ After the first release, this section will be removed an tasks will be organized
 as github issues. Until them, if you fixed something, please check it off on this
 list before opening a pull request.
 
+- [ ] Give each chirp in df its own ID
+- [ ] Give each spectrogram snippet its own ID
+- [ ] Save spectrogram snippet ID and chirp IDs
+- [ ] Write data dumping for main loop
 - [ ] Write an assingment benchmarking
 - [ ] Write an assignmen GUI to create a ground truth
 - [ ] Find out why current assignment algo is failing at raw = raw1 - raw2
