@@ -2,24 +2,22 @@
 
 import logging
 import pathlib
-import shutil
-import time
-import uuid
-from typing import Self, Tuple, List, Any
 from abc import ABC, abstractmethod
+from typing import List, Self, Tuple
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from gridtools.datasets import load, subset
+from gridtools.datasets import load
 from gridtools.datasets.models import Dataset
+from gridtools.preprocessing.preprocessing import interpolate_tracks
 from gridtools.utils.spectrograms import (
+    compute_spectrogram,
     freqres_to_nfft,
     overlap_to_hoplen,
-    compute_spectrogram,
-    to_decibel
+    to_decibel,
 )
 from matplotlib.patches import Rectangle
 from rich.progress import (
@@ -28,23 +26,18 @@ from rich.progress import (
     SpinnerColumn,
     TimeElapsedColumn,
 )
-
 from torchvision.ops import nms
-from gridtools.preprocessing.preprocessing import interpolate_tracks
 
-from .convert_data import make_file_tree, numpy_to_pil
-from .detect_chirps import spec_to_image, float_index_interpolation
+from .dataset_parser import ArrayParser
+from .detect_chirps import float_index_interpolation, spec_to_image
 from .models.utils import get_device, load_fasterrcnn
 from .utils.configfiles import Config, load_config
-from .utils.logging import make_logger, Timer
+from .utils.logging import Timer, make_logger
 from .utils.signal_processing import (
-    compute_sum_spectrogam,
     make_spectrogram_axes,
 )
-from .dataset_parser import ArrayParser
 
-# Use non-gui backend for matplotlib to
-# avoid memory leaks
+# Use non-gui backend for matplotlib to avoid memory leaks
 mpl.use("Agg")
 
 # initialize the progress bar
@@ -56,8 +49,19 @@ prog = Progress(
 )
 
 
-def get_faster_rcnn(cfg: Config) -> torch.nn.Module:
-    """Load the trained faster R-CNN model."""
+def get_trained_faster_rcnn(cfg: Config) -> torch.nn.Module:
+    """Load the trained faster R-CNN model.
+
+    Parameters
+    ----------
+    cfg : Config
+        The configuration file.
+
+    Returns
+    -------
+    model : torch.nn.Module
+        The trained model.
+    """
     model = load_fasterrcnn(num_classes=len(cfg.hyper.classes))
     device = get_device()
     checkpoint = torch.load(
@@ -69,9 +73,43 @@ def get_faster_rcnn(cfg: Config) -> torch.nn.Module:
 
 
 def make_batch_specs(
-    indices: List, handles: List, batch: List, samplerate: float, cfg: Config
-    ) -> List:
-    """Compute the spectrograms for a batch of windows."""
+    indices: List,
+    metadata: List,
+    batch: np.ndarray,
+    samplerate: float,
+    cfg: Config
+) -> Tuple[List, List, List, List]:
+    """Compute the spectrograms for a batch of windows.
+
+    Gets the snippets of raw data for one batch and computes the sum
+    spectrogram for each snippet. The sum spectrogram is then converted
+    to decibel and the spectrograms are tiled along the frequency axis
+    and converted into 0-255 uint8 images.
+
+    Parameters
+    ----------
+    indices : List
+        The indices of the raw data snippets in the original recording.
+    metadata : List
+        The metadata for each snippet.
+    batch : np.ndarray
+        The raw data snippets.
+    samplerate : float
+        The sampling rate of the raw data.
+    cfg : Config
+        The configuration file.
+
+    Returns
+    -------
+    metadata : List
+        The metadata for each snippet.
+    images : List
+        The spectrograms as images.
+    times : List
+        The time axis for each spectrogram.
+    freqs : List
+        The frequency axis for each spectrogram.
+    """
     batch = np.swapaxes(batch, 1, 2)
     nfft = freqres_to_nfft(
         freq_res=cfg.spec.freq_res,
@@ -109,10 +147,10 @@ def make_batch_specs(
     batch_specs = [
         (spec, *ax) for spec, ax in zip(batch_sum_specs, axes)
     ]
-    # Add the name to each spec tuple
+    # Add the metadata to each spec tuple
     batch_specs = [
-        (name, *spec) for name, spec in zip(
-            handles, batch_specs
+        (meta, *spec) for meta, spec in zip(
+            metadata, batch_specs
         )
     ]
 
@@ -120,34 +158,67 @@ def make_batch_specs(
     sliced_specs = tile_batch_specs(batch_specs, cfg)
 
     # Split the list into specs and axes
-    handles, specs, times, freqs = zip(*sliced_specs)
+    metadata, specs, times, freqs = zip(*sliced_specs)
 
     # Convert the spec tensors to mimic PIL images
     images = [spec_to_image(spec) for spec in specs]
 
-    return handles, images, times, freqs
+    return metadata, images, times, freqs
 
 
 def tile_batch_specs(batch_specs: List, cfg: Config) -> List:
-    """Tile the spectrograms of a batch."""
+    """Tile the spectrograms of a batch.
+
+    Parameters
+    ----------
+    batch_specs : List
+        The spectrograms of a batch.
+    cfg : Config
+        The configuration file.
+
+    Returns
+    -------
+    sliced_specs : List
+        The tiled spectrograms.
+    """
     freq_ranges = [(0, 1000), (500, 1500), (1000, 2000)]
     sliced_specs = []
-    for start, end in freq_ranges:
+    for i, (start, end) in enumerate(freq_ranges):
         start_idx = np.argmax(batch_specs[0][3] >= start)
         end_idx = np.argmax(batch_specs[0][3] >= end)
-        suffix = f"_frange-{start}-{end}"
-        sliced_specs.extend([
-            (name + suffix, spec[start_idx:end_idx, :], time, freq[start_idx:end_idx])
-            for name, spec, time, freq in batch_specs
-        ])
-
+        for meta, spec, time, freq in batch_specs:
+            meta["frange"] = []
+            meta["frange"].append(freq_ranges[i])
+            sliced_specs.append(
+                (
+                    meta,
+                    spec[start_idx:end_idx, :],
+                    time,
+                    freq[start_idx:end_idx]
+                )
+            )
     return sliced_specs
 
 
-def pixel_to_timefreq(
+def pixel_box_to_timefreq(
         boxes: np.ndarray, time: np.ndarray, freq: np.ndarray
     ) -> np.ndarray:
-    """Convert the pixel coordinates of a box to time and frequency."""
+    """Convert the pixel coordinates of a box to time and frequency.
+
+    Parameters
+    ----------
+    boxes : np.ndarray
+        The boxes to convert.
+    time : np.ndarray
+        The time axis of the spectrogram.
+    freq : np.ndarray
+        The frequency axis of the spectrogram.
+
+    Returns
+    -------
+    boxes_timefreq : np.ndarray
+        The converted boxes.
+    """
     freq_indices = np.arange(len(freq))
     time_indices = np.arange(len(time))
 
@@ -168,12 +239,31 @@ def pixel_to_timefreq(
 
 def convert_detections(
     detections: List,
-    names: List,
+    metadata: List,
     times: List,
     freqs: List,
     cfg: Config,
-) -> pd.DataFrame():
-    """Convert the detections to a pandas DataFrame."""
+) -> pd.DataFrame:
+    """Convert the detected bboxes to a pandas DataFrame including metadata.
+
+    Parameters
+    ----------
+    detections : List
+        The detections for each spectrogram in the batch.
+    metadata : List
+        The metadata for each spectrogram in the batch.
+    times : List
+        The time axis for each spectrogram in the batch.
+    freqs : List
+        The frequency axis for each spectrogram in the batch.
+    cfg : Config
+        The configuration file.
+
+    Returns
+    -------
+    out_df : pd.DataFrame
+        The converted detections.
+    """
     dataframes = []
     for i in range(len(detections)):
 
@@ -187,11 +277,8 @@ def convert_detections(
         batch_spec_index = batch_spec_index[scores >= cfg.det.threshold]
         scores = scores[scores >= cfg.det.threshold]
 
-        # add the name to each box
-        name = [names[i]] * len(boxes)
-
         # convert the boxes to time and frequency
-        boxes_timefreq = pixel_to_timefreq(
+        boxes_timefreq = pixel_box_to_timefreq(
             boxes=boxes,
             time=times[i],
             freq=freqs[i]
@@ -199,7 +286,11 @@ def convert_detections(
 
         # put it all into a large dataframe
         dataframe = pd.DataFrame({
-            "name": name,
+            "recording": [metadata[i]["recording"] for _ in range(len(boxes))],
+            "batch": [metadata[i]["batch"] for _ in range(len(boxes))],
+            "window": [metadata[i]["window"] for _ in range(len(boxes))],
+            "indices": [metadata[i]["indices"] for _ in range(len(boxes))],
+            "frange": [metadata[i]["frange"] for _ in range(len(boxes))],
             "batch_spec_index": batch_spec_index,
             "x1": boxes[:, 0],
             "y1": boxes[:, 1],
@@ -216,11 +307,26 @@ def convert_detections(
     return out_df.reset_index(drop=True)
 
 
-def non_max_suppression(
+def dataframe_nms(
     chirp_df: pd.DataFrame,
     overlapthresh: float,
 ) -> List:
-    """Non maximum suppression with the torchvision nms implementation."""
+    """Non maximum suppression with the torchvision nms implementation.
+
+    ...but with a pandas dataframe as input.
+
+    Parameters
+    ----------
+    chirp_df : pd.DataFrame
+        The dataframe with the detections.
+    overlapthresh : float
+        The overlap threshold for non-maximum suppression.
+
+    Returns
+    -------
+    indices : List
+        The indices of the boxes to keep after non-maximum suppression.
+    """
     # convert the dataframe to a list of boxes
     boxes = chirp_df[["t1", "f1", "t2", "f2"]].to_numpy()
 
@@ -270,7 +376,7 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
 
     # detect chirps in all datasets in the specified path
     # and show a progress bar
-    model = get_faster_rcnn(config)
+    model = get_trained_faster_rcnn(config)
     model.to(get_device()).eval()
     predictor = FasterRCNN(
         model=model
@@ -279,7 +385,7 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
         for dataset in datasets:
             data = load(dataset)
-            data = interpolate_tracks(data)
+            data = interpolate_tracks(data, samplerate=120)
             cpd = ChirpDetector(
                 cfg=config,
                 data=data,
@@ -305,6 +411,7 @@ class AbstractDetectionModel(ABC):
     ]
     One dict for each spectrogram in the batch.
     Boxes follow the format [x1, y1, x2, y2] in pixels.
+    We dont need labels as we only detect one class.
     """
 
     def __init__(self: Self, model: torch.nn.Module) -> None:
@@ -341,6 +448,10 @@ class FasterRCNN(AbstractDetectionModel):
         for i in range(len(model_output)):
             boxes = model_output[i]["boxes"].detach().cpu().numpy()
             scores = model_output[i]["scores"].detach().cpu().numpy()
+            labels = model_output[i]["labels"].detach().cpu().numpy()
+
+            boxes = boxes[labels == 1]
+            scores = scores[labels == 1]
             output.append(
                 {
                     "boxes": boxes,
@@ -350,20 +461,11 @@ class FasterRCNN(AbstractDetectionModel):
         return output
 
 
-class YOLONAS(AbstractDetectionModel):
-    """Wrapper for the deci-ai YOLO-NAS model."""
-
-    def convert_to_standard_format(self: Self, model_output: List) -> List:
-        """Convert the model output to a standardized format."""
-        pass
-
-
 class AbstractBoxAssigner(ABC):
-    """Wrapper around different box assignment methods."""
+    """Default wrapper around different box assignment methods."""
 
-    def __init__(
+    def __init__( # noqa
         self: Self,
-        batch_indices: List,
         batch_specs: List,
         batch_times: List,
         batch_freqs: List,
@@ -372,7 +474,6 @@ class AbstractBoxAssigner(ABC):
         cfg: Config,
     ) -> None:
         """Initialize the BoxAssigner."""
-        self.batch_indices = batch_indices
         self.batch_specs = batch_specs
         self.batch_times = batch_times
         self.batch_freqs = batch_freqs
@@ -387,7 +488,26 @@ class AbstractBoxAssigner(ABC):
 
 
 class TroughBoxAssigner(AbstractBoxAssigner):
-    """Assign boxes to tracks based on power troughs."""
+    """Assign boxes to tracks based on power troughs.
+
+    The idea is to assign boxes to tracks by checking which of the tracks
+    has a trough in spectrogram power in the spectrogram bbox.
+
+    This is done by combining the information included the chirp detection
+    spectrogram, which has a fine temporal resolution, and the approximation
+    of the fishes fundamental frequencies, which have fine frequency
+    resolution.
+
+    To do this, I take the chirp detection spectrogram and extract the powers
+    that lie below a frequency track of a fish for each bounding box. During
+    chirps, there usually is a trough in power. If a fish did not chirp but the
+    chirp of another fish crosses its frequency band, there should be a peak
+    in power as the signal of the chirper and the signal of the non-chirper
+    add up. In short: Chirping fish have a trough in power, non-chirping fish
+    have a peak in power (in the ideal world).
+
+    This method uses this notion and just assigns chirps by peak detection.
+    """
 
     def assign(self: Self) -> pd.DataFrame:
         """Assign boxes to tracks by troughts in power.
@@ -396,41 +516,114 @@ class TroughBoxAssigner(AbstractBoxAssigner):
         power in the spectrogram bbox.
         """
         subdata = self.data
+        padding = 0.05 # seconds before and after bbox bounds to ad
 
         # retrieve frequency and time for each fish id
-        tracks = [
+        track_ids = np.unique(subdata.track.ids)
+        track_freqs = [
             subdata.track.freqs[subdata.track.idents == ident]
-            for ident in np.unique(subdata.track.ids)
+            for ident in track_ids
         ]
-        times = [
-            subdata.track.times[subdata.track.indices[subdata.track.idents == ident]]
-            for ident in np.unique(subdata.track.ids)
+        track_times = [
+            subdata.track.times[subdata.track.indices[
+            subdata.track.idents == ident
+        ]]
+            for ident in track_ids
         ]
-        ids = np.unique(subdata.track.ids)
 
-        import matplotlib as mpl
-        mpl.use("TkAgg")
-        # plt.plot(subdata.track.times)
-        for t, f in zip(times, tracks):
-            plt.plot(t, f)
-        plt.show()
+        # Plan: First go though each box and check if there is a track in them.
+        # If there is, compute the power in the box for each track.
+        # If, not skip the box.
+        # Then, check if there is a trough in power for each track.
+        # If there is, assign the box to the track.
+        # If not, skip the box.
 
-        for i, (spec, time, freq) in enumerate(zip(
-            self.batch_specs, self.batch_times, self.batch_freqs
-        )):
+        for i in range(len(self.batch_detections)):
 
-            spec = spec.cpu().numpy()
-            spec_boxes = self.batch_detections[
-                self.batch_detections["batch_spec_index"] == i
-            ][["t1", "f1", "t2", "f2"]].to_numpy()
-            plt.pcolormesh(time, freq, spec[0])
+            # get the current box
+            box = self.batch_detections.iloc[i]
 
-            for box in spec_boxes:
-                x1, y1, x2, y2 = box
-                plt.plot([x1, x2], [y1, y2], color="red", lw=1, ls="--")
+            # get the time and frequency indices for the box
+            t1 = box["t1"]
+            f1 = box["f1"]
+            t2 = box["t2"]
+            f2 = box["f2"]
+            spec_idx = box["batch_spec_index"].astype(int)
 
-            for track_id, t, f in zip(ids, times, tracks):
-                continue
+            # get the power in the box for each track
+            box_powers = []
+            box_power_ids = []
+            import matplotlib as mpl
+            mpl.use("TkAgg")
+            fig, (ax1, ax2) = plt.subplots(2,1)
+            for track_id, track_freq, track_time in zip(track_ids, track_freqs, track_times):
+                # get the time indices for the track
+                # as the dataset is interpolated, time and freq indices
+                # the same
+                track_t1_idx = np.argmin(np.abs(track_time - (t1 - padding)))
+                track_t2_idx = np.argmin(np.abs(track_time - (t2 + padding)))
+
+                # get the track snippet in the current bbox
+                track_freq_snippet = track_freq[track_t1_idx:track_t2_idx]
+                track_time_snippet = track_time[track_t1_idx:track_t2_idx]
+
+                # Check if the frequency values of the snippet are
+                # inside the bbox
+                if np.min(track_freq_snippet) > f2 or np.max(track_freq_snippet) < f1:
+                    # the track does not lie in the box
+                    continue
+
+                # Now get the power on spec underneath the track
+                # and plot it
+                spec_powers = self.batch_specs[spec_idx].cpu().numpy()[0]
+                spec_times = self.batch_times[spec_idx]
+                spec_freqs = self.batch_freqs[spec_idx]
+
+                spec_t1_idx = np.argmin(np.abs(spec_times - (t1 - padding)))
+                spec_t2_idx = np.argmin(np.abs(spec_times - (t2 + padding)))
+
+                spec_powers = spec_powers[:, spec_t1_idx:spec_t2_idx]
+                spec_times = spec_times[spec_t1_idx:spec_t2_idx]
+
+                spec_f_indices = [
+                    np.argmin(np.abs(spec_freqs - freq)) for freq in track_freq_snippet
+                ]
+
+                spec_powers = [
+                    spec_powers[f_idx, t_idx] for f_idx, t_idx in zip(
+                        spec_f_indices, range(len(spec_times))
+                    )
+                ]
+
+                # store the powers
+                box_powers.append(spec_powers)
+                box_power_ids.append(track_id)
+
+
+                # plot the box and the track
+                ax1.pcolormesh(
+                    self.batch_times[spec_idx],
+                    self.batch_freqs[spec_idx],
+                    self.batch_specs[spec_idx].cpu().numpy()[0]
+                )
+                ax1.add_patch(
+                    Rectangle(
+                        (t1, f1),
+                        t2 - t1,
+                        f2 - f1,
+                        fill=False,
+                        color="white",
+                        lw=1,
+                    )
+                )
+                ax1.plot(track_time_snippet, track_freq_snippet)
+
+            # shift the track power baseline to same level
+            starts = [power[0] for power in box_powers]
+            box_powers = [power - start for power, start in zip(box_powers, starts)]
+
+            for power, track_id in zip(box_powers, box_power_ids):
+                ax2.plot(power, label=track_id)
             plt.show()
 
 
@@ -482,16 +675,18 @@ class ChirpDetector:
         """Detect chirps on the dataset."""
         prog.console.rule("[bold green]Starting parser")
 
-        prog.console.log("Interpolating wavetracker tracks")
+        # prog.console.log("Interpolating wavetracker tracks")
 
         for i, batch_indices in enumerate(self.parser.batches):
 
-            # Generate a string handle for each spectrogram
-            # e.g. for filenames in case of saving
-            batch_handles = [
-                f"{self.data.path.name}_batch-{i}_window-{j}"
-                for j in range(len(batch_indices))
-            ]
+            batch_metadata = [{
+                "recording": self.data.path.name,
+                "batch": i,
+                "window": j,
+                "indices": indices,
+                "frange": [],
+            } for j, indices in enumerate(batch_indices)]
+
 
             # STEP 1: Load the raw data as a batch
             batch_raw = [
@@ -501,9 +696,9 @@ class ChirpDetector:
 
             # STEP 2: Compute the spectrograms for each raw data snippet
             with Timer(prog.console, "Compute spectrograms"):
-                handles, specs, times, freqs = make_batch_specs(
+                batch_metadata, specs, times, freqs = make_batch_specs(
                     batch_indices,
-                    batch_handles,
+                    batch_metadata,
                     batch_raw,
                     self.data.grid.samplerate,
                     self.cfg
@@ -518,7 +713,7 @@ class ChirpDetector:
             with Timer(prog.console, "Convert detections"):
                 batch_df = convert_detections(
                     predictions,
-                    handles,
+                    batch_metadata,
                     times,
                     freqs,
                     self.cfg
@@ -526,7 +721,7 @@ class ChirpDetector:
 
             # STEP 5: Remove overlapping boxes by non-maximum suppression
             with Timer(prog.console, "Non-maximum suppression"):
-                good_box_indices = non_max_suppression(
+                good_box_indices = dataframe_nms(
                     batch_df,
                     overlapthresh=0.5,
                 )
@@ -535,7 +730,6 @@ class ChirpDetector:
             # STEP 6: Assign boxes to wavetracker tracks
             # TODO: Implement this
             assigner = TroughBoxAssigner(
-                batch_indices=batch_indices,
                 batch_specs=specs,
                 batch_times=times,
                 batch_freqs=freqs,

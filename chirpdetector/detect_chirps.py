@@ -7,6 +7,7 @@ import time
 import uuid
 from typing import Self, Tuple
 
+from numba import jit
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -91,6 +92,7 @@ def clean_up_dir(path: pathlib.Path) -> None:
         file.unlink()
 
 
+@jit(nopython=True, parallel=True)
 def float_index_interpolation(
     values: np.ndarray,
     index_arr: np.ndarray,
@@ -156,8 +158,8 @@ def float_index_interpolation(
         raise ValueError(msg)
 
     # Find the indices corresponding to the values
-    lower_indices = np.floor(values).astype(int)
-    upper_indices = np.ceil(values).astype(int)
+    lower_indices = np.floor(values).astype(np.int_)
+    upper_indices = np.ceil(values).astype(np.int_)
 
     # Ensure upper indices are within the array bounds
     upper_indices = np.minimum(upper_indices, len(index_arr) - 1)

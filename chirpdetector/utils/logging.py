@@ -1,11 +1,11 @@
 """Logging utilities used in all modules."""
 
-from typing import Self
-from contextlib import ContextDecorator
-import time
-
 import logging
 import pathlib
+import time
+from contextlib import ContextDecorator
+from typing import Self
+
 from rich.console import Console
 
 
