@@ -9,23 +9,21 @@ from typing import Callable
 import rich_click as click
 import toml
 
-from .assign_chirps import assign_cli
-from .convert_data import convert_cli
-from .dataset_utils import (
+from chirpdetector.conversion.convert_data import convert_cli
+from chirpdetector.datahandling.yolo_dataset_utils import (
     clean_yolo_dataset,
     merge_yolo_datasets,
     subset_yolo_dataset,
 )
-from .detect_chirps2 import detect_cli
-from .eval_detection import eval_detection_cli
-from .plot_detections import (
+from chirpdetector.detection.detect_chirps import detect_cli
+from chirpdetector.visualization.plot_detections import (
     clean_all_plots_cli,
     clean_plots_cli,
     plot_all_detections_cli,
     plot_detections_cli,
 )
-from .train_model import train_cli
-from .utils.configfiles import copy_config
+from chirpdetector.models.faster_rcnn_detector.train import train_cli
+from chirpdetector.config import copy_config
 
 click.rich_click.USE_MARKDOWN = True
 # click.rich_click.SHOW_ARGUMENTS = True
@@ -210,43 +208,43 @@ def detect(path: pathlib.Path, make_training_data: bool) -> None:
     """Detect chirps on a spectrogram."""
     detect_cli(path, make_training_data)
 
+#
+# @chirpdetector.command()
+# @click.option(
+#     "--path",
+#     "-p",
+#     type=click.Path(
+#         exists=True,
+#         file_okay=False,
+#         dir_okay=True,
+#         resolve_path=True,
+#         path_type=pathlib.Path,
+#     ),
+#     required=True,
+#     help="Path to the dataset.",
+# )
+# def assign(path: pathlib.Path) -> None:
+#     """Detect chirps on a spectrogram."""
+#     assign_cli(path)
 
-@chirpdetector.command()
-@click.option(
-    "--path",
-    "-p",
-    type=click.Path(
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        resolve_path=True,
-        path_type=pathlib.Path,
-    ),
-    required=True,
-    help="Path to the dataset.",
-)
-def assign(path: pathlib.Path) -> None:
-    """Detect chirps on a spectrogram."""
-    assign_cli(path)
 
-
-@chirpdetector.command()
-@click.option(
-    "--path",
-    "-p",
-    type=click.Path(
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        resolve_path=True,
-        path_type=pathlib.Path,
-    ),
-    required=True,
-    help="Path to the dataset.",
-)
-def evaltrain(path: pathlib.Path) -> None:
-    """Detect chirps on a spectrogram."""
-    eval_detection_cli(path)
+# @chirpdetector.command()
+# @click.option(
+#     "--path",
+#     "-p",
+#     type=click.Path(
+#         exists=True,
+#         file_okay=False,
+#         dir_okay=True,
+#         resolve_path=True,
+#         path_type=pathlib.Path,
+#     ),
+#     required=True,
+#     help="Path to the dataset.",
+# )
+# def evaltrain(path: pathlib.Path) -> None:
+#     """Detect chirps on a spectrogram."""
+#     eval_detection_cli(path)
 
 
 @chirpdetector.command()

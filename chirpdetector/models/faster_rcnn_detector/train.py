@@ -22,10 +22,14 @@ from rich.progress import (
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader
 
-from .models.datasets import CustomDataset
-from .models.utils import collate_fn, get_device, load_fasterrcnn
-from .utils.configfiles import Config, load_config
-from .utils.logging import make_logger
+from chirpdetector.models.datasets import CustomDataset
+from chirpdetector.models.utils import collate_fn, get_device
+from chirpdetector.models.faster_rcnn_detector.loaders import (
+    load_pretrained_faster_rcnn
+)
+from chirpdetector.config import Config, load_config
+from chirpdetector.logging.logging import make_logger
+
 
 # Use non-gui backend to prevent memory leaks
 mpl.use("Agg")
@@ -780,9 +784,9 @@ def train(config: Config, mode: str = "pretrain") -> None:  # noqa
             splits.split(np.arange(len(data))),
         ):
             # initialize the model and optimizer
-            model = load_fasterrcnn(num_classes=len(config.hyper.classes)).to(
-                device,
-            )
+            model = load_pretrained_faster_rcnn(
+                num_classes=len(config.hyper.classes)
+            ).to(device)
 
             # If the mode is finetune, load the model state dict from
             # previous training

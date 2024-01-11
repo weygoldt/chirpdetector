@@ -48,6 +48,7 @@ class Timer(ContextDecorator):
             )
             self.console.log(msg)
 
+
 def make_logger(name: str, logfile: pathlib.Path) -> logging.Logger:
     """Create a logger for the script.
 

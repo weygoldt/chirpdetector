@@ -1,10 +1,156 @@
-"""Parse a dataset in batches safely."""
+"""Tools to parse large datasets in batches."""
 
-from typing import Self
+from typing import List, Self, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
+from gridtools.utils.spectrograms import (
+    compute_spectrogram,
+    freqres_to_nfft,
+    overlap_to_hoplen,
+    to_decibel,
+)
 from rich.console import Console
+
+from chirpdetector.config import Config
+from chirpdetector.datahandling.signal_processing import (
+    make_spectrogram_axes, spec_to_image
+)
+
+
+def tile_batch_specs(batch_specs: List, cfg: Config) -> List:
+    """Tile the spectrograms of a batch in the frequency dimension.
+
+    Parameters
+    ----------
+    batch_specs : List
+        The spectrograms of a batch.
+    cfg : Config
+        The configuration file.
+
+    Returns
+    -------
+    sliced_specs : List
+        The tiled spectrograms.
+    """
+    freq_ranges = cfg.spec.freq_ranges
+    # group ranges into tuples of 2 ints
+    freq_ranges = [
+        (freq_ranges[i], freq_ranges[i + 1])
+        for i in range(0, len(freq_ranges), 2)
+    ]
+    sliced_specs = []
+    for start, end in freq_ranges:
+        start_idx = np.argmax(batch_specs[0][3] >= start)
+        end_idx = np.argmax(batch_specs[0][3] >= end)
+        for meta, spec, time, freq in batch_specs:
+            newmeta = meta.copy()
+            newmeta["frange"] = (start, end)
+            sliced_specs.append(
+                (
+                    newmeta,
+                    spec[start_idx:end_idx, :],
+                    time,
+                    freq[start_idx:end_idx]
+                )
+            )
+    return sliced_specs
+
+
+def make_batch_specs(
+    indices: List,
+    metadata: List,
+    batch: np.ndarray,
+    samplerate: float,
+    cfg: Config
+) -> Tuple[List, List, List, List]:
+    """Compute the spectrograms for a batch of windows.
+
+    Gets the snippets of raw data for one batch and computes the sum
+    spectrogram for each snippet. The sum spectrogram is then converted
+    to decibel and the spectrograms are tiled along the frequency axis
+    and converted into 0-255 uint8 images.
+
+    Parameters
+    ----------
+    indices : List
+        The indices of the raw data snippets in the original recording.
+    metadata : List
+        The metadata for each snippet.
+    batch : np.ndarray
+        The raw data snippets.
+    samplerate : float
+        The sampling rate of the raw data.
+    cfg : Config
+        The configuration file.
+
+    Returns
+    -------
+    metadata : List
+        The metadata for each snippet.
+    images : List
+        The spectrograms as images.
+    times : List
+        The time axis for each spectrogram.
+    freqs : List
+        The frequency axis for each spectrogram.
+    """
+    batch = np.swapaxes(batch, 1, 2)
+    nfft = freqres_to_nfft(
+        freq_res=cfg.spec.freq_res,
+        samplingrate=samplerate
+    )
+    hop_length = overlap_to_hoplen(
+        nfft=nfft,
+        overlap=cfg.spec.overlap_frac
+    )
+    batch_specs = [
+        compute_spectrogram(
+            data=signal,
+            samplingrate=samplerate,
+            nfft=nfft,
+            hop_length=hop_length
+        )[0] for signal in batch
+    ]
+
+    batch_specs_decibel = [
+        to_decibel(spec) for spec in batch_specs
+    ]
+    # batch_specs_decible_cpu = [spec for spec in batch_specs_decibel]
+    batch_sum_specs = [
+        torch.sum(spec, dim=0) for spec in batch_specs_decibel
+    ]
+    axes = [
+        make_spectrogram_axes(
+            start=idxs[0],
+            stop=idxs[1],
+            nfft=nfft,
+            hop_length=hop_length,
+            samplerate=samplerate
+        ) for idxs in indices
+    ]
+    batch_specs = [
+        (spec, *ax) for spec, ax in zip(batch_sum_specs, axes)
+    ]
+    # Add the metadata to each spec tuple
+    batch_specs = [
+        (meta, *spec) for meta, spec in zip(
+            metadata, batch_specs
+        )
+    ]
+
+    # Tile the spectrograms y-axis
+    sliced_specs = tile_batch_specs(batch_specs, cfg)
+
+    # Split the list into specs and axes
+    metadata, specs, times, freqs = zip(*sliced_specs)
+
+    # Convert the spec tensors to mimic PIL images
+    images = [spec_to_image(spec) for spec in specs]
+
+    return metadata, images, times, freqs
+
 
 
 class ArrayParser:
@@ -187,16 +333,22 @@ class ArrayParser:
         )
 
 
-def main() -> None:
+def arrayparser_demo() -> None:
     """Run a test."""
     samplingrate = 20000
     length = 100023423
     batchsize = 5
     windowsize = 15
     overlap = 1
-    dsp = DatasetParser(length, samplingrate, batchsize, windowsize, overlap)
+    dsp = ArrayParser(
+        length, samplingrate, batchsize, windowsize, overlap, Console()
+    )
     print(f"Has {dsp.nbatches} batches.")
     dsp.viz()
+
+def main() -> None:
+    """Run the demos."""
+    arrayparser_demo()
 
 if __name__ == "__main__":
     main()

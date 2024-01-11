@@ -16,9 +16,9 @@ from PIL import Image
 from rich.console import Console
 from rich.progress import track
 
-from .utils.configfiles import Config, load_config
-from .utils.signal_processing import (
-    compute_sum_spectrogam,
+from chirpdetector.config import Config, load_config
+from chirpdetector.datahandling.signal_processing import (
+    # compute_sum_spectrogam,
     make_chunk_indices,
     make_spectrogram_axes,
     zscore_standardize,
@@ -458,58 +458,58 @@ def convert(
         chunk = subset(data, idx1, idx2, mode="index")
 
         # compute the spectrogram for each electrode of the current chunk
-        spectrogram = compute_sum_spectrogam(chunk, nfft, hop_len)
+        # spectrogram = compute_sum_spectrogam(chunk, nfft, hop_len)
 
         # cut off everything outside the upper frequency limit
         # the spec is still a tensor
 
-        spectrogram = spectrogram[
-            (spectrogram_frequencies >= spectrogram_freq_limits[0])
-            & (spectrogram_frequencies <= spectrogram_freq_limits[1]),
-            :,
-        ]
-        spectrogram_frequencies = spectrogram_frequencies[
-            (spectrogram_frequencies >= spectrogram_freq_limits[0])
-            & (spectrogram_frequencies <= spectrogram_freq_limits[1])
-        ]
-
-        # normalize the spectrogram to zero mean and unit variance
-        # the spec is still a tensor
-        spectrogram = zscore_standardize(spectrogram)
-
-        # convert the spectrogram to a PIL image and save
-        spectrogram = spectrogram.detach().cpu().numpy()
-        img = numpy_to_pil(spectrogram)
-        imgpath = dataroot / "images" / f"{chunk.path.name}.png"
-        img.save(imgpath)
-
-        if label_mode == "synthetic":
-            bboxes = bboxes_from_simulated_chirps(chunk, nfft)
-            bbox_df = convert_bboxes_from_simulated_chirps(
-                imgpath,
-                spectrogram_times,
-                spectrogram_frequencies,
-                current_chunk,
-                bboxes,
-            )
-            if bbox_df is None:
-                continue
-            bbox_dfs.append(bbox_df)
-            save_labels_for_simulated_chirps(bbox_df, dataroot)
-
-        elif label_mode == "detected":
-            detected_labels(
-                dataroot, chunk, imgpath.name, spectrogram, spectrogram_times
-            )
-
-    if label_mode == "synthetic":
-        bbox_df = pd.concat(bbox_dfs, ignore_index=True)
-        bbox_df.to_csv(dataroot / f"{data.path.name}_bboxes.csv", index=False)
-
-    # save the classes.txt file
-    classes = ["__background__", "chirp"]
-    with pathlib.Path.open(dataroot / "classes.txt", "w") as f:
-        f.write("\n".join(classes))
+    #     spectrogram = spectrogram[
+    #         (spectrogram_frequencies >= spectrogram_freq_limits[0])
+    #         & (spectrogram_frequencies <= spectrogram_freq_limits[1]),
+    #         :,
+    #     ]
+    #     spectrogram_frequencies = spectrogram_frequencies[
+    #         (spectrogram_frequencies >= spectrogram_freq_limits[0])
+    #         & (spectrogram_frequencies <= spectrogram_freq_limits[1])
+    #     ]
+    #
+    #     # normalize the spectrogram to zero mean and unit variance
+    #     # the spec is still a tensor
+    #     spectrogram = zscore_standardize(spectrogram)
+    #
+    #     # convert the spectrogram to a PIL image and save
+    #     spectrogram = spectrogram.detach().cpu().numpy()
+    #     img = numpy_to_pil(spectrogram)
+    #     imgpath = dataroot / "images" / f"{chunk.path.name}.png"
+    #     img.save(imgpath)
+    #
+    #     if label_mode == "synthetic":
+    #         bboxes = bboxes_from_simulated_chirps(chunk, nfft)
+    #         bbox_df = convert_bboxes_from_simulated_chirps(
+    #             imgpath,
+    #             spectrogram_times,
+    #             spectrogram_frequencies,
+    #             current_chunk,
+    #             bboxes,
+    #         )
+    #         if bbox_df is None:
+    #             continue
+    #         bbox_dfs.append(bbox_df)
+    #         save_labels_for_simulated_chirps(bbox_df, dataroot)
+    #
+    #     elif label_mode == "detected":
+    #         detected_labels(
+    #             dataroot, chunk, imgpath.name, spectrogram, spectrogram_times
+    #         )
+    #
+    # if label_mode == "synthetic":
+    #     bbox_df = pd.concat(bbox_dfs, ignore_index=True)
+    #     bbox_df.to_csv(dataroot / f"{data.path.name}_bboxes.csv", index=False)
+    #
+    # # save the classes.txt file
+    # classes = ["__background__", "chirp"]
+    # with pathlib.Path.open(dataroot / "classes.txt", "w") as f:
+    #     f.write("\n".join(classes))
 
 
 def convert_cli(

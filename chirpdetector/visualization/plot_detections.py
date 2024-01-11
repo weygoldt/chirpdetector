@@ -22,9 +22,9 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from .utils.configfiles import Config, load_config
-from .utils.signal_processing import (
-    compute_sum_spectrogam,
+from chirpdetector.config import Config, load_config
+from chirpdetector.datahandling.signal_processing import (
+    # compute_sum_spectrogam,
     make_chunk_indices,
     make_spectrogram_axes,
 )

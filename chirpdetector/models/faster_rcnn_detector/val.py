@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pydantic import BaseModel
 
-from .train_model import FoldMetrics
+from .train import FoldMetrics
 
 
 class AvgEpochMetrics(BaseModel):

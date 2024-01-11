@@ -12,7 +12,8 @@ from matplotlib.patches import Rectangle
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
-from ..utils.configfiles import load_config
+from chirpdetector.config import load_config
+
 from .utils import collate_fn
 
 
