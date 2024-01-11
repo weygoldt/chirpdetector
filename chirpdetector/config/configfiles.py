@@ -76,7 +76,7 @@ def copy_config(destination: pathlib.Path) -> None:
     -------
     - `None`
     """
-    origin = pathlib.Path(__file__).parent.parent / "config.toml"
+    origin = pathlib.Path(__file__).parent / "config.toml"
     if not origin.exists():
         msg = (
             "Could not find the default config file. "

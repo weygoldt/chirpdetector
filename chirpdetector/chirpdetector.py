@@ -9,7 +9,8 @@ from typing import Callable
 import rich_click as click
 import toml
 
-from chirpdetector.conversion.convert_data import convert_cli
+# from chirpdetector.conversion.convert_data import convert_cli
+from chirpdetector.conversion.detection_dataset import convert_cli
 from chirpdetector.datahandling.yolo_dataset_utils import (
     clean_yolo_dataset,
     merge_yolo_datasets,
@@ -153,7 +154,12 @@ def convert(
     Convert wavetracker dataset to labeled or unlabeled
     spectrogram images to train the model.
     """
-    convert_cli(input_path, output_path, labels)
+    convert_cli(
+        input_path,
+        False,
+        # output_path,
+        # labels
+    )
 
 
 @chirpdetector.command()

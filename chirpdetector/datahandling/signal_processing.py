@@ -4,7 +4,8 @@ from typing import Tuple, TypeVar
 
 import numpy as np
 import torch
-from gridtools.utils.spectrograms import sint
+from gridtools.utils.spectrograms import sint, compute_spectrogram, to_decibel
+from gridtools.datasets.models import Dataset
 from scipy.signal import butter, sosfiltfilt
 
 ArrayLike = TypeVar("ArrayLike", np.ndarray, torch.Tensor)
@@ -277,54 +278,54 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
 #     return to_decibel(spectrogram)
 #
 #
-# def compute_sum_spectrogam(
-#     data: Dataset, nfft: int, hop_len: int
-# ) -> torch.Tensor:
-#     """Compute the sum spectrogram of a chunk.
-#
-#     Parameters
-#     ----------
-#     - `chunk` : `Dataset`
-#         The dataset to make bounding boxes for.
-#     - `nfft` : `int`
-#         The number of samples in the FFT.
-#     - `hop_len` : `int`
-#         The hop length in samples.
-#
-#     Returns
-#     -------
-#     - `torch.tensor`
-#         The sum spectrogram.
-#     """
-#     n_electrodes = data.grid.rec.shape[1]
-#     spectrogram = None
-#     for electrode in range(n_electrodes):
-#         # get the signal for the current electrode
-#         signal = data.grid.rec[:, electrode]
-#
-#         # compute the spectrogram for the current electrode
-#         electrode_spectrogram, _, _ = compute_spectrogram(
-#             data=signal.copy(),
-#             samplingrate=data.grid.samplerate,
-#             nfft=nfft,
-#             hop_length=hop_len,
-#         )
-#
-#         # sum spectrogram over all electrodes
-#         # the spec is a tensor
-#         if electrode == 0:
-#             spectrogram = electrode_spectrogram
-#         else:
-#             spectrogram += electrode_spectrogram
-#
-#     if spectrogram is None:
-#         msg = "Failed to compute spectrogram."
-#         raise ValueError(msg)
-#
-#     # normalize spectrogram by the number of electrodes
-#     # the spec is still a tensor
-#     spectrogram /= n_electrodes
-#
-#     # convert the spectrogram to dB
-#     # .. still a tensor
-#     return to_decibel(spectrogram)
+def compute_sum_spectrogam(
+    data: Dataset, nfft: int, hop_len: int
+) -> torch.Tensor:
+    """Compute the sum spectrogram of a chunk.
+
+    Parameters
+    ----------
+    - `chunk` : `Dataset`
+        The dataset to make bounding boxes for.
+    - `nfft` : `int`
+        The number of samples in the FFT.
+    - `hop_len` : `int`
+        The hop length in samples.
+
+    Returns
+    -------
+    - `torch.tensor`
+        The sum spectrogram.
+    """
+    n_electrodes = data.grid.rec.shape[1]
+    spectrogram = None
+    for electrode in range(n_electrodes):
+        # get the signal for the current electrode
+        signal = data.grid.rec[:, electrode]
+
+        # compute the spectrogram for the current electrode
+        electrode_spectrogram, _, _ = compute_spectrogram(
+            data=signal.copy(),
+            samplingrate=data.grid.samplerate,
+            nfft=nfft,
+            hop_length=hop_len,
+        )
+
+        # sum spectrogram over all electrodes
+        # the spec is a tensor
+        if electrode == 0:
+            spectrogram = electrode_spectrogram
+        else:
+            spectrogram += electrode_spectrogram
+
+    if spectrogram is None:
+        msg = "Failed to compute spectrogram."
+        raise ValueError(msg)
+
+    # normalize spectrogram by the number of electrodes
+    # the spec is still a tensor
+    spectrogram /= n_electrodes
+
+    # convert the spectrogram to dB
+    # .. still a tensor
+    return to_decibel(spectrogram)
