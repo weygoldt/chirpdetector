@@ -42,10 +42,7 @@ from chirpdetector.models.faster_rcnn_detector import (
     load_finetuned_faster_rcnn,
 )
 from chirpdetector.models.utils import get_device
-from chirpdetector.detection.visualization_functions import (
-    plot_raw_batch,
-    plot_spec_tiling
-)
+from chirpdetector.detection.visualization_functions import plot_raw_batch
 
 # Use non-gui backend for matplotlib to avoid memory leaks
 mpl.use("TkAgg")
@@ -60,6 +57,7 @@ prog = Progress(
     MofNCompleteColumn(),
     TimeElapsedColumn(),
 )
+
 
 def convert_detections(
     detections: List,
@@ -195,6 +193,9 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
         prog.update(task, completed=len(datasets))
 
 
+
+
+
 class ChirpDetector:
     """Parse a grid dataset into batches."""
 
@@ -281,45 +282,35 @@ class ChirpDetector:
                     self.cfg
                 )
 
-            if i == 1:
-                plot_spec_tiling(specs, times, freqs)
-
-            # STEP 3: Predict boxes for each spectrogram
-            with Timer(prog.console, "Detect chirps"):
-                predictions = self.detector.predict(specs)
 
             if i == 1:
                 fig, ax = plt.subplots()
                 from matplotlib.patches import Rectangle
-                ax.pcolormesh(specs[4][0].cpu().numpy())
-                for j in range(len(predictions[4]["boxes"])):
-                    box = predictions[4]["boxes"][j]
-                    score = predictions[4]["scores"][j]
+                for spec, time, freq in zip(specs, times, freqs):
+                    spec = spec.cpu().numpy()
+                    ax.pcolormesh(time, freq, spec[0])
                     ax.add_patch(
                         Rectangle(
-                            (box[0], box[1]),
-                            box[2] - box[0],
-                            box[3] - box[1],
+                            (time[0], freq[0]),
+                            time[-1] - time[0],
+                            freq[-1] - freq[0],
                             fill=False,
-                            color="grey",
+                            color="white",
                             lw=1,
                             alpha=1
+                            zorder=1000
                         )
                     )
-                    ax.text(
-                        box[0],
-                        box[1],
-                        f"{score:.2f}",
-                        color="grey",
-                        fontsize=8,
-                        ha="left",
-                        va="bottom",
-                        alpha=1,
-                    )
-                ax.axis("off")
+                    # ax.axvline(time[0], color="white", lw=1)
+                    # ax.axvline(time[-1], color="white", lw=1)
+                    # ax.axhline(freq[0], color="white", lw=1)
+                    # ax.axhline(freq[-1], color="white", lw=1)
                 plt.show()
                 exit()
 
+            # STEP 3: Predict boxes for each spectrogram
+            with Timer(prog.console, "Detect chirps"):
+                predictions = self.detector.predict(specs)
 
             # STEP 4: Convert pixel values to time and frequency
             # and save everything in a dataframe

@@ -22,14 +22,13 @@ from rich.progress import (
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader
 
-from chirpdetector.models.datasets import CustomDataset
-from chirpdetector.models.utils import collate_fn, get_device
-from chirpdetector.models.faster_rcnn_detector.loaders import (
-    load_pretrained_faster_rcnn
-)
 from chirpdetector.config import Config, load_config
 from chirpdetector.logging.logging import make_logger
-
+from chirpdetector.models.datasets import CustomDataset
+from chirpdetector.models.faster_rcnn_detector.loaders import (
+    load_pretrained_faster_rcnn,
+)
+from chirpdetector.models.utils import collate_fn, get_device
 
 # Use non-gui backend to prevent memory leaks
 mpl.use("Agg")

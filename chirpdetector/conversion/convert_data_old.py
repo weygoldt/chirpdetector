@@ -460,8 +460,8 @@ def convert(
         # compute the spectrogram for each electrode of the current chunk
         spectrogram = compute_sum_spectrogam(chunk, nfft, hop_len)
 
-        import matplotlib.pyplot as plt
         import matplotlib as mpl
+        import matplotlib.pyplot as plt
         mpl.use("TkAgg")
         plt.imshow(spectrogram.cpu().numpy(), aspect="auto", origin="lower")
         plt.show()

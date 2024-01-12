@@ -4,8 +4,8 @@ from typing import Tuple, TypeVar
 
 import numpy as np
 import torch
-from gridtools.utils.spectrograms import sint, compute_spectrogram, to_decibel
 from gridtools.datasets.models import Dataset
+from gridtools.utils.spectrograms import compute_spectrogram, sint, to_decibel
 from scipy.signal import butter, sosfiltfilt
 
 ArrayLike = TypeVar("ArrayLike", np.ndarray, torch.Tensor)

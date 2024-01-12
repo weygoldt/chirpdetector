@@ -5,8 +5,8 @@ from typing import List
 import numpy as np
 import pandas as pd
 import torch
-from torchvision.ops import nms
 from numba import jit
+from torchvision.ops import nms
 
 from chirpdetector.models.utils import get_device
 

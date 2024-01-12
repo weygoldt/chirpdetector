@@ -19,13 +19,15 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from chirpdetector.datahandling.dataset_parsing import ArrayParser
 from chirpdetector.config import Config, load_config
-from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.datahandling.bbox_tools import (
     pixel_box_to_timefreq,
 )
-from chirpdetector.datahandling.dataset_parsing import make_batch_specs
+from chirpdetector.datahandling.dataset_parsing import (
+    ArrayParser,
+    make_batch_specs,
+)
+from chirpdetector.logging.logging import Timer, make_logger
 
 # Use non-gui backend for matplotlib to avoid memory leaks
 mpl.use("Agg")
@@ -161,9 +163,6 @@ def convert_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
         prog.update(task, completed=len(datasets))
 
 
-
-
-
 class Wavetracker2YOLOConverter:
     """Parse a grid dataset into batches."""
 
@@ -173,7 +172,7 @@ class Wavetracker2YOLOConverter:
         data: Dataset,
         logger: logging.Logger
     ) -> None:
-        """Initialize the ChirpDetector.
+        """Initialize the converter.
 
         Parameters
         ----------
@@ -181,10 +180,6 @@ class Wavetracker2YOLOConverter:
             Configuration file.
         data : Dataset
             Dataset to detect chirps on.
-        detector: AbstractDetectionModel
-            Model to use for detection.
-        assigner: AbstractBoxAssigner
-            Assigns bboxes to frequency tracks.
         logger: logging.Logger
             The logger to log to a logfile.
         """
@@ -233,8 +228,6 @@ class Wavetracker2YOLOConverter:
                 for idxs in batch_indices
             ]
 
-            # print([np.unique(raw) for raw in batch_raw])
-
             # STEP 2: Compute the spectrograms for each raw data snippet
             with Timer(prog.console, "Compute spectrograms"):
                 batch_metadata, specs, times, freqs = make_batch_specs(
@@ -245,8 +238,9 @@ class Wavetracker2YOLOConverter:
                     self.cfg
                 )
 
-            import matplotlib.pyplot as plt
+            # STEP 3: Use the chirp_params to estimate the bounding boxes
             import matplotlib as mpl
+            import matplotlib.pyplot as plt
             mpl.use("TkAgg")
             fig, ax = plt.subplots()
             for spec, time, freq in zip(specs, times, freqs):

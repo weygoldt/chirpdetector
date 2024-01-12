@@ -9,6 +9,8 @@ from typing import Callable
 import rich_click as click
 import toml
 
+from chirpdetector.config import copy_config
+
 # from chirpdetector.conversion.convert_data import convert_cli
 from chirpdetector.conversion.detection_dataset import convert_cli
 from chirpdetector.datahandling.yolo_dataset_utils import (
@@ -17,14 +19,13 @@ from chirpdetector.datahandling.yolo_dataset_utils import (
     subset_yolo_dataset,
 )
 from chirpdetector.detection.detect_chirps import detect_cli
+from chirpdetector.models.faster_rcnn_detector.train import train_cli
 from chirpdetector.visualization.plot_detections import (
     clean_all_plots_cli,
     clean_plots_cli,
     plot_all_detections_cli,
     plot_detections_cli,
 )
-from chirpdetector.models.faster_rcnn_detector.train import train_cli
-from chirpdetector.config import copy_config
 
 click.rich_click.USE_MARKDOWN = True
 # click.rich_click.SHOW_ARGUMENTS = True

@@ -15,7 +15,8 @@ from rich.console import Console
 
 from chirpdetector.config import Config
 from chirpdetector.datahandling.signal_processing import (
-    make_spectrogram_axes, spec_to_image
+    make_spectrogram_axes,
+    spec_to_image,
 )
 
 
