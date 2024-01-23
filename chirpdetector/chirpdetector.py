@@ -157,7 +157,7 @@ def convert(
     """
     convert_cli(
         input_path,
-        False,
+        output_path,
         # output_path,
         # labels
     )

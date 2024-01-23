@@ -4,8 +4,10 @@ import gc
 import logging
 import pathlib
 from typing import List, Self
-
+from gridtools.utils.spectrograms import freqres_to_nfft
+import shutil
 import matplotlib as mpl
+from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 import torch
@@ -18,6 +20,8 @@ from rich.progress import (
     SpinnerColumn,
     TimeElapsedColumn,
 )
+from PIL import Image
+import pandas as pd
 
 from chirpdetector.config import Config, load_config
 from chirpdetector.datahandling.bbox_tools import (
@@ -39,6 +43,124 @@ prog = Progress(
     MofNCompleteColumn(),
     TimeElapsedColumn(),
 )
+
+
+def numpy_to_pil(img: np.ndarray) -> Image.Image:
+    """Convert a 2D numpy array to a PIL image.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        The input image.
+
+    Returns
+    -------
+    PIL.Image
+        The converted image.
+    """
+    img_dimens = 2
+    if len(img.shape) != img_dimens:
+        msg = f"Image must be {img_dimens}D"
+        raise ValueError(msg)
+
+    if img.max() == img.min():
+        msg = "Image must have more than one value"
+        raise ValueError(msg)
+
+    img = np.flipud(img)
+    intimg = np.uint8((img - img.min()) / (img.max() - img.min()) * 255)
+    return Image.fromarray(intimg)
+
+
+def make_file_tree(path: pathlib.Path, wipe: bool = True) -> None:
+    """Build a file tree for the training dataset.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        The root directory of the dataset.
+    """
+    if not isinstance(path, pathlib.Path):
+        msg = f"Path must be a pathlib.Path, not {type(path)}"
+        raise TypeError(msg)
+
+    if path.parent.exists() and path.parent.is_file():
+        msg = (
+            f"Parent directory of {path} is a file. "
+            "Please specify a directory."
+        )
+        raise ValueError(msg)
+
+    if path.exists() and wipe:
+        shutil.rmtree(path)
+
+    path.mkdir(exist_ok=True, parents=True)
+
+    train_imgs = path / "images"
+    train_labels = path / "labels"
+    train_imgs.mkdir(exist_ok=True, parents=True)
+    train_labels.mkdir(exist_ok=True, parents=True)
+
+
+def chirp_height_width_to_bbox(
+    data: Dataset,
+    nfft: int,
+) -> pd.DataFrame:
+
+    pad_time = nfft / data.grid.samplerate * 0.8
+    freq_res = data.grid.samplerate / nfft
+    pad_freq = freq_res * 50
+    pad_freq = freq_res * 40
+    pad_freq = freq_res * 10
+
+    boxes = []
+    ids = []
+
+    print(data.com.chirp.have_params)
+
+    for fish_id in data.track.ids:
+
+        freqs = data.track.freqs[data.track.idents == fish_id]
+        times = data.track.times[data.track.indices[data.track.idents == fish_id]]
+        chirps = data.com.chirp.times[data.com.chirp.idents == fish_id]
+        print(np.shape(data.com.chirp.params))
+        chirp_params = data.com.chirp.params[data.com.chirp.idents == fish_id]
+
+        for chirp, param in zip(chirps, chirp_params):
+
+            f_closest = freqs[np.argsort(np.abs(times - chirp))[:2]]
+            t_closest = times[np.argsort(np.abs(times - chirp))[:2]]
+
+            f_closest = np.average(
+                f_closest, weights=np.abs(t_closest - chirp)
+            )
+            t_closest = np.average(
+                t_closest, weights=np.abs(t_closest - chirp)
+            )
+
+            height = param[1]
+            width = param[0]
+
+            t_center = t_closest
+            f_center = f_closest + height / 2
+
+            bbox_height = height
+            bbox_width = width + pad_time
+
+            boxes.append([
+                t_center - bbox_width / 2,
+                (f_center - bbox_height / 2) - pad_freq,
+                t_center + bbox_width / 2,
+                (f_center + bbox_height / 2) + pad_freq / 2, # just a bit higher
+            ])
+            ids.append(fish_id)
+
+    df = pd.DataFrame( # noqa
+        boxes,
+        columns=["t1", "f1", "t2", "f2"]
+    )
+    df["fish_id"] = ids
+    return df
 
 
 def convert_detections(
@@ -115,12 +237,15 @@ def convert_detections(
     return out_df.reset_index(drop=True)
 
 
-def convert_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
+def convert_cli(input_path: pathlib.Path, output_path: pathlib.Path) -> None:
     """Terminal interface for the detection function.
 
     Parameters
     ----------
-    - `path` : `str`
+    - `input_path` : `pathlib.Path`
+        The path to the directory containing the raw dataset.
+    - `output_path` : `pathlib.Path`
+        The path to the directory to save the converted dataset to.
 
     Returns
     -------
@@ -129,6 +254,8 @@ def convert_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
     logger = make_logger(__name__, input_path / "chirpdetector.log")
     datasets = [folder for folder in input_path.iterdir() if folder.is_dir()]
     confpath = input_path / "chirpdetector.toml"
+
+    make_file_tree(output_path)
 
     # load the config file and print a warning if it does not exist
     if confpath.exists():
@@ -150,6 +277,7 @@ def convert_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
             cpd = Wavetracker2YOLOConverter(
                 cfg=config,
                 data=data,
+                output_path=output_path,
                 logger=logger,
             )
             cpd.convert()
@@ -170,6 +298,7 @@ class Wavetracker2YOLOConverter:
         self: Self,
         cfg: Config,
         data: Dataset,
+        output_path: pathlib.Path,
         logger: logging.Logger
     ) -> None:
         """Initialize the converter.
@@ -187,6 +316,12 @@ class Wavetracker2YOLOConverter:
         self.cfg = cfg
         self.data = data
         self.logger = logger
+        self.bbox_df = chirp_height_width_to_bbox(
+            data=data,
+            nfft=freqres_to_nfft(cfg.spec.freq_res, data.grid.samplerate)
+        )
+        self.img_path = output_path / "images"
+        self.label_path = output_path / "labels"
 
         # Batch and windowing setup
         self.parser = ArrayParser(
@@ -239,13 +374,74 @@ class Wavetracker2YOLOConverter:
                 )
 
             # STEP 3: Use the chirp_params to estimate the bounding boxes
-            import matplotlib as mpl
-            import matplotlib.pyplot as plt
-            mpl.use("TkAgg")
-            fig, ax = plt.subplots()
+            # import matplotlib as mpl
+            # import matplotlib.pyplot as plt
+            # mpl.use("TkAgg")
             for spec, time, freq in zip(specs, times, freqs):
-                ax.pcolormesh(time, freq, spec.cpu().numpy()[1])
-            plt.show()
+
+                # fig, ax = plt.subplots()
+                # ax.pcolormesh(time, freq, spec.cpu().numpy()[1])
+                # get the boxes for the current time and freq range
+                boxes = self.bbox_df[
+                    (self.bbox_df["t1"] >= time[0]) &
+                    (self.bbox_df["t2"] <= time[-1])
+                ].to_numpy()
+
+                maxf = np.max(freq)
+                minf = np.min(freq)
+
+                # correct overshooting freq bounds of bboxes
+                boxes[:, 1] = np.clip(boxes[:, 1], minf, maxf)
+                boxes[:, 3] = np.clip(boxes[:, 3], minf, maxf)
+
+                # plot the boxes
+                # for box in boxes:
+                #     ax.add_patch(Rectangle(
+                #         (box[0], box[1]),
+                #         box[2] - box[0],
+                #         box[3] - box[1],
+                #         linewidth=1,
+                #         edgecolor="r",
+                #         facecolor="none"
+                #     ))
+                # plt.show()
+
+                # convert boxes to [label, x_center, y_center, width, height]
+                # format in relative coordinates
+                label = 1
+
+                print(spec.shape)
+                labels = np.ones(len(boxes), dtype=int) * label
+                x = (boxes[:, 0] + (boxes[:, 2] - boxes[:, 0]) / 2) / spec.shape[2]
+                y = (boxes[:, 1] + (boxes[:, 3] - boxes[:, 1]) / 2) / spec.shape[1]
+                w = (boxes[:, 2] - boxes[:, 0]) / spec.shape[2]
+                h = (boxes[:, 3] - boxes[:, 1]) / spec.shape[1]
+
+                txt = np.stack([labels, x, y, w, h], axis=1)
+
+                # save the boxes to the label directory
+                # filename is batch metadata
+                filename = (
+                    f"{batch_metadata[0]['recording']}_"
+                    f"{batch_metadata[0]['batch']}_"
+                    f"{batch_metadata[0]['window']}.txt"
+                )
+                np.savetxt(
+                    self.label_path / filename,
+                    txt,
+                    fmt=["%d", "%f", "%f", "%f", "%f"]
+                )
+
+                # convert the spec to PIL image
+                img = numpy_to_pil(spec.cpu().numpy()[1])
+
+                # save the image to the image directory
+                filename = (
+                    f"{batch_metadata[0]['recording']}_"
+                    f"{batch_metadata[0]['batch']}_"
+                    f"{batch_metadata[0]['window']}.png"
+                )
+                img.save(self.img_path / filename)
 
             del specs
             if torch.cuda.is_available():
