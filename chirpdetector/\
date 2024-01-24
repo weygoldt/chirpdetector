@@ -234,7 +234,7 @@ def extract_assignment_training_data(
 
         # get the baseline EODfs in the window by finding peaks on the
         # power spectrum
-        target_prom = (np.max(spec_window) - np.min(spec_window)) * 0.01
+        target_prom = (np.max(spec_window) - np.min(spec_window)) * 0.05
         power = np.mean(spec_window, axis=1)
         peaks = find_peaks(power, prominence=target_prom)[0]
         
@@ -284,30 +284,36 @@ def extract_assignment_training_data(
         import matplotlib.pyplot as plt
         mpl.use("TkAgg")
 
-        cm = 1/2.54  # centimeters in inches
-        size = (16*cm, 8*cm)
-        fig, (ax1, ax2, ax3) = plt.subplots(1,3, figsize=size, constrained_layout=True)
+        # make 16x8 cm 
 
-        # get 3 cool colors from magma palette
-        c1, c2, c3 = plt.cm.magma(np.linspace(0.2, 1, 3))
+        size = [16, 8] * 2.54
+        fig, (ax1, ax2, ax3) = plt.subplots(1,3, size=size, constrained_layout=True)
 
-        ax1.pcolormesh(window_times, window_freqs, spec_window, alpha=0.8)
-        ax1.plot(track_times, track, color=c2, lw=2)
+        ax1.pcolormesh(window_times, window_freqs, spec_window)
+        ax1.plot(track_times, track, color="C0")
+        for s,e in zip(starts, ends):
+            ax2.fill_betweenx(
+                window_freqs[s:e],
+                power[s:e],
+                color="C4",
+                alpha=0.5,
+                zorder=1000,
+            )
 
-        ax2.plot(power, window_freqs, color="grey")
-        ax2.plot(power[peaks], window_freqs[peaks], "o", color=c2)
+        ax2.plot(power, window_freqs)
+        ax2.plot(power[peaks], window_freqs[peaks], "o", color="C1")
 
         for s, e in zip(starts, ends):
             ax2.fill_betweenx(
                 window_freqs[s:e],
                 power[s:e],
-                color=c2,
+                color="C1",
                 alpha=0.5,
             )
 
-        for ix, p in enumerate(powers):
-            if ix == closest:
-                ax3.plot(window_times, p, color=c2, lw=2, zorder=1000)
+        for i, p in enumerate(powers):
+            if i == closest:
+                ax3.plot(window_times, p, color="C0")
             else:
                 ax3.plot(window_times, p, color="grey")
 
@@ -320,14 +326,13 @@ def extract_assignment_training_data(
 
         ax1.set_xlabel("Time [s]")
         ax1.set_ylabel("Frequency [Hz]")
+        ax1.set_title("Chirp")
         ax2.set_xlabel("Power [a.u.]")
+        ax2.set_ylabel("Frequency [Hz]")
+        ax2.set_title("Power spectrum")
         ax3.set_xlabel("Time [s]")
         ax3.set_ylabel("Power [a.u.]")
-
-        # remove ax2 y labels
-        ax2.set_yticklabels([])
-
-        # make margins nicer
+        ax3.set_title("Power in window")
         plt.show()
 
 

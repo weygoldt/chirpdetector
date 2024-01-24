@@ -111,6 +111,7 @@ def make_batch_specs(
             data=signal,
             samplingrate=samplerate,
             nfft=nfft,
+            # nfft=4096,
             hop_length=hop_length
         )[0] for signal in batch
     ]
