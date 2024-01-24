@@ -37,15 +37,15 @@ from chirpdetector.detection.detection_models import (
     AbstractDetectionModel,
     FasterRCNN,
 )
+from chirpdetector.detection.visualization_functions import (
+    plot_raw_batch,
+    plot_spec_tiling,
+)
 from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.models.faster_rcnn_detector import (
     load_finetuned_faster_rcnn,
 )
 from chirpdetector.models.utils import get_device
-from chirpdetector.detection.visualization_functions import (
-    plot_raw_batch,
-    plot_spec_tiling
-)
 
 # Use non-gui backend for matplotlib to avoid memory leaks
 mpl.use("TkAgg")

@@ -17,6 +17,7 @@ from chirpdetector.datahandling.yolo_dataset_utils import (
     clean_yolo_dataset,
     merge_yolo_datasets,
     subset_yolo_dataset,
+    plot_yolo_dataset,
 )
 from chirpdetector.detection.detect_chirps import detect_cli
 from chirpdetector.models.faster_rcnn_detector.train import train_cli
@@ -417,6 +418,32 @@ def merge(
 ) -> None:
     """Merge two datasets."""
     merge_yolo_datasets(dataset1, dataset2, output)
+
+@datautils.command()
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        path_type=pathlib.Path,
+    ),
+    required=False,
+    help="Path to the dataset.",
+)
+@click.option(
+    "--number",
+    "-n",
+    type=int,
+    required=False,
+    default=5,
+    help="Number of images to show.",
+)
+def show(path: pathlib.Path, number: int) -> None:
+    """Show the dataset."""
+    plot_yolo_dataset(path, number)
 
 
 if __name__ == "__main__":

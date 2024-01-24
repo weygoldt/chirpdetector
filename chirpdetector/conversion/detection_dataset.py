@@ -3,29 +3,29 @@
 import gc
 import logging
 import pathlib
-from typing import List, Self
-from gridtools.utils.spectrograms import freqres_to_nfft
 import shutil
+from typing import List, Self
+
 import matplotlib as mpl
-from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 import torch
 from gridtools.datasets import load
 from gridtools.datasets.models import Dataset
 from gridtools.preprocessing.preprocessing import interpolate_tracks
+from gridtools.utils.spectrograms import freqres_to_nfft
+from PIL import Image
 from rich.progress import (
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
     TimeElapsedColumn,
 )
-from PIL import Image
-import pandas as pd
 
 from chirpdetector.config import Config, load_config
 from chirpdetector.datahandling.bbox_tools import (
     pixel_box_to_timefreq,
+    reverse_float_index_interpolation,
 )
 from chirpdetector.datahandling.dataset_parsing import (
     ArrayParser,
@@ -106,7 +106,6 @@ def chirp_height_width_to_bbox(
     data: Dataset,
     nfft: int,
 ) -> pd.DataFrame:
-
     pad_time = nfft / data.grid.samplerate * 0.8
     freq_res = data.grid.samplerate / nfft
     pad_freq = freq_res * 50
@@ -119,15 +118,15 @@ def chirp_height_width_to_bbox(
     print(data.com.chirp.have_params)
 
     for fish_id in data.track.ids:
-
         freqs = data.track.freqs[data.track.idents == fish_id]
-        times = data.track.times[data.track.indices[data.track.idents == fish_id]]
+        times = data.track.times[
+            data.track.indices[data.track.idents == fish_id]
+        ]
         chirps = data.com.chirp.times[data.com.chirp.idents == fish_id]
         print(np.shape(data.com.chirp.params))
         chirp_params = data.com.chirp.params[data.com.chirp.idents == fish_id]
 
         for chirp, param in zip(chirps, chirp_params):
-
             f_closest = freqs[np.argsort(np.abs(times - chirp))[:2]]
             t_closest = times[np.argsort(np.abs(times - chirp))[:2]]
 
@@ -147,17 +146,19 @@ def chirp_height_width_to_bbox(
             bbox_height = height
             bbox_width = width + pad_time
 
-            boxes.append([
-                t_center - bbox_width / 2,
-                (f_center - bbox_height / 2) - pad_freq,
-                t_center + bbox_width / 2,
-                (f_center + bbox_height / 2) + pad_freq / 2, # just a bit higher
-            ])
+            boxes.append(
+                [
+                    t_center - bbox_width / 2,
+                    (f_center - bbox_height / 2) - pad_freq,
+                    t_center + bbox_width / 2,
+                    (f_center + bbox_height / 2)
+                    + pad_freq / 2,  # just a bit higher
+                ]
+            )
             ids.append(fish_id)
 
-    df = pd.DataFrame( # noqa
-        boxes,
-        columns=["t1", "f1", "t2", "f2"]
+    df = pd.DataFrame(  # noqa
+        boxes, columns=["t1", "f1", "t2", "f2"]
     )
     df["fish_id"] = ids
     return df
@@ -193,11 +194,10 @@ def convert_detections(
     """
     dataframes = []
     for i in range(len(detections)):
-
         # get the boxes and scores for the current spectrogram
-        boxes = detections[i]["boxes"] # bbox coordinates in pixels
-        scores = detections[i]["scores"] # confidence scores
-        idents = bbox_ids[i] # unique ids for each bbox
+        boxes = detections[i]["boxes"]  # bbox coordinates in pixels
+        scores = detections[i]["scores"]  # confidence scores
+        idents = bbox_ids[i]  # unique ids for each bbox
         batch_spec_index = np.ones(len(boxes)) * i
 
         # discard boxes with low confidence
@@ -208,30 +208,36 @@ def convert_detections(
 
         # convert the boxes to time and frequency
         boxes_timefreq = pixel_box_to_timefreq(
-            boxes=boxes,
-            time=times[i],
-            freq=freqs[i]
+            boxes=boxes, time=times[i], freq=freqs[i]
         )
 
         # put it all into a large dataframe
-        dataframe = pd.DataFrame({
-            "recording": [metadata[i]["recording"] for _ in range(len(boxes))],
-            "batch": [metadata[i]["batch"] for _ in range(len(boxes))],
-            "window": [metadata[i]["window"] for _ in range(len(boxes))],
-            "spec": batch_spec_index,
-            "box_ident": idents,
-            "raw_indices": [metadata[i]["indices"] for _ in range(len(boxes))],
-            "freq_range": [metadata[i]["frange"] for _ in range(len(boxes))],
-            "x1": boxes[:, 0],
-            "y1": boxes[:, 1],
-            "x2": boxes[:, 2],
-            "y2": boxes[:, 3],
-            "t1": boxes_timefreq[:, 0],
-            "f1": boxes_timefreq[:, 1],
-            "t2": boxes_timefreq[:, 2],
-            "f2": boxes_timefreq[:, 3],
-            "score": scores
-        })
+        dataframe = pd.DataFrame(
+            {
+                "recording": [
+                    metadata[i]["recording"] for _ in range(len(boxes))
+                ],
+                "batch": [metadata[i]["batch"] for _ in range(len(boxes))],
+                "window": [metadata[i]["window"] for _ in range(len(boxes))],
+                "spec": batch_spec_index,
+                "box_ident": idents,
+                "raw_indices": [
+                    metadata[i]["indices"] for _ in range(len(boxes))
+                ],
+                "freq_range": [
+                    metadata[i]["frange"] for _ in range(len(boxes))
+                ],
+                "x1": boxes[:, 0],
+                "y1": boxes[:, 1],
+                "x2": boxes[:, 2],
+                "y2": boxes[:, 3],
+                "t1": boxes_timefreq[:, 0],
+                "f1": boxes_timefreq[:, 1],
+                "t2": boxes_timefreq[:, 2],
+                "f2": boxes_timefreq[:, 3],
+                "score": scores,
+            }
+        )
         dataframes.append(dataframe)
     out_df = pd.concat(dataframes)
     return out_df.reset_index(drop=True)
@@ -299,7 +305,7 @@ class Wavetracker2YOLOConverter:
         cfg: Config,
         data: Dataset,
         output_path: pathlib.Path,
-        logger: logging.Logger
+        logger: logging.Logger,
     ) -> None:
         """Initialize the converter.
 
@@ -318,7 +324,7 @@ class Wavetracker2YOLOConverter:
         self.logger = logger
         self.bbox_df = chirp_height_width_to_bbox(
             data=data,
-            nfft=freqres_to_nfft(cfg.spec.freq_res, data.grid.samplerate)
+            nfft=freqres_to_nfft(cfg.spec.freq_res, data.grid.samplerate),
         )
         self.img_path = output_path / "images"
         self.label_path = output_path / "labels"
@@ -330,7 +336,7 @@ class Wavetracker2YOLOConverter:
             batchsize=cfg.spec.batch_size,
             windowsize=cfg.spec.time_window,
             overlap=cfg.spec.spec_overlap,
-            console=prog.console
+            console=prog.console,
         )
 
         msg = "Intialized Converter."
@@ -343,19 +349,21 @@ class Wavetracker2YOLOConverter:
         dataframes = []
         bbox_counter = 0
         for i, batch_indices in enumerate(self.parser.batches):
-
             prog.console.rule(
                 f"[bold green]Batch {i} of {len(self.parser.batches)}"
             )
 
             # STEP 0: Create metadata for each batch
-            batch_metadata = [{
-                "recording": self.data.path.name,
-                "batch": i,
-                "window": j,
-                "indices": indices,
-                "frange": [],
-            } for j, indices in enumerate(batch_indices)]
+            batch_metadata = [
+                {
+                    "recording": self.data.path.name,
+                    "batch": i,
+                    "window": j,
+                    "indices": indices,
+                    "frange": [],
+                }
+                for j, indices in enumerate(batch_indices)
+            ]
 
             # STEP 1: Load the raw data as a batch
             batch_raw = [
@@ -370,7 +378,7 @@ class Wavetracker2YOLOConverter:
                     batch_metadata,
                     batch_raw,
                     self.data.grid.samplerate,
-                    self.cfg
+                    self.cfg,
                 )
 
             # STEP 3: Use the chirp_params to estimate the bounding boxes
@@ -378,45 +386,53 @@ class Wavetracker2YOLOConverter:
             # import matplotlib.pyplot as plt
             # mpl.use("TkAgg")
             for spec, time, freq in zip(specs, times, freqs):
-
                 # fig, ax = plt.subplots()
                 # ax.pcolormesh(time, freq, spec.cpu().numpy()[1])
                 # get the boxes for the current time and freq range
                 boxes = self.bbox_df[
-                    (self.bbox_df["t1"] >= time[0]) &
-                    (self.bbox_df["t2"] <= time[-1])
+                    (self.bbox_df["t1"] >= time[0])
+                    & (self.bbox_df["t2"] <= time[-1])
                 ].to_numpy()
 
+                # correct overshooting freq bounds of bboxes
                 maxf = np.max(freq)
                 minf = np.min(freq)
-
-                # correct overshooting freq bounds of bboxes
                 boxes[:, 1] = np.clip(boxes[:, 1], minf, maxf)
                 boxes[:, 3] = np.clip(boxes[:, 3], minf, maxf)
 
-                # plot the boxes
-                # for box in boxes:
-                #     ax.add_patch(Rectangle(
-                #         (box[0], box[1]),
-                #         box[2] - box[0],
-                #         box[3] - box[1],
-                #         linewidth=1,
-                #         edgecolor="r",
-                #         facecolor="none"
-                #     ))
-                # plt.show()
+                # make labels
+                labels = np.ones(len(boxes), dtype=int)
 
-                # convert boxes to [label, x_center, y_center, width, height]
-                # format in relative coordinates
-                label = 1
+                # convert to indices on the spectrogram
+                x1 = reverse_float_index_interpolation(
+                    boxes[:, 0], time, np.arange(len(time))
+                )
+                y1 = reverse_float_index_interpolation(
+                    boxes[:, 1], freq, np.arange(len(freq))
+                )
+                x2 = reverse_float_index_interpolation(
+                    boxes[:, 2], time, np.arange(len(time))
+                )
+                y2 = reverse_float_index_interpolation(
+                    boxes[:, 3], freq, np.arange(len(freq))
+                )
 
-                print(spec.shape)
-                labels = np.ones(len(boxes), dtype=int) * label
-                x = (boxes[:, 0] + (boxes[:, 2] - boxes[:, 0]) / 2) / spec.shape[2]
-                y = (boxes[:, 1] + (boxes[:, 3] - boxes[:, 1]) / 2) / spec.shape[1]
-                w = (boxes[:, 2] - boxes[:, 0]) / spec.shape[2]
-                h = (boxes[:, 3] - boxes[:, 1]) / spec.shape[1]
+                # make relative to the spectrogram
+                x1 /= spec.shape[-1]
+                y1 /= spec.shape[-2]
+                x2 /= spec.shape[-1]
+                y2 /= spec.shape[-2]
 
+                # convert to x, y, w, h
+                x = (x1 + x2) / 2
+                y = (y1 + y2) / 2
+                w = x2 - x1
+                h = y2 - y1
+
+                # flip y axis as y=0 is at the top
+                y = 1 - y
+
+                # make label txt
                 txt = np.stack([labels, x, y, w, h], axis=1)
 
                 # save the boxes to the label directory
@@ -429,7 +445,7 @@ class Wavetracker2YOLOConverter:
                 np.savetxt(
                     self.label_path / filename,
                     txt,
-                    fmt=["%d", "%f", "%f", "%f", "%f"]
+                    fmt=["%d", "%f", "%f", "%f", "%f"],
                 )
 
                 # convert the spec to PIL image
@@ -447,4 +463,3 @@ class Wavetracker2YOLOConverter:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
-

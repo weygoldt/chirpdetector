@@ -83,6 +83,8 @@ def float_index_interpolation(
     upper_indices = np.minimum(upper_indices, len(index_arr) - 1)
     lower_indices = np.minimum(lower_indices, len(index_arr) - 1)
 
+    # TODO: Something is wrong with the weights
+
     # Calculate the interpolation weights
     weights = values - lower_indices
 
@@ -90,6 +92,104 @@ def float_index_interpolation(
     return (1 - weights) * data_arr[lower_indices] + weights * data_arr[
         upper_indices
     ]
+
+
+@jit(nopython=True, parallel=True)
+def reverse_float_index_interpolation(
+    values: np.ndarray,
+    data_arr: np.ndarray,
+    index_arr: np.ndarray,
+) -> np.ndarray:
+    """Convert float data points not on the data array to float indices.
+
+    Interpolates a set of float data points within the given data
+    array to obtain corresponding values from the index
+    array using linear interpolation.
+
+    This function is used to transform simulated bounding boxes on images
+    from frequency and time to pixel coordinates.
+
+    Parameters
+    ----------
+    - `values` : `np.ndarray`
+        The index value as a float that should be interpolated.
+    - `data_arr` : `numpy.ndarray`
+        The array of data.
+    - `index_arr` : `numpy.ndarray`
+        The array of indices on the data array.
+
+    Returns
+    -------
+    - `numpy.ndarray`
+        The interpolated value.
+
+    Raises
+    ------
+    - `ValueError`
+        If any of the input float indices (`values`) are outside
+        the range of the provided `index_arr`.
+    """
+    # Check if the values are within the range of the index array
+    if np.any(values < (np.min(data_arr) - 1)) or np.any(
+        values > (np.max(data_arr) + 1),
+    ):
+        msg = (
+            "Values outside the range of data array\n"
+            f"Target values: {values}\n"
+            f"Data array: {data_arr}\n"
+            f"Index array: {index_arr}"
+        )
+        raise ValueError(msg)
+
+    # Find the indices corresponding to the values
+    lower_indices = np.searchsorted(data_arr, values, side="left")
+    upper_indices = lower_indices + 1
+    # print(data_arr)
+    # print(values[0])
+    # print(f"Lower indices: {lower_indices[0]}")
+    # print(f"Upper indices: {upper_indices[0]}")
+
+    # Ensure upper indices are within the array bounds
+    maxlen = np.ones(len(lower_indices), dtype=np.int_) * (len(index_arr) - 1)
+    upper_indices = np.minimum(upper_indices, maxlen)
+    lower_indices = np.minimum(lower_indices, maxlen)
+
+    # if np.any(upper_indices == lower_indices):
+    #     print("Some upper and lower indices are equal")
+    #     print(f"Upper indices: {upper_indices}")
+    #     print(f"Lower indices: {lower_indices}")
+
+    # print(f"Maxlen: {maxlen[0]}")
+    # print(f"Max upper indices: {np.max(upper_indices)}")
+    # print(f"Max lower indices: {np.max(lower_indices)}")
+
+    # Calculate the interpolation weights
+    lower_diff = np.abs(values - data_arr[lower_indices])
+    upper_diff = np.abs(data_arr[upper_indices] - values)
+
+    # print(f"Lower diff: {lower_diff[-1]}")
+    # print(f"Upper diff: {upper_diff[-1]}")
+
+    # print(f"Lower diff: {lower_diff[0]}")
+    # print(f"Upper diff: {upper_diff[0]}")
+
+    # compute the weigth for the upper and lower indices
+    lower_weights = upper_diff / (lower_diff + upper_diff)
+    upper_weights = lower_diff / (lower_diff + upper_diff)
+
+    # fix the weights where the diff is zero
+    lower_weights[lower_diff == 0] = 1
+    upper_weights[upper_diff == 0] = 1
+
+    # fix the weights where upper and lower indices are equal
+    lower_weights[upper_indices == lower_indices] = 0.5
+    upper_weights[upper_indices == lower_indices] = 0.5
+
+    # print(f"Lower weights: {np.array(lower_weights)[-1]}")
+    # print(f"Upper weights: {upper_weights[-1]}")
+
+    # Linear interpolation
+    return lower_indices * lower_weights + upper_indices * upper_weights
 
 
 def pixel_box_to_timefreq(
