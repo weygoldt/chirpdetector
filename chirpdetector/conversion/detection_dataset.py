@@ -49,7 +49,7 @@ prog = Progress(
 
 # import mplstyles
 base = "/home/weygoldt/Projects/mscthesis/src/base.mplstyle"
-darkbg = "/home/weygoldt/Projects/mscthesis/src/dark_background.mplstyle"
+darkbg = "/home/weygoldt/Projects/mscthesis/src/light_background.mplstyle"
 plt.style.use([base, darkbg])
 
 
@@ -185,9 +185,8 @@ def extract_assignment_training_data(
     # then get the index of the closest y value to the baseline EODf
     # that one is labeled 1, the rest 0
     # then get the spectrogram snippet
-    specs = []
-    labels = []
-    tolerance = 10
+    y = []
+    x = []
     for i, box in enumerate(boxes):
         # get the fish id
         fish_id = box[-1]
@@ -251,6 +250,8 @@ def extract_assignment_training_data(
             # this is the start of the peak
             start = idx
             while True:
+                if start < 0:
+                    break
                 if window_freqs[idx] - window_freqs[start] > window_radius:
                     break
                 if np.sign(power[idx] - power[start]) == -1:
@@ -262,12 +263,13 @@ def extract_assignment_training_data(
             # this is the end of the peak
             end = idx
             while True:
+                if end > len(power) - 1:
+                    break
                 if window_freqs[end] - window_freqs[idx] > window_radius:
                     break
                 if np.sign(power[idx] - power[end]) == -1:
                     break
                 end += 1
-
             starts.append(start)
             ends.append(end)
 
@@ -279,58 +281,73 @@ def extract_assignment_training_data(
             powers.append(np.mean(spec_window[s:e, :], axis=0))
         powers = np.array(powers)
 
-        # plot
-        import matplotlib as mpl
-        import matplotlib.pyplot as plt
-        mpl.use("TkAgg")
-
-        cm = 1/2.54  # centimeters in inches
-        size = (16*cm, 8*cm)
-        fig, (ax1, ax2, ax3) = plt.subplots(1,3, figsize=size, constrained_layout=True)
-
-        # get 3 cool colors from magma palette
-        c1, c2, c3 = plt.cm.magma(np.linspace(0.2, 1, 3))
-
-        ax1.pcolormesh(window_times, window_freqs, spec_window, alpha=0.8)
-        ax1.plot(track_times, track, color=c2, lw=2)
-
-        ax2.plot(power, window_freqs, color="grey")
-        ax2.plot(power[peaks], window_freqs[peaks], "o", color=c2)
-
-        for s, e in zip(starts, ends):
-            ax2.fill_betweenx(
-                window_freqs[s:e],
-                power[s:e],
-                color=c2,
-                alpha=0.5,
-            )
-
-        for ix, p in enumerate(powers):
-            if ix == closest:
-                ax3.plot(window_times, p, color=c2, lw=2, zorder=1000)
-            else:
-                ax3.plot(window_times, p, color="grey")
-
-        ax1.set_ylim([window_freqs[0], window_freqs[-1]])
-        ax1.set_xlim([window_times[0], window_times[-1]])
-        ax2.set_ylim([window_freqs[0], window_freqs[-1]])
-        ax2.set_xlim([0, 1])
-        ax3.set_ylim([0, np.max(powers)])
-        ax3.set_xlim([window_times[0], window_times[-1]])
-
-        ax1.set_xlabel("Time [s]")
-        ax1.set_ylabel("Frequency [Hz]")
-        ax2.set_xlabel("Power [a.u.]")
-        ax3.set_xlabel("Time [s]")
-        ax3.set_ylabel("Power [a.u.]")
-
+        # # plot
+        # import matplotlib as mpl
+        # import matplotlib.pyplot as plt
+        # mpl.use("TkAgg")
+        #
+        # cm = 1/2.54  # centimeters in inches
+        # size = (16*cm, 8*cm)
+        # fig, (ax1, ax2, ax3) = plt.subplots(1,3, figsize=size, constrained_layout=True)
+        #
+        # # get 3 cool colors from magma palette
+        # # c1, c2, c3 = plt.cm.magma(np.linspace(0.5, 1, 3))
+        # c2 = "tab:orange"
+        # c1 = "tab:red"
+        #
+        # ax1.pcolormesh(window_times, window_freqs, spec_window, alpha=0.8)
+        # ax1.plot(track_times, track, color=c2, lw=2)
+        #
+        # ax2.plot(power, window_freqs, color="grey")
+        # ax2.plot(power[peaks], window_freqs[peaks], "o", color=c1)
+        #
+        # for s, e in zip(starts, ends):
+        #     ax2.fill_betweenx(
+        #         window_freqs[s:e],
+        #         power[s:e],
+        #         color=c1,
+        #         alpha=0.5,
+        #     )
+        #
+        # for ix, p in enumerate(powers):
+        #     if ix == closest:
+        #         ax3.plot(window_times, p, color=c2, lw=2, zorder=1000)
+        #     else:
+        #         ax3.plot(window_times, p, color="grey")
+        #
+        # ax1.set_ylim([window_freqs[0], window_freqs[-1]])
+        # ax1.set_xlim([window_times[0], window_times[-1]])
+        # ax2.set_ylim([window_freqs[0], window_freqs[-1]])
+        # ax2.set_xlim([0, 1])
+        # ax3.set_ylim([0, np.max(powers)])
+        # ax3.set_xlim([window_times[0], window_times[-1]])
+        #
+        # ax1.set_xlabel("Time [s]")
+        # ax1.set_ylabel("Frequency [Hz]")
+        # ax2.set_xlabel("Power [a.u.]")
+        # ax3.set_xlabel("Time [s]")
+        # ax3.set_ylabel("Power [a.u.]")
+        #
         # remove ax2 y labels
-        ax2.set_yticklabels([])
+        # ax2.set_yticklabels([])
 
         # make margins nicer
-        plt.show()
+        # plt.show()
 
+        # prepare data and labels for export
+        labels = np.zeros(len(powers))
+        labels[closest] = 1
 
+        # append to x and y
+        x.extend(powers)
+        y.extend(labels)
+
+    x = np.array(x)
+    y = np.array(y)
+    print(np.shape(x))
+    print(np.shape(y))
+
+    return x, y
 
 
 def convert_cli(input_path: pathlib.Path, output_path: pathlib.Path) -> None:
@@ -437,6 +454,8 @@ class Wavetracker2YOLOConverter:
         """Convert wavetracker data to spectrogram snippets."""
         prog.console.rule("[bold green]Starting parser")
         dataframes = []
+        assingment_x = []
+        assignment_y = []
         bbox_counter = 0
         for i, batch_indices in enumerate(self.parser.batches):
             prog.console.rule(
@@ -487,13 +506,15 @@ class Wavetracker2YOLOConverter:
                 ].to_numpy()
 
                 # extract the assignment training data
-                extract_assignment_training_data(
+                x, y = extract_assignment_training_data(
                     data=self.data,
                     boxes=boxes,
                     spec=spec.cpu().numpy()[1],
                     times=time,
                     freqs=freq,
                 )
+                assingment_x.append(x)
+                assignment_y.append(y)
 
                 # correct overshooting freq bounds of bboxes
                 maxf = np.max(freq)
@@ -510,24 +531,24 @@ class Wavetracker2YOLOConverter:
                 t2 = boxes[:, 2]
                 f2 = boxes[:, 3]
 
-                import matplotlib as mpl
-                import matplotlib.pyplot as plt
-                from matplotlib.patches import Rectangle
-                mpl.use("TkAgg")
-                fig, ax = plt.subplots()
-                ax.pcolormesh(time, freq, spec.cpu().numpy()[1])
-                for x1, y1, x2, y2 in zip(t1, f1, t2, f2):
-                    ax.add_patch(
-                        Rectangle(
-                            (x1, y1),
-                            x2 - x1,
-                            y2 - y1,
-                            linewidth=1,
-                            edgecolor="w",
-                            facecolor="none",
-                        )
-                    )
-                plt.show()
+                # import matplotlib as mpl
+                # import matplotlib.pyplot as plt
+                # from matplotlib.patches import Rectangle
+                # mpl.use("TkAgg")
+                # fig, ax = plt.subplots()
+                # ax.pcolormesh(time, freq, spec.cpu().numpy()[1])
+                # for x1, y1, x2, y2 in zip(t1, f1, t2, f2):
+                #     ax.add_patch(
+                #         Rectangle(
+                #             (x1, y1),
+                #             x2 - x1,
+                #             y2 - y1,
+                #             linewidth=1,
+                #             edgecolor="w",
+                #             facecolor="none",
+                #         )
+                #     )
+                # plt.show()
 
                 # convert to indices on the spectrogram
                 x1 = reverse_float_index_interpolation(
@@ -614,6 +635,13 @@ class Wavetracker2YOLOConverter:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
+
+        assignment_x = np.concatenate(assingment_x)
+        assignment_y = np.concatenate(assignment_y)
+        print(np.shape(assignment_x))
+        print(np.shape(assignment_y))
+        np.save(self.data.path / "assignment_x.npy", assignment_x)
+        np.save(self.data.path / "assignment_y.npy", assignment_y)
 
         dataframes = pd.concat(dataframes)
         dataframes = dataframes.reset_index(drop=True)
