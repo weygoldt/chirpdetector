@@ -5,6 +5,7 @@ import logging
 import pathlib
 import shutil
 from typing import List, Self
+from IPython import embed
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -636,8 +637,13 @@ class Wavetracker2YOLOConverter:
                 torch.cuda.empty_cache()
             gc.collect()
 
+        print(np.shape(assingment_x[0]))
+        print(np.shape(assingment_x[8]))
+            # print(assignment_y)
         assignment_x = np.concatenate(assingment_x)
         assignment_y = np.concatenate(assignment_y)
+
+
         print(np.shape(assignment_x))
         print(np.shape(assignment_y))
         np.save(self.data.path / "assignment_x.npy", assignment_x)
