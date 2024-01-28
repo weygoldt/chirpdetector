@@ -6,6 +6,7 @@ import pathlib
 import shutil
 from typing import List, Self
 from IPython import embed
+from uuid import uuid4
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -107,8 +108,10 @@ def make_file_tree(path: pathlib.Path, wipe: bool = True) -> None:
 
     train_imgs = path / "images"
     train_labels = path / "labels"
+    assign_path = path / "assignment"
     train_imgs.mkdir(exist_ok=True, parents=True)
     train_labels.mkdir(exist_ok=True, parents=True)
+    assign_path.mkdir(exist_ok=True, parents=True)
 
 
 def chirp_height_width_to_bbox(
@@ -124,15 +127,12 @@ def chirp_height_width_to_bbox(
     boxes = []
     ids = []
 
-    print(data.com.chirp.have_params)
-
     for fish_id in data.track.ids:
         freqs = data.track.freqs[data.track.idents == fish_id]
         times = data.track.times[
             data.track.indices[data.track.idents == fish_id]
         ]
         chirps = data.com.chirp.times[data.com.chirp.idents == fish_id]
-        print(np.shape(data.com.chirp.params))
         chirp_params = data.com.chirp.params[data.com.chirp.idents == fish_id]
 
         for chirp, param in zip(chirps, chirp_params):
@@ -235,6 +235,7 @@ def extract_assignment_training_data(
         # get the baseline EODfs in the window by finding peaks on the
         # power spectrum
         target_prom = (np.max(spec_window) - np.min(spec_window)) * 0.01
+        # print(f"Spec window shape: {spec_window.shape}")
         power = np.mean(spec_window, axis=1)
         peaks = find_peaks(power, prominence=target_prom)[0]
         
@@ -251,7 +252,7 @@ def extract_assignment_training_data(
             # this is the start of the peak
             start = idx
             while True:
-                if start < 0:
+                if start == 0:
                     break
                 if window_freqs[idx] - window_freqs[start] > window_radius:
                     break
@@ -279,10 +280,14 @@ def extract_assignment_training_data(
         # compute average power in the window determined by peak start and end
         powers = []
         for s, e in zip(starts, ends):
-            powers.append(np.mean(spec_window[s:e, :], axis=0))
+            mu = np.mean(spec_window[s:e, :], axis=0)
+            # print(f"Freq power mean range start: {s}, end: {e}")
+            # print(f"Shape: {mu.shape}")
+            powers.append(mu)
         powers = np.array(powers)
 
         # # plot
+        # if len(np.shape(powers)) == 1:
         # import matplotlib as mpl
         # import matplotlib.pyplot as plt
         # mpl.use("TkAgg")
@@ -294,13 +299,20 @@ def extract_assignment_training_data(
         # # get 3 cool colors from magma palette
         # # c1, c2, c3 = plt.cm.magma(np.linspace(0.5, 1, 3))
         # c2 = "tab:orange"
-        # c1 = "tab:red"
+        # c1 = "tab:blue"
         #
-        # ax1.pcolormesh(window_times, window_freqs, spec_window, alpha=0.8)
+        # # ax1.pcolormesh(window_times, window_freqs, spec_window, alpha=0.8)
+        # ax1.imshow(
+        #     spec_window,
+        #     aspect="auto",
+        #     origin="lower",
+        #     extent=[window_times[0], window_times[-1], window_freqs[0], window_freqs[-1]],
+        #     cmap="viridis",
+        # )
         # ax1.plot(track_times, track, color=c2, lw=2)
         #
-        # ax2.plot(power, window_freqs, color="grey")
-        # ax2.plot(power[peaks], window_freqs[peaks], "o", color=c1)
+        # ax2.plot(power, window_freqs, color="black")
+        # ax2.plot(power[peaks], window_freqs[peaks], ".", color=c1)
         #
         # for s, e in zip(starts, ends):
         #     ax2.fill_betweenx(
@@ -314,7 +326,7 @@ def extract_assignment_training_data(
         #     if ix == closest:
         #         ax3.plot(window_times, p, color=c2, lw=2, zorder=1000)
         #     else:
-        #         ax3.plot(window_times, p, color="grey")
+        #         ax3.plot(window_times, p, color="grey", lw=1)
         #
         # ax1.set_ylim([window_freqs[0], window_freqs[-1]])
         # ax1.set_xlim([window_times[0], window_times[-1]])
@@ -329,12 +341,16 @@ def extract_assignment_training_data(
         # ax3.set_xlabel("Time [s]")
         # ax3.set_ylabel("Power [a.u.]")
         #
-        # remove ax2 y labels
+        # # remove ax2 y labels and axes and y spine
+        # ax2.spines["left"].set_visible(False)
         # ax2.set_yticklabels([])
-
-        # make margins nicer
+        # ax2.set_yticks([])
+        # ax2.set_ylabel("")
+        #
+        # # make margins nicer
+        # plt.savefig(f"plots/{uuid4()}.svg")
         # plt.show()
-
+        #
         # prepare data and labels for export
         labels = np.zeros(len(powers))
         labels[closest] = 1
@@ -345,8 +361,6 @@ def extract_assignment_training_data(
 
     x = np.array(x)
     y = np.array(y)
-    print(np.shape(x))
-    print(np.shape(y))
 
     return x, y
 
@@ -383,7 +397,9 @@ def convert_cli(input_path: pathlib.Path, output_path: pathlib.Path) -> None:
         raise FileNotFoundError(msg)
 
     with prog:
-        task = prog.add_task("Detecting chirps...", total=len(datasets))
+        task = prog.add_task(
+            "Converting to training data ...", total=len(datasets)
+        )
         for dataset in datasets:
             prog.console.log(f"Detecting chirps in {dataset.name}")
             data = load(dataset)
@@ -436,6 +452,7 @@ class Wavetracker2YOLOConverter:
         )
         self.img_path = output_path / "images"
         self.label_path = output_path / "labels"
+        self.assignment_path = output_path / "assignment"
 
         # Batch and windowing setup
         self.parser = ArrayParser(
@@ -505,6 +522,9 @@ class Wavetracker2YOLOConverter:
                     (self.bbox_df["t1"] >= time[0])
                     & (self.bbox_df["t2"] <= time[-1])
                 ].to_numpy()
+
+                if len(boxes) == 0:
+                    continue
 
                 # extract the assignment training data
                 x, y = extract_assignment_training_data(
@@ -637,17 +657,17 @@ class Wavetracker2YOLOConverter:
                 torch.cuda.empty_cache()
             gc.collect()
 
-        print(np.shape(assingment_x[0]))
-        print(np.shape(assingment_x[8]))
-            # print(assignment_y)
+        # for x in assingment_x:
+        #     print(f"Assignment x shape: {x.shape}")
+
         assignment_x = np.concatenate(assingment_x)
         assignment_y = np.concatenate(assignment_y)
 
+        assignment_x_name = self.data.path.name + "_data.npy"
+        assignment_y_name = self.data.path.name + "_labels.npy"
 
-        print(np.shape(assignment_x))
-        print(np.shape(assignment_y))
-        np.save(self.data.path / "assignment_x.npy", assignment_x)
-        np.save(self.data.path / "assignment_y.npy", assignment_y)
+        np.save(self.assignment_path / assignment_x_name, assignment_x)
+        np.save(self.assignment_path / assignment_y_name, assignment_y)
 
         dataframes = pd.concat(dataframes)
         dataframes = dataframes.reset_index(drop=True)
