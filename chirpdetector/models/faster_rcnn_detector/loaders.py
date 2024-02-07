@@ -56,7 +56,7 @@ def load_finetuned_faster_rcnn(cfg: Config) -> torch.nn.Module:
     model = load_pretrained_faster_rcnn(num_classes=len(cfg.hyper.classes))
     device = get_device()
     checkpoint = torch.load(
-        f"{cfg.hyper.modelpath}/model.pt",
+        f"{cfg.hyper.modelpath}/faster-rcnn.pt",
         map_location=device,
     )
     model.load_state_dict(checkpoint["model_state_dict"])

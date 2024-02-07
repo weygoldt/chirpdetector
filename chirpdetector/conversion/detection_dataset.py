@@ -49,10 +49,12 @@ prog = Progress(
     TimeElapsedColumn(),
 )
 
-# import mplstyles
-base = "/home/weygoldt/Projects/mscthesis/src/base.mplstyle"
-darkbg = "/home/weygoldt/Projects/mscthesis/src/light_background.mplstyle"
-plt.style.use([base, darkbg])
+try:
+    base = "/home/weygoldt/Projects/mscthesis/src/base.mplstyle"
+    darkbg = "/home/weygoldt/Projects/mscthesis/src/light_background.mplstyle"
+    plt.style.use([base, darkbg])
+except FileNotFoundError:
+    pass
 
 
 def numpy_to_pil(img: np.ndarray) -> Image.Image:
@@ -221,7 +223,7 @@ def extract_assignment_training_data(
             (times >= box[0]) & (times <= box[2])
         ]
 
-        # interpolate the spec window and axes to 500x500
+        # interpolate the spec window and axes to 100x100
         res = 100
         spec_window = np.array(Image.fromarray(spec_window).resize((res, res)))
 
