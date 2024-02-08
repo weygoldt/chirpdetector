@@ -359,7 +359,7 @@ class ChirpDetector:
             with Timer(prog.console, "Non-maximum suppression"):
                 good_box_indices = dataframe_nms(
                     batch_df,
-                    overlapthresh=0.5,
+                    overlapthresh=0.2,
                 )
                 nms_batch_df = batch_df.iloc[good_box_indices]
 
