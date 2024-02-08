@@ -56,10 +56,10 @@ def plot_batch_detections(
     # get nice ligth colors for the tracks
     track_colors = [
         "#1f77b4",
+        "#d62728",
         "#e377c2",
         "#ff7f0e",
         "#2ca02c",
-        "#d62728",
         "#9467bd",
         "#8c564b",
         "#7f7f7f",

@@ -29,15 +29,17 @@ After the first release, this section will be removed an tasks will be organized
 as github issues. Until them, if you fixed something, please check it off on this
 list before opening a pull request.
 
-- [ ] Give each chirp in df its own ID
-- [ ] Give each spectrogram snippet its own ID
-- [ ] Save spectrogram snippet ID and chirp IDs
+- [ ] Move the waveform preprocessing stuff into a nn.module as suggested by
+      the torchaudio docs here: https://pytorch.org/audio/main/transforms.html
+- [x] Give each chirp in df its own ID
+- [x] Give each spectrogram snippet its own ID
+- [x] Save spectrogram snippet ID and chirp IDs
 - [ ] Write data dumping for main loop
-- [ ] Write an assingment benchmarking
+- [x] Write an assingment benchmarking
 - [ ] Write an assignmen GUI to create a ground truth
 - [ ] Find out why current assignment algo is failing at raw = raw1 - raw2
 - [ ] Try a random forest classifier on PCAed envelope extractions to assign chirps
-- [ ] Try a small NN, might work better than the random forest in this case
+- [x] Try a small NN, might work better than the random forest in this case
 - [ ] Finish a script to analyze the Json dumps from the training loop
 - [ ] Update all the docstrings after refactoring.
 - [ ] Move hardcoded params from assignment algo into config.toml
