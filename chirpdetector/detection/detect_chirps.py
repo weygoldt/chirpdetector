@@ -13,6 +13,7 @@ import torch
 from gridtools.datasets import load
 from gridtools.datasets.models import Dataset
 from gridtools.preprocessing.preprocessing import interpolate_tracks
+from matplotlib.collections import PatchCollection
 from rich.progress import (
     MofNCompleteColumn,
     Progress,
@@ -31,7 +32,6 @@ from chirpdetector.datahandling.dataset_parsing import (
 )
 from chirpdetector.detection.assignment_models import (
     AbstractBoxAssigner,
-    SpectrogramPowerTroughBoxAssigner,
     SpectrogramPowerTroughBoxAssignerMLP,
 )
 from chirpdetector.detection.detection_models import (
@@ -41,6 +41,7 @@ from chirpdetector.detection.detection_models import (
 from chirpdetector.detection.visualization_functions import (
     plot_raw_batch,
     plot_spec_tiling,
+    plot_batch_detections,
 )
 from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.models.faster_rcnn_detector import (
@@ -48,15 +49,6 @@ from chirpdetector.models.faster_rcnn_detector import (
 )
 from chirpdetector.models.utils import get_device
 
-# Use non-gui backend for matplotlib to avoid memory leaks
-mpl.use("TkAgg")
-
-try:
-    basestyle = "/home/weygoldt/Projects/mscthesis/src/base.mplstyle"
-    background = "/home/weygoldt/Projects/mscthesis/src/light_background.mplstyle"
-    plt.style.use([basestyle, background])
-except FileNotFoundError:
-    pass
 
 # initialize the progress bar
 prog = Progress(
@@ -65,132 +57,6 @@ prog = Progress(
     MofNCompleteColumn(),
     TimeElapsedColumn(),
 )
-
-
-def plot_batch_detections(
-    specs: List,
-    times: List,
-    freqs: List,
-    batch_df: pd.DataFrame,
-    nms_batch_df: pd.DataFrame,
-    assigned_batch_df: pd.DataFrame,
-    data: Dataset,
-) -> None:
-    """Plot the detections for each batch."""
-    cm = 1/2.54
-    figsize = (16*cm, 9*cm)
-    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
-
-    for i in range(len(specs)):
-        spec = specs[i].cpu().numpy()
-        ax.pcolormesh(times[i], freqs[i], spec[0, :, :])
-
-    # get colors from a cmap
-    track_colors = plt.cm.get_cmap("tab10")(np.linspace(0, 1, len(data.track.ids)))
-
-    for j, track_id in enumerate(data.track.ids):
-        track_freqs = data.track.freqs[data.track.idents == track_id]
-        track_time = data.track.times[data.track.indices[data.track.idents == track_id]]
-        color = track_colors[data.track.ids == track_id]
-        print(color)
-        ax.plot(track_time, track_freqs, color=color, lw=2, label=f"Fish {j+1}")
-
-    patches = []
-    # get bboxes before nms
-    for j in range(len(batch_df)):
-        t1 = batch_df["t1"].iloc[j]
-        f1 = batch_df["f1"].iloc[j]
-        t2 = batch_df["t2"].iloc[j]
-        f2 = batch_df["f2"].iloc[j]
-        score = batch_df["score"].iloc[j]
-        patches.append(plt.Rectangle(
-            (t1, f1),
-            t2 - t1,
-            f2 - f1,
-            fill=False,
-            color="lightgrey",
-            lw=1.5,
-            alpha=0.2,
-        ))
-        ax.text(
-            t1,
-            f2,
-            f"{score:.2f}",
-            color="lightgrey",
-            fontsize=8,
-            ha="left",
-            va="bottom",
-            alpha=0.2,
-        )
-
-    # get bboxes after nms
-    for j in range(len(nms_batch_df)):
-        t1 = nms_batch_df["t1"].iloc[j]
-        f1 = nms_batch_df["f1"].iloc[j]
-        t2 = nms_batch_df["t2"].iloc[j]
-        f2 = nms_batch_df["f2"].iloc[j]
-        score = nms_batch_df["score"].iloc[j]
-        patches.append(plt.Rectangle(
-            (t1, f1),
-            t2 - t1,
-            f2 - f1,
-            fill=False,
-            color="white",
-            lw=1.5,
-            alpha=1,
-        ))
-        ax.text(
-            t1,
-            f2,
-            f"{score:.2f}",
-            color="white",
-            fontsize=8,
-            ha="left",
-            va="bottom",
-            alpha=1,
-        )
-
-    # get bboxes after assignment
-    for j in range(len(assigned_batch_df)):
-        t1 = assigned_batch_df["t1"].iloc[j]
-        f1 = assigned_batch_df["f1"].iloc[j]
-        t2 = assigned_batch_df["t2"].iloc[j]
-        f2 = assigned_batch_df["f2"].iloc[j]
-        score = assigned_batch_df["score"].iloc[j]
-        track_id = assigned_batch_df["track_id"].iloc[j]
-
-        if np.isnan(track_id):
-            continue
-
-        color = track_colors[data.track.ids == track_id][0]
-
-        patches.append(plt.Rectangle(
-            (t1, f1),
-            t2 - t1,
-            f2 - f1,
-            fill=False,
-            color=color,
-            lw=1.5,
-            alpha=1,
-        ))
-        ax.text(
-            t1,
-            f2,
-            f"{score:.2f}",
-            color=color,
-            fontsize=8,
-            ha="left",
-            va="bottom",
-            alpha=1,
-        )
-
-    ax.add_collection(PatchCollection(patches, match_original=True))
-    ax.set_ylim(np.min(data.track.freqs) - 200, np.max(data.track.freqs) + 500)
-    ax.set_xlim(times[0][0], times[0][-1])
-    ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Frequency [Hz]")
-    ax.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left", borderaxespad=0, ncol=2)
-    plt.show()
 
 
 def assign_ffreqs_to_tracks(bbox_df: pd.DataFrame, data: Dataset) -> pd.DataFrame:
@@ -341,7 +207,7 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
         # for dataset in datasets[10:]:
-        for dataset in datasets[10:]:
+        for dataset in datasets:
             prog.console.log(f"Detecting chirps in {dataset.name}")
             data = load(dataset)
             data = interpolate_tracks(data, samplerate=120)
@@ -366,7 +232,7 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
 class ChirpDetector:
     """Parse a grid dataset into batches."""
 
-    def __init__(
+    def __init__(  # noqa
         self: Self,
         cfg: Config,
         data: Dataset,
@@ -432,7 +298,7 @@ class ChirpDetector:
 
             # STEP 1: Load the raw data as a batch
             batch_raw = [
-                np.array(self.data.grid.rec[idxs[0] : idxs[1], :])
+                np.array(self.data.grid.rec[idxs[0]:idxs[1], :])
                 for idxs in batch_indices
             ]
 
@@ -455,7 +321,6 @@ class ChirpDetector:
             # STEP 3: Predict boxes for each spectrogram
             with Timer(prog.console, "Detect chirps"):
                 predictions = self.detector.predict(specs)
-
 
             # STEP 4: Convert pixel values to time and frequency
             # and save everything in a dataframe
@@ -503,6 +368,9 @@ class ChirpDetector:
                     batch_detections=nms_batch_df,
                     data=self.data,
                 )
+                if len(assigned_batch_df) == 0:
+                    prog.console.log(f"No detections in batch {i}.")
+                    continue
 
             # STEP 7: Associate the fundamental frequency of the emitter
             # to the closest wavetracker track
@@ -520,7 +388,8 @@ class ChirpDetector:
                 batch_df,
                 nms_batch_df,
                 assigned_batch_df,
-                self.data
+                self.data,
+                i
             )
 
             dataframes.append(assigned_batch_df)
@@ -535,168 +404,4 @@ class ChirpDetector:
         dataframes = dataframes.sort_values(by=["t1"])
         savepath = self.data.path / "chirpdetector_bboxes.csv"
         dataframes.to_csv(savepath, index=False)
-
-
-
-
-
-
-
-
-
-
-
-            # import matplotlib as mpl
-            # from matplotlib.collections import PatchCollection
-            # from matplotlib.patches import Rectangle
-            # mpl.use("TkAgg")
-            #
-            # for speci in range(4):
-            #     cm = 1/2.54
-            #     fig, ax = plt.subplots(figsize=(16*cm, 9*cm), constrained_layout=True)
-            #     iter = 0
-            #     for spec, time, freq in zip(specs, times, freqs):
-            #         spec = spec.cpu().numpy()
-            #         ax.pcolormesh(time, freq, spec[0, :, :])
-            #         # ax.imshow(spec[0], aspect="auto", origin="lower",
-            #         #           extent=[time[0], time[-1], freq[0], freq[-1]],
-            #         #           interpolation="gaussian",)
-            #         iter += 1
-
-                # # before nms
-                # for i in range(len(batch_df)):
-                #     x1 = batch_df["t1"].iloc[i]
-                #     y1 = batch_df["f1"].iloc[i]
-                #     x2 = batch_df["t2"].iloc[i]
-                #     y2 = batch_df["f2"].iloc[i]
-                #     score = batch_df["score"].iloc[i]
-                #     ax.add_patch(
-                #         Rectangle(
-                #             (x1, y1),
-                #             x2 - x1,
-                #             y2 - y1,
-                #             fill=False,
-                #             color="white",
-                #             lw=2,
-                #             alpha=0.2
-                #         )
-                #     )
-                #     ax.text(
-                #         x1,
-                #         y1,
-                #         f"{score:.2f}",
-                #         color="white",
-                #         fontsize=8,
-                #         ha="left",
-                #         va="bottom",
-                #         alpha=0.2,
-                #     )
-
-                # after nms
-                # for i in range(len(nms_batch_df)):
-                #     x1 = nms_batch_df["t1"].iloc[i]
-                #     y1 = nms_batch_df["f1"].iloc[i]
-                #     x2 = nms_batch_df["t2"].iloc[i]
-                #     y2 = nms_batch_df["f2"].iloc[i]
-                #     score = nms_batch_df["score"].iloc[i]
-                #     ax.add_patch(
-                #         Rectangle(
-                #             (x1-0.1, y1),
-                #             (x2 - x1) + 0.2,
-                #             y2 - y1,
-                #             fill=False,
-                #             color="white",
-                #             lw=1.5,
-                #             alpha=1,
-                #             zorder=1000
-                #         )
-                #     )
-                #     ax.text(
-                #         x1,
-                #         y2,
-                #         f"{score:.2f}",
-                #         color="black",
-                #         fontsize=10,
-                #         ha="left",
-                #         va="bottom",
-                #         alpha=1,
-                #         backgroundcolor="white"
-                #     )
-            #
-            #     colors = ["#1f77b4", "#ff7f0e"]
-            #     colors = ["tab:red", "tab:orange"]
-            #     for j, track_id in enumerate(self.data.track.ids):
-            #         track_freqs = self.data.track.freqs[self.data.track.idents == track_id]
-            #         track_time = self.data.track.times[self.data.track.indices[self.data.track.idents == track_id]]
-            #         ax.plot(track_time, track_freqs, color=colors[j], lw=2, label=f"Fish {j+1}")
-            #
-            #     patches = []
-            #     for j in range(len(assigned_batch_df)):
-            #         t1 = assigned_batch_df["t1"].iloc[j]
-            #         f1 = assigned_batch_df["f1"].iloc[j]
-            #         t2 = assigned_batch_df["t2"].iloc[j]
-            #         f2 = assigned_batch_df["f2"].iloc[j]
-            #         score = assigned_batch_df["score"].iloc[j]
-            #
-            #         # assigned_id = assigned_batch_df["track_id"].iloc[j]
-            #
-            #         assigned_eodf = assigned_batch_df["emitter_eodf"].iloc[j]
-            #         print(f"Assigned EODF: {assigned_eodf}")
-            #         print(f"Corresponding time: {t2-t1}")
-            #
-            #         ax.scatter(t1 + (t2-t1)/2, assigned_eodf, color="black", s=10, zorder=1000)
-            #
-            #         # if assigned_id not in self.data.track.ids:
-            #             # continue
-            #
-            #         ax.text(
-            #             t1,
-            #             f2,
-            #             f"score{score:.2f} id2",
-            #             color="black",
-            #             fontsize=10,
-            #             ha="left",
-            #             va="bottom",
-            #             alpha=1,
-            #             backgroundcolor="white"
-            #         )
-            #
-            #         # print(assigned_id)
-            #         # print(self.data.track.ids)
-            #
-            #         # color = np.array(colors)[self.data.track.ids == assigned_id][0]
-            #         # print(color)
-            #         color = "white"
-            #
-            #         patches.append(Rectangle(
-            #                 (t1 - 0.1, f1),
-            #                 t2 - t1 + 0.2,
-            #                 f2 - f1,
-            #                 fill=False,
-            #                 color=color,
-            #                 lw=1.5,
-            #                 alpha=1,
-            #         ))
-            #
-            #     ax.add_collection(PatchCollection(patches, match_original=True))
-            #
-            #     # go through in 15 second intervals
-            #     ax.set_ylim(np.min(self.data.track.freqs) - 100, np.max(self.data.track.freqs) + 300)
-            #     ax.set_xlim(times[0][0] + speci * 15, times[0][0] + (speci + 1) * 15)
-            #     ax.set_xlabel("Time [s]")
-            #     ax.set_ylabel("Frequency [Hz]")
-            #     ax.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left", borderaxespad=0, ncol=2)
-            #     from uuid import uuid4
-            #     # plt.savefig(f"plots/{self.data.path.name}_{speci}_{uuid4()}.svg", dpi=300)
-            #     plt.show()
-            #
-            # plt.close()
-            #
-            # # TODO: Save the output from above to a file
-
-
-
-
-
-
 

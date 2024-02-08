@@ -229,24 +229,24 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
 
         boxes = batch_detections[["t1", "f1", "t2", "f2"]].to_numpy()
         boxes_spec_idx = batch_detections["spec"].to_numpy().astype(int)
-        print(f"max spec idx: {np.max(boxes_spec_idx)}")
-        print(f"min spec idx: {np.min(boxes_spec_idx)}")
-        
-        import matplotlib.pyplot as plt
-        import matplotlib as mpl
-        mpl.use('TkAgg')
+
+        if len(boxes) == 0:
+            return batch_detections
+
+        # print(f"max spec idx: {np.max(boxes_spec_idx)}")
+        # print(f"min spec idx: {np.min(boxes_spec_idx)}")
 
         assigned_eodfs = []
         for idx, box in zip(boxes_spec_idx, boxes):
 
-            print(f"box {idx}: {box}")
-            print(box)
+            # print(f"box {idx}: {box}")
+            # print(box)
 
             upper_y_cutoff = 0.66 * (box[3] - box[1]) + box[1]
 
-            print(f"Upper bbox border: {box[3]}")
-            print(f"Lower bbox border: {box[1]}")
-            print(f"Upper y cutoff: {upper_y_cutoff}")
+            # print(f"Upper bbox border: {box[3]}")
+            # print(f"Lower bbox border: {box[1]}")
+            # print(f"Upper y cutoff: {upper_y_cutoff}")
 
             # get the spectrogram window in the box
             window_spec = batch_specs[idx][
@@ -262,8 +262,8 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
                 (batch_times[idx] > box[0]) & (batch_times[idx] < box[2])
             ]
 
-            print(f"min freq: {window_freqs[0]}")
-            print(f"max freq: {window_freqs[-1]}")
+            # print(f"min freq: {window_freqs[0]}")
+            # print(f"max freq: {window_freqs[-1]}")
 
             # interpolate the window to 100x100
             res = 100
@@ -280,7 +280,7 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
 
             if len(peaks) == 0:
                 assigned_eodfs.append(np.nan)
-                print("no peaks found")
+                # print("no peaks found")
                 continue
 
             # window width to 10 Hz in frequency
@@ -326,8 +326,8 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
 
             powers = np.array(powers)
             eodfs = np.array(eodfs)
-            print(f"len powers: {len(powers)}")
-            print(f"len eodfs: {len(eodfs)}")
+            # print(f"len powers: {len(powers)}")
+            # print(f"len eodfs: {len(eodfs)}")
 
             with torch.no_grad():
                 pred = model(torch.tensor(powers).float())
@@ -335,15 +335,15 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
             emitter = torch.argmax(pred).item()
 
             if pred[emitter] < 0.8:
-                print("no emitter found")
+                # print("no emitter found")
                 assigned_eodfs.append(np.nan)
                 continue
 
             emitter_eodf = eodfs[emitter]
 
-            print(f"output: {pred}")
-            print(f"emitter: {emitter}")
-            print(f"emitter eodf: {emitter_eodf}")
+            # print(f"output: {pred}")
+            # print(f"emitter: {emitter}")
+            # print(f"emitter eodf: {emitter_eodf}")
 
             assigned_eodfs.append(emitter_eodf)
 
@@ -381,12 +381,9 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
             # ax.set_ylim([batch_freqs[idx][0], batch_freqs[idx][-1]])
             # plt.show()
 
-
         batch_detections.loc[:, "emitter_eodf"] = assigned_eodfs
 
         # drop all boxes that were not assigned
         batch_detections = batch_detections.dropna()
-
-
 
         return batch_detections
