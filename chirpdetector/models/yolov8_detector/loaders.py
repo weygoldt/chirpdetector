@@ -1,9 +1,12 @@
 """Loaders for the YOLOV8 model."""
 
 import pathlib
-from ultralytics import YOLO
+
 import torch
+from ultralytics import YOLO
+
 from chirpdetector.config import Config
+
 
 def load_finetuned_yolov8(cfg: Config) -> torch.nn.Module:
     """Load the trained YOLOV8 model.

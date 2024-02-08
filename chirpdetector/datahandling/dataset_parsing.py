@@ -53,7 +53,7 @@ def tile_batch_specs(batch_specs: List, cfg: Config) -> List:
                     newmeta,
                     spec[start_idx:end_idx, :],
                     time,
-                    freq[start_idx:end_idx]
+                    freq[start_idx:end_idx],
                 )
             )
     return sliced_specs
@@ -64,7 +64,7 @@ def make_batch_specs(
     metadata: List,
     batch: np.ndarray,
     samplerate: float,
-    cfg: Config
+    cfg: Config,
 ) -> Tuple[List, List, List, List]:
     """Compute the spectrograms for a batch of windows.
 
@@ -98,49 +98,35 @@ def make_batch_specs(
         The frequency axis for each spectrogram.
     """
     batch = np.swapaxes(batch, 1, 2)
-    nfft = freqres_to_nfft(
-        freq_res=cfg.spec.freq_res,
-        samplingrate=samplerate
-    )
-    hop_length = overlap_to_hoplen(
-        nfft=nfft,
-        overlap=cfg.spec.overlap_frac
-    )
+    nfft = freqres_to_nfft(freq_res=cfg.spec.freq_res, samplingrate=samplerate)
+    hop_length = overlap_to_hoplen(nfft=nfft, overlap=cfg.spec.overlap_frac)
     batch_specs = [
         compute_spectrogram(
             data=signal,
             samplingrate=samplerate,
             nfft=nfft,
             # nfft=4096,
-            hop_length=hop_length
-        )[0] for signal in batch
+            hop_length=hop_length,
+        )[0]
+        for signal in batch
     ]
 
-    batch_specs_decibel = [
-        to_decibel(spec) for spec in batch_specs
-    ]
+    batch_specs_decibel = [to_decibel(spec) for spec in batch_specs]
     # batch_specs_decible_cpu = [spec for spec in batch_specs_decibel]
-    batch_sum_specs = [
-        torch.sum(spec, dim=0) for spec in batch_specs_decibel
-    ]
+    batch_sum_specs = [torch.sum(spec, dim=0) for spec in batch_specs_decibel]
     axes = [
         make_spectrogram_axes(
             start=idxs[0],
             stop=idxs[1],
             nfft=nfft,
             hop_length=hop_length,
-            samplerate=samplerate
-        ) for idxs in indices
-    ]
-    batch_specs = [
-        (spec, *ax) for spec, ax in zip(batch_sum_specs, axes)
-    ]
-    # Add the metadata to each spec tuple
-    batch_specs = [
-        (meta, *spec) for meta, spec in zip(
-            metadata, batch_specs
+            samplerate=samplerate,
         )
+        for idxs in indices
     ]
+    batch_specs = [(spec, *ax) for spec, ax in zip(batch_sum_specs, axes)]
+    # Add the metadata to each spec tuple
+    batch_specs = [(meta, *spec) for meta, spec in zip(metadata, batch_specs)]
 
     # Tile the spectrograms y-axis
     sliced_specs = tile_batch_specs(batch_specs, cfg)
@@ -154,18 +140,17 @@ def make_batch_specs(
     return metadata, images, times, freqs
 
 
-
 class ArrayParser:
     """Generate indices to iterate large arrays in batches."""
 
-    def __init__( # noqa
+    def __init__(  # noqa
         self: Self,
         length: int,
         samplingrate: float,
         batchsize: int,
         windowsize: float,
         overlap: float,
-        console: Console
+        console: Console,
     ) -> None:
         """Initialize DatasetParser.
 
@@ -214,8 +199,8 @@ class ArrayParser:
             )
             self.console.log(msg)
         self.batchsize_samples = self.windowsize_samples * self.batchsize
-        self.nbatches = int(np.ceil(
-            self.datasetsize_samples / self.batchsize_samples)
+        self.nbatches = int(
+            np.ceil(self.datasetsize_samples / self.batchsize_samples)
         )
 
         # check if last batch has at least one window
@@ -232,7 +217,6 @@ class ArrayParser:
                     "Dropping last batch. This means that the last "
                     f"{last_batch_size / self.samplingrate} seconds of "
                     "the dataset will be lost."
-
                 )
                 self.console.log(msg)
 
@@ -244,7 +228,6 @@ class ArrayParser:
         )
         self.console.log(msg)
 
-
     def set_batches(self: Self) -> None:
         """Compute the indices for each batch and window."""
         indices = np.arange(0, self.nbatches)
@@ -252,40 +235,37 @@ class ArrayParser:
         starts = indices * self.batchsize_samples
         ends = starts + self.batchsize_samples
 
-        window_start_indices = [np.arange(
-            start, end, self.windowsize_samples
-        ) for start, end in zip(starts, ends)]
+        window_start_indices = [
+            np.arange(start, end, self.windowsize_samples)
+            for start, end in zip(starts, ends)
+        ]
 
         window_end_indices = [
-            (
-                item + self.windowsize_samples + self.overlap_samples
-            ) for item in window_start_indices
+            (item + self.windowsize_samples + self.overlap_samples)
+            for item in window_start_indices
         ]
 
         # check if indices are out of range
         window_end_indices = [
-            ends[starts < self.datasetsize_samples] for ends, starts in zip(
-                window_end_indices, window_start_indices
-            )
+            ends[starts < self.datasetsize_samples]
+            for ends, starts in zip(window_end_indices, window_start_indices)
         ]
         window_start_indices = [
-            starts[starts < self.datasetsize_samples] for starts in \
-                window_start_indices
+            starts[starts < self.datasetsize_samples]
+            for starts in window_start_indices
         ]
         window_start_indices = [
-            starts[ends <= self.datasetsize_samples] for starts, ends in zip(
-                window_start_indices, window_end_indices
-            )
+            starts[ends <= self.datasetsize_samples]
+            for starts, ends in zip(window_start_indices, window_end_indices)
         ]
         window_end_indices = [
-            ends[ends <= self.datasetsize_samples] for ends in \
-            window_end_indices
+            ends[ends <= self.datasetsize_samples]
+            for ends in window_end_indices
         ]
 
         self.batches = [
-            list(zip(start, end)) for start, end in zip(
-                window_start_indices, window_end_indices
-            )
+            list(zip(start, end))
+            for start, end in zip(window_start_indices, window_end_indices)
         ]
 
         remaining = self.datasetsize_samples - self.batches[-1][-1][1]
@@ -348,10 +328,11 @@ def arrayparser_demo() -> None:
     print(f"Has {dsp.nbatches} batches.")
     dsp.viz()
 
+
 def main() -> None:
     """Run the demos."""
     arrayparser_demo()
 
+
 if __name__ == "__main__":
     main()
-

@@ -5,19 +5,19 @@ from typing import List, Self
 
 import numpy as np
 import pandas as pd
+import torch
 from gridtools.datasets.models import Dataset
+from PIL import Image
 from scipy.signal import find_peaks
 
 from chirpdetector.config import Config
 from chirpdetector.models.mlp_assigner import load_trained_mlp
-from PIL import Image
-import torch
 
 
 class AbstractBoxAssigner(ABC):
     """Default wrapper around different box assignment methods."""
 
-    def __init__( # noqa
+    def __init__(  # noqa
         self: Self,
         cfg: Config,
     ) -> None:
@@ -25,7 +25,7 @@ class AbstractBoxAssigner(ABC):
         self.cfg = cfg
 
     @abstractmethod
-    def assign( # noqa
+    def assign(  # noqa
         self: Self,
         batch_specs: List,
         batch_times: List,
@@ -59,7 +59,7 @@ class SpectrogramPowerTroughBoxAssigner(AbstractBoxAssigner):
     This method uses this notion and just assigns chirps by peak detection.
     """
 
-    def assign( #noqa
+    def assign(  # noqa
         self: Self,
         batch_specs: List,
         batch_times: List,
@@ -72,24 +72,20 @@ class SpectrogramPowerTroughBoxAssigner(AbstractBoxAssigner):
         Assignment by checking which of the tracks has a trough in spectrogram
         power in the spectrogram bbox.
         """
-        padding = 0.05 # seconds before and after bbox bounds to ad
+        padding = 0.05  # seconds before and after bbox bounds to ad
 
         # retrieve frequency and time for each fish id
         track_ids = np.unique(data.track.ids)
         track_freqs = [
-            data.track.freqs[data.track.idents == ident]
-            for ident in track_ids
+            data.track.freqs[data.track.idents == ident] for ident in track_ids
         ]
         track_times = [
-            data.track.times[data.track.indices[
-            data.track.idents == ident
-        ]]
+            data.track.times[data.track.indices[data.track.idents == ident]]
             for ident in track_ids
         ]
         assigned_ids = []
         assigned_eodfs = []
         for i in range(len(batch_detections)):
-
             # get the current box
             box = batch_detections.iloc[i]
 
@@ -119,8 +115,9 @@ class SpectrogramPowerTroughBoxAssigner(AbstractBoxAssigner):
 
                 # Check if the frequency values of the snippet are
                 # inside the bbox
-                if (np.min(track_freq_snippet) > f2) or \
-                    (np.max(track_freq_snippet) < f1):
+                if (np.min(track_freq_snippet) > f2) or (
+                    np.max(track_freq_snippet) < f1
+                ):
                     # the track does not lie in the box
                     continue
 
@@ -145,7 +142,8 @@ class SpectrogramPowerTroughBoxAssigner(AbstractBoxAssigner):
                 ]
 
                 spec_powers = [
-                    spec_powers[f_idx, t_idx] for f_idx, t_idx in zip(
+                    spec_powers[f_idx, t_idx]
+                    for f_idx, t_idx in zip(
                         spec_f_indices, range(len(spec_times))
                     )
                 ]
@@ -214,7 +212,7 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
     ... but using a multi layer perceptron to do the assignment.
     """
 
-    def assign( #noqa
+    def assign(  # noqa
         self: Self,
         batch_specs: List,
         batch_times: List,
@@ -223,7 +221,6 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
         data: Dataset,
     ) -> pd.DataFrame:
         """Extract trougths in power and assign boxes to tracks using a MLP."""
-
         # load model
         model = load_trained_mlp(self.cfg)
 
@@ -238,7 +235,6 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
 
         assigned_eodfs = []
         for idx, box in zip(boxes_spec_idx, boxes):
-
             # print(f"box {idx}: {box}")
             # print(box)
 
@@ -253,10 +249,12 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
                 0, :, (batch_times[idx] > box[0]) & (batch_times[idx] < box[2])
             ]
             window_spec = window_spec[
-                (batch_freqs[idx] > box[1]) & (batch_freqs[idx] < upper_y_cutoff)
+                (batch_freqs[idx] > box[1])
+                & (batch_freqs[idx] < upper_y_cutoff)
             ]
             window_freqs = batch_freqs[idx][
-                (batch_freqs[idx] > box[1]) & (batch_freqs[idx] < upper_y_cutoff)
+                (batch_freqs[idx] > box[1])
+                & (batch_freqs[idx] < upper_y_cutoff)
             ]
             window_times = batch_times[idx][
                 (batch_times[idx] > box[0]) & (batch_times[idx] < box[2])
@@ -267,7 +265,9 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
 
             # interpolate the window to 100x100
             res = 100
-            window_spec = np.array(Image.fromarray(window_spec.cpu().numpy()).resize((res, res)))
+            window_spec = np.array(
+                Image.fromarray(window_spec.cpu().numpy()).resize((res, res))
+            )
             window_freqs = np.linspace(box[1], upper_y_cutoff, res)
             window_times = np.linspace(box[0], box[2], res)
 
@@ -284,7 +284,7 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
                 continue
 
             # window width to 10 Hz in frequency
-            window_radius = 8 # Hz
+            window_radius = 8  # Hz
 
             # get the start and end of the peak
             starts = []
@@ -295,7 +295,10 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
                 while True:
                     if start == 0:
                         break
-                    if window_freqs[idx2] - window_freqs[start] > window_radius:
+                    if (
+                        window_freqs[idx2] - window_freqs[start]
+                        > window_radius
+                    ):
                         break
                     if np.sign(power[idx2] - power[start]) == -1:
                         break

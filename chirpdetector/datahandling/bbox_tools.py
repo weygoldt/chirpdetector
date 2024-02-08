@@ -193,8 +193,8 @@ def reverse_float_index_interpolation(
 
 
 def pixel_box_to_timefreq(
-        boxes: np.ndarray, time: np.ndarray, freq: np.ndarray
-    ) -> np.ndarray:
+    boxes: np.ndarray, time: np.ndarray, freq: np.ndarray
+) -> np.ndarray:
     """Convert the pixel coordinates of a box to time and frequency.
 
     Parameters

@@ -13,8 +13,8 @@ class Timer(ContextDecorator):
     """A simple timer class to time the execution of a block of code."""
 
     def __init__(
-            self: Self, console: Console, message: str, verbosity: int = 1
-        ) -> None:
+        self: Self, console: Console, message: str, verbosity: int = 1
+    ) -> None:
         """Initialize the timer."""
         self.console = console
         self.message = message
@@ -26,8 +26,8 @@ class Timer(ContextDecorator):
         return self
 
     def __exit__(
-            self: Self, exc_type: None, exc_value: None, traceback: None
-        ) -> None:
+        self: Self, exc_type: None, exc_value: None, traceback: None
+    ) -> None:
         """Stop the timer and log the elapsed time."""
         elapsed_time = time.time() - self.start_time
         msg = (
@@ -43,9 +43,7 @@ class Timer(ContextDecorator):
                 f"{exc_type.__name__}: {exc_value}"
             )
             self.console.log(msg)
-            msg = (
-                f"[bold red]Traceback:[/bold red] {traceback}"
-            )
+            msg = f"[bold red]Traceback:[/bold red] {traceback}"
             self.console.log(msg)
 
 

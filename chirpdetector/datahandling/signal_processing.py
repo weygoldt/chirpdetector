@@ -202,6 +202,7 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     # make sure image is float32
     return normalized_tensor.float()
 
+
 # def compute_spectrogram_worker(
 #     args: Tuple[int, np.ndarray, float, int, int]
 # ) -> torch.Tensor:

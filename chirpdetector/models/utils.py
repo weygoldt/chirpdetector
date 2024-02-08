@@ -85,5 +85,3 @@ def collate_fn(batch: list) -> tuple:
         A tuple containing the images and the targets.
     """
     return tuple(zip(*batch))
-
-

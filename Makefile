@@ -1,7 +1,7 @@
 .PHONY: docs install clean
 
 # deploy docs to github pages
-docs: 
+docs:
 	mkdocs gh-deploy --force
 
 # install dependencies and package in editable mode

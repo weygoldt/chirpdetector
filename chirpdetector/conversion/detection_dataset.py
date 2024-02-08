@@ -5,8 +5,6 @@ import logging
 import pathlib
 import shutil
 from typing import List, Self
-from IPython import embed
-from uuid import uuid4
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -24,18 +22,16 @@ from rich.progress import (
     SpinnerColumn,
     TimeElapsedColumn,
 )
-
 from scipy.signal import find_peaks
+
 from chirpdetector.config import Config, load_config
 from chirpdetector.datahandling.bbox_tools import (
-    pixel_box_to_timefreq,
     reverse_float_index_interpolation,
 )
 from chirpdetector.datahandling.dataset_parsing import (
     ArrayParser,
     make_batch_specs,
 )
-from chirpdetector.detection.detect_chirps import convert_detections
 from chirpdetector.logging.logging import Timer, make_logger
 
 # Use non-gui backend for matplotlib to avoid memory leaks
@@ -155,7 +151,7 @@ def chirp_height_width_to_bbox(
             t_center = t_closest
             f_center = f_closest + height / 2
 
-            bbox_height = height 
+            bbox_height = height
             bbox_width = width + pad_time
 
             boxes.append(
@@ -196,12 +192,12 @@ def extract_assignment_training_data(
 
         # get the baseline EODf
         track = data.track.freqs[data.track.idents == fish_id]
-        track_times = data.track.times[data.track.indices[data.track.idents == fish_id]]
+        track_times = data.track.times[
+            data.track.indices[data.track.idents == fish_id]
+        ]
 
         # get the track values in the box
-        track = track[
-            (track_times >= box[0]) & (track_times <= box[2])
-        ]
+        track = track[(track_times >= box[0]) & (track_times <= box[2])]
         track_times = track_times[
             (track_times >= box[0]) & (track_times <= box[2])
         ]
@@ -211,28 +207,23 @@ def extract_assignment_training_data(
 
         # get the spectrogram window in box
         spec_window = spec[
-            :, (times >= box[0]) & (times <= box[2]),
+            :,
+            (times >= box[0]) & (times <= box[2]),
         ]
         spec_window = spec_window[
-            (freqs >= box[1]) & (freqs <= (box[3] - (box[3] - box[1])/2)), :
+            (freqs >= box[1]) & (freqs <= (box[3] - (box[3] - box[1]) / 2)), :
         ]
         window_freqs = freqs[
-            (freqs >= box[1]) & (freqs <= (box[3] - (box[3] - box[1])/2))
+            (freqs >= box[1]) & (freqs <= (box[3] - (box[3] - box[1]) / 2))
         ]
-        window_times = times[
-            (times >= box[0]) & (times <= box[2])
-        ]
+        window_times = times[(times >= box[0]) & (times <= box[2])]
 
         # interpolate the spec window and axes to 100x100
         res = 100
         spec_window = np.array(Image.fromarray(spec_window).resize((res, res)))
 
-        window_freqs = np.linspace(
-            window_freqs[0], window_freqs[-1], res
-        )
-        window_times = np.linspace(
-            window_times[0], window_times[-1], res
-        )
+        window_freqs = np.linspace(window_freqs[0], window_freqs[-1], res)
+        window_times = np.linspace(window_times[0], window_times[-1], res)
 
         # get the baseline EODfs in the window by finding peaks on the
         # power spectrum
@@ -240,7 +231,7 @@ def extract_assignment_training_data(
         # print(f"Spec window shape: {spec_window.shape}")
         power = np.mean(spec_window, axis=1)
         peaks = find_peaks(power, prominence=target_prom)[0]
-        
+
         # peak start and stop are either where the sign of the diff switches
         # or where the window is 10 Hz wide
         window_radius = 5
@@ -514,9 +505,9 @@ class Wavetracker2YOLOConverter:
             # import matplotlib as mpl
             # import matplotlib.pyplot as plt
             # mpl.use("TkAgg")
-            for i, (meta, spec, time, freq) in enumerate(zip(
-                batch_metadata, specs, times, freqs
-            )):
+            for i, (meta, spec, time, freq) in enumerate(
+                zip(batch_metadata, specs, times, freqs)
+            ):
                 # fig, ax = plt.subplots()
                 # ax.pcolormesh(time, freq, spec.cpu().numpy()[1])
                 # get the boxes for the current time and freq range
@@ -634,24 +625,32 @@ class Wavetracker2YOLOConverter:
                 )
                 img.save(self.img_path / filename)
 
-                dataframe = pd.DataFrame({
-                    "recording": [meta["recording"] for _ in range(len(boxes))],
-                    "batch": [meta["batch"] for _ in range(len(boxes))],
-                    "window": [meta["window"] for _ in range(len(boxes))],
-                    "spec": i,
-                    "box_ident": idents,
-                    "raw_indices": [meta["indices"] for _ in range(len(boxes))],
-                    "freq_range": [meta["frange"] for _ in range(len(boxes))],
-                    "x1": x1,
-                    "y1": y1,
-                    "x2": x2,
-                    "y2": y2,
-                    "t1": t1,
-                    "f1": f1,
-                    "t2": t2,
-                    "f2": f2,
-                    "score": np.ones(len(x1), dtype=int),
-                })
+                dataframe = pd.DataFrame(
+                    {
+                        "recording": [
+                            meta["recording"] for _ in range(len(boxes))
+                        ],
+                        "batch": [meta["batch"] for _ in range(len(boxes))],
+                        "window": [meta["window"] for _ in range(len(boxes))],
+                        "spec": i,
+                        "box_ident": idents,
+                        "raw_indices": [
+                            meta["indices"] for _ in range(len(boxes))
+                        ],
+                        "freq_range": [
+                            meta["frange"] for _ in range(len(boxes))
+                        ],
+                        "x1": x1,
+                        "y1": y1,
+                        "x2": x2,
+                        "y2": y2,
+                        "t1": t1,
+                        "f1": f1,
+                        "t2": t2,
+                        "f2": f2,
+                        "score": np.ones(len(x1), dtype=int),
+                    }
+                )
                 dataframes.append(dataframe)
 
             del specs

@@ -3,10 +3,9 @@
 import gc
 from abc import ABC, abstractmethod
 from typing import List, Self
-from torchvision.transforms import Resize
 
 import torch
- 
+from torchvision.transforms import Resize
 
 # TODO: Refactor the ABC to always get an input transform and an output transform
 # method and pass it the raw output from spectrogram computations.
@@ -83,7 +82,6 @@ class YOLOV8(AbstractDetectionModel):
 
     def predictor(self: Self, batch: List) -> List:
         """Predict boxes for a batch of spectrograms."""
-
         # Resize the spectrograms so that the longest side is 640 pixels
         newx = 640
         newy = int(batch[0].shape[1] * newx // batch[0].shape[2])
@@ -104,13 +102,12 @@ class YOLOV8(AbstractDetectionModel):
             batch[i] = resize(batch[i])
             print(batch[i].shape)
 
-
         # Add padding to y axis so that the spectrograms are 640x640
         print("PADDED")
         for i in range(len(batch)):
             batch[i] = torch.nn.functional.pad(
                 batch[i],
-                pad=(0, 0, newx-newy, 0),
+                pad=(0, 0, newx - newy, 0),
                 mode="constant",
                 value=0.5,
             )

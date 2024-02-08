@@ -16,8 +16,8 @@ from chirpdetector.conversion.detection_dataset import convert_cli
 from chirpdetector.datahandling.yolo_dataset_utils import (
     clean_yolo_dataset,
     merge_yolo_datasets,
-    subset_yolo_dataset,
     plot_yolo_dataset,
+    subset_yolo_dataset,
 )
 from chirpdetector.detection.detect_chirps import detect_cli
 from chirpdetector.models.faster_rcnn_detector.train import train_cli
@@ -215,6 +215,7 @@ def train(config_path: pathlib.Path, mode: str) -> None:
 def detect(path: pathlib.Path, make_training_data: bool) -> None:
     """Detect chirps on a spectrogram."""
     detect_cli(path, make_training_data)
+
 
 #
 # @chirpdetector.command()
@@ -418,6 +419,7 @@ def merge(
 ) -> None:
     """Merge two datasets."""
     merge_yolo_datasets(dataset1, dataset2, output)
+
 
 @datautils.command()
 @click.option(

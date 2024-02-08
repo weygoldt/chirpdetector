@@ -895,8 +895,7 @@ def detect_chirps(
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device).eval()
 
-    window_duration = (
-        conf.spec.time_window * conf.spec.batch_size)
+    window_duration = conf.spec.time_window * conf.spec.batch_size
     # ) - conf.spec.spec_overlap * (conf.spec.batch_size - 1)
 
     window_duration_samples = int(window_duration * data.grid.samplerate)

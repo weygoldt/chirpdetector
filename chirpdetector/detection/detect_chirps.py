@@ -5,15 +5,12 @@ import logging
 import pathlib
 from typing import List, Self
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 from gridtools.datasets import load
 from gridtools.datasets.models import Dataset
 from gridtools.preprocessing.preprocessing import interpolate_tracks
-from matplotlib.collections import PatchCollection
 from rich.progress import (
     MofNCompleteColumn,
     Progress,
@@ -39,16 +36,15 @@ from chirpdetector.detection.detection_models import (
     FasterRCNN,
 )
 from chirpdetector.detection.visualization_functions import (
+    plot_batch_detections,
     plot_raw_batch,
     plot_spec_tiling,
-    plot_batch_detections,
 )
 from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.models.faster_rcnn_detector import (
     load_finetuned_faster_rcnn,
 )
 from chirpdetector.models.utils import get_device
-
 
 # initialize the progress bar
 prog = Progress(
@@ -59,9 +55,11 @@ prog = Progress(
 )
 
 
-def assign_ffreqs_to_tracks(bbox_df: pd.DataFrame, data: Dataset) -> pd.DataFrame:
+def assign_ffreqs_to_tracks(
+    bbox_df: pd.DataFrame, data: Dataset
+) -> pd.DataFrame:
     """Assign a bounding box to a track."""
-    dist_threshold = 20 # Hz
+    dist_threshold = 20  # Hz
     assigned_tracks = []
     for i in range(len(bbox_df)):
         chirptime = (bbox_df["t1"].iloc[i] + bbox_df["t2"].iloc[i]) / 2
@@ -71,7 +69,9 @@ def assign_ffreqs_to_tracks(bbox_df: pd.DataFrame, data: Dataset) -> pd.DataFram
         candidate_freqs = []
         candidate_times = []
         for track_id in data.track.ids:
-            time = data.track.times[data.track.indices[data.track.idents == track_id]]
+            time = data.track.times[
+                data.track.indices[data.track.idents == track_id]
+            ]
             freq = data.track.freqs[data.track.idents == track_id]
             closest_time = time[np.argmin(np.abs(time - chirptime))]
             closest_freq = freq[np.argmin(np.abs(time - chirptime))]
@@ -122,11 +122,10 @@ def convert_detections(
     """
     dataframes = []
     for i in range(len(detections)):
-
         # get the boxes and scores for the current spectrogram
-        boxes = detections[i]["boxes"] # bbox coordinates in pixels
-        scores = detections[i]["scores"] # confidence scores
-        idents = bbox_ids[i] # unique ids for each bbox
+        boxes = detections[i]["boxes"]  # bbox coordinates in pixels
+        scores = detections[i]["scores"]  # confidence scores
+        idents = bbox_ids[i]  # unique ids for each bbox
         batch_spec_index = np.ones(len(boxes)) * i
 
         # discard boxes with low confidence
@@ -137,30 +136,36 @@ def convert_detections(
 
         # convert the boxes to time and frequency
         boxes_timefreq = pixel_box_to_timefreq(
-            boxes=boxes,
-            time=times[i],
-            freq=freqs[i]
+            boxes=boxes, time=times[i], freq=freqs[i]
         )
 
         # put it all into a large dataframe
-        dataframe = pd.DataFrame({
-            "recording": [metadata[i]["recording"] for _ in range(len(boxes))],
-            "batch": [metadata[i]["batch"] for _ in range(len(boxes))],
-            "window": [metadata[i]["window"] for _ in range(len(boxes))],
-            "spec": batch_spec_index,
-            "box_ident": idents,
-            "raw_indices": [metadata[i]["indices"] for _ in range(len(boxes))],
-            "freq_range": [metadata[i]["frange"] for _ in range(len(boxes))],
-            "x1": boxes[:, 0],
-            "y1": boxes[:, 1],
-            "x2": boxes[:, 2],
-            "y2": boxes[:, 3],
-            "t1": boxes_timefreq[:, 0],
-            "f1": boxes_timefreq[:, 1],
-            "t2": boxes_timefreq[:, 2],
-            "f2": boxes_timefreq[:, 3],
-            "score": scores
-        })
+        dataframe = pd.DataFrame(
+            {
+                "recording": [
+                    metadata[i]["recording"] for _ in range(len(boxes))
+                ],
+                "batch": [metadata[i]["batch"] for _ in range(len(boxes))],
+                "window": [metadata[i]["window"] for _ in range(len(boxes))],
+                "spec": batch_spec_index,
+                "box_ident": idents,
+                "raw_indices": [
+                    metadata[i]["indices"] for _ in range(len(boxes))
+                ],
+                "freq_range": [
+                    metadata[i]["frange"] for _ in range(len(boxes))
+                ],
+                "x1": boxes[:, 0],
+                "y1": boxes[:, 1],
+                "x2": boxes[:, 2],
+                "y2": boxes[:, 3],
+                "t1": boxes_timefreq[:, 0],
+                "f1": boxes_timefreq[:, 1],
+                "t2": boxes_timefreq[:, 2],
+                "f2": boxes_timefreq[:, 3],
+                "score": scores,
+            }
+        )
         dataframes.append(dataframe)
     out_df = pd.concat(dataframes)
     return out_df.reset_index(drop=True)
@@ -195,9 +200,7 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
     # Get the box predictor
     model = load_finetuned_faster_rcnn(config)
     model.to(get_device()).eval()
-    predictor = FasterRCNN(
-        model=model
-    )
+    predictor = FasterRCNN(model=model)
     # model = load_finetuned_yolov8(config)
     # predictor = YOLOV8(model=model)
 
@@ -238,7 +241,7 @@ class ChirpDetector:
         data: Dataset,
         detector: AbstractDetectionModel,
         assigner: AbstractBoxAssigner,
-        logger: logging.Logger
+        logger: logging.Logger,
     ) -> None:
         """Initialize the ChirpDetector.
 
@@ -269,7 +272,7 @@ class ChirpDetector:
             batchsize=cfg.spec.batch_size,
             windowsize=cfg.spec.time_window,
             overlap=cfg.spec.spec_overlap,
-            console=prog.console
+            console=prog.console,
         )
 
         msg = "Intialized ChirpDetector."
@@ -282,23 +285,25 @@ class ChirpDetector:
         dataframes = []
         bbox_counter = 0
         for i, batch_indices in enumerate(self.parser.batches):
-
             prog.console.rule(
                 f"[bold green]Batch {i} of {len(self.parser.batches)}"
             )
 
             # STEP 0: Create metadata for each batch
-            batch_metadata = [{
-                "recording": self.data.path.name,
-                "batch": i,
-                "window": j,
-                "indices": indices,
-                "frange": [],
-            } for j, indices in enumerate(batch_indices)]
+            batch_metadata = [
+                {
+                    "recording": self.data.path.name,
+                    "batch": i,
+                    "window": j,
+                    "indices": indices,
+                    "frange": [],
+                }
+                for j, indices in enumerate(batch_indices)
+            ]
 
             # STEP 1: Load the raw data as a batch
             batch_raw = [
-                np.array(self.data.grid.rec[idxs[0]:idxs[1], :])
+                np.array(self.data.grid.rec[idxs[0] : idxs[1], :])
                 for idxs in batch_indices
             ]
 
@@ -312,7 +317,7 @@ class ChirpDetector:
                     batch_metadata,
                     batch_raw,
                     self.data.grid.samplerate,
-                    self.cfg
+                    self.cfg,
                 )
 
             if i == 1:
@@ -337,8 +342,8 @@ class ChirpDetector:
                 # detections for each spec
                 split_ids = []
                 for prediction in predictions:
-                    sub_ids = bbox_ids[:len(prediction["boxes"])]
-                    bbox_ids = bbox_ids[len(prediction["boxes"]):]
+                    sub_ids = bbox_ids[: len(prediction["boxes"])]
+                    bbox_ids = bbox_ids[len(prediction["boxes"]) :]
                     split_ids.append(sub_ids)
 
                 batch_df = convert_detections(
@@ -347,7 +352,7 @@ class ChirpDetector:
                     batch_metadata,
                     times,
                     freqs,
-                    self.cfg
+                    self.cfg,
                 )
 
             # STEP 5: Remove overlapping boxes by non-maximum suppression
@@ -376,8 +381,7 @@ class ChirpDetector:
             # to the closest wavetracker track
             with Timer(prog.console, "Associate emitter frequency to tracks"):
                 assigned_batch_df = assign_ffreqs_to_tracks(
-                    assigned_batch_df,
-                    self.data
+                    assigned_batch_df, self.data
                 )
 
             # STEP 8: plot the detections
@@ -389,7 +393,7 @@ class ChirpDetector:
                 nms_batch_df,
                 assigned_batch_df,
                 self.data,
-                i
+                i,
             )
 
             dataframes.append(assigned_batch_df)
@@ -404,4 +408,3 @@ class ChirpDetector:
         dataframes = dataframes.sort_values(by=["t1"])
         savepath = self.data.path / "chirpdetector_bboxes.csv"
         dataframes.to_csv(savepath, index=False)
-
