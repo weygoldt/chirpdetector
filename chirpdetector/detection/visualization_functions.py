@@ -39,10 +39,13 @@ def plot_batch_detections(
     assigned_batch_df: pd.DataFrame,
     data: Dataset,
     batch_no: int,
-    ylims: str = 'full',
+    ylims: str = "full",
 ) -> None:
     """Plot the detections for each batch."""
-    assert ylims in ["full", "fit"], "Invalid ylims argument. Must be 'full' or 'fit'."
+    assert ylims in [
+        "full",
+        "fit",
+    ], "Invalid ylims argument. Must be 'full' or 'fit'."
     mpl.use(backend)
     if style is not None:
         plt.style.use(style)
@@ -69,10 +72,10 @@ def plot_batch_detections(
         "#17becf",
     ]
     track_colors = np.array(track_colors)[: len(data.track.ids)]
-    
+
     min_freq = np.inf
     max_freq = -np.inf
-    for j, track_id in enumerate(data.track.ids):
+    for j, track_id in enumerate(data.track.ids[~np.isnan(data.track.ids)]):
         track_freqs = data.track.freqs[data.track.idents == track_id]
         track_time = data.track.times[
             data.track.indices[data.track.idents == track_id]
@@ -195,9 +198,9 @@ def plot_batch_detections(
     ax.add_collection(PatchCollection(patches, match_original=True))
     ax.set_xlim(np.min(times), np.max(times))
 
-    if ylims == 'full':
+    if ylims == "full":
         ax.set_ylim(np.min(freqs), np.max(freqs))
-    if ylims == 'fit':
+    if ylims == "fit":
         ax.set_ylim(min_freq - 200, max_freq + 500)
 
     ax.set_xlabel("Time [s]")
@@ -211,9 +214,9 @@ def plot_batch_detections(
 
     savepath = pathlib.Path(f"{data.path}/plots")
     savepath.mkdir(exist_ok=True, parents=True)
-    if ylims == 'full':
+    if ylims == "full":
         plt.savefig(savepath / f"batch_{batch_no}_full.png", dpi=300)
-    if ylims == 'fit':
+    if ylims == "fit":
         plt.savefig(savepath / f"batch_{batch_no}_fit.png", dpi=300)
 
     plt.close()

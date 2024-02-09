@@ -340,7 +340,7 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
 
             emitter = torch.argmax(pred).item()
 
-            thresh = 0.0 # should be thresh at f1 score
+            thresh = 0.0  # should be thresh at f1 score
             if pred[emitter] < thresh:
                 # print("no emitter found")
                 assigned_eodfs.append(np.nan)

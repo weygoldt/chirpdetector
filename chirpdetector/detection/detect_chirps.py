@@ -68,7 +68,7 @@ def assign_ffreqs_to_tracks(
         candidate_tracks = []
         candidate_freqs = []
         candidate_times = []
-        for track_id in data.track.ids:
+        for track_id in data.track.ids[~np.isnan(data.track.ids)]:
             time = data.track.times[
                 data.track.indices[data.track.idents == track_id]
             ]
@@ -394,7 +394,7 @@ class ChirpDetector:
                 assigned_batch_df,
                 self.data,
                 i,
-                ylims='full',
+                ylims="full",
             )
 
             dataframes.append(assigned_batch_df)
