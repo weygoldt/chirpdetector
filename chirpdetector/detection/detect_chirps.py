@@ -394,6 +394,7 @@ class ChirpDetector:
                 assigned_batch_df,
                 self.data,
                 i,
+                ylims='full',
             )
 
             dataframes.append(assigned_batch_df)
