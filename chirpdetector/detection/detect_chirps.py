@@ -44,6 +44,7 @@ from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.models.faster_rcnn_detector import (
     load_finetuned_faster_rcnn,
 )
+from chirpdetector.models.mlp_assigner import load_trained_mlp
 from chirpdetector.models.utils import get_device
 
 # initialize the progress bar
@@ -198,14 +199,16 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
         raise FileNotFoundError(msg)
 
     # Get the box predictor
-    model = load_finetuned_faster_rcnn(config)
-    model.to(get_device()).eval()
-    predictor = FasterRCNN(model=model)
+    det_model = load_finetuned_faster_rcnn(config)
+    det_model.to(get_device()).eval()
+    predictor = FasterRCNN(model=det_model)
     # model = load_finetuned_yolov8(config)
     # predictor = YOLOV8(model=model)
 
     # get the box assigner
-    assigner = SpectrogramPowerTroughBoxAssignerMLP(config)
+    ass_model = load_trained_mlp(config)
+    ass_model.to(get_device()).eval()
+    assigner = SpectrogramPowerTroughBoxAssignerMLP(ass_model)
 
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))

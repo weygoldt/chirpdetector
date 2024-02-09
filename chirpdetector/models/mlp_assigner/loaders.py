@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from chirpdetector.config import Config
+from chirpdetector.models.utils import get_device
 
 model = nn.Sequential(
     nn.Linear(100, 64),
@@ -21,8 +22,10 @@ model = nn.Sequential(
 
 def load_trained_mlp(cfg: Config) -> nn.Module:
     """Load a trained multi layer perceptron assignment model."""
+    device = get_device()
     model.load_state_dict(
         torch.load(cfg.hyper.modelpath + "/assignment_mlp.pt")
     )
+    model.to(device)
     model.eval()
     return model

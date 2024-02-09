@@ -51,7 +51,9 @@ def plot_batch_detections(
         plt.style.use(style)
 
     cm = 1 / 2.54
-    figsize = (60 * cm, 30 * cm)
+    lenmult = 0.5
+    width = (np.max(times) - np.min(times)) * lenmult
+    figsize = (width * cm, 30 * cm)
     fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
 
     for i in range(len(specs)):
