@@ -5,9 +5,11 @@ must fulfill the following requirements:
 
 - The dataset is a single directory containing subdirectories for each single
   `.raw` or `.wav` file, i.e. for each recording.
-- Each raw recording file, i.e. the `.raw` or `.wav` file is named `traces_grid1.{file_ext}`.
+- Each raw recording file, i.e. the `.raw` or `.wav` file is named
+  `traces_grid1.{file_ext}`.
 - The fundamental frequencies of the fish in the recordings must be already
-  tracked using the [wavetracker](https://github.com/tillraab/wavetracker) project.
+  tracked using the [wavetracker](https://github.com/tillraab/wavetracker)
+  project.
 
 An example directory structure could look like the following:
 
