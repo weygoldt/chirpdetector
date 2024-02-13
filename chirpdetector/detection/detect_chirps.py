@@ -398,6 +398,7 @@ class ChirpDetector:
                 self.data,
                 i,
                 ylims="full",
+                interpolate=True,
             )
 
             dataframes.append(assigned_batch_df)
@@ -412,3 +413,18 @@ class ChirpDetector:
         dataframes = dataframes.sort_values(by=["t1"])
         savepath = self.data.path / "chirpdetector_bboxes.csv"
         dataframes.to_csv(savepath, index=False)
+
+        # save chirp times and identities as numpy files
+        chirp_times = dataframes["t1"] + ((dataframes["t2"] - dataframes["t1"]) / 2)
+        chirp_times = chirp_times.to_numpy()
+        chirp_ids = dataframes["track_id"].to_numpy()
+        print(np.shape(chirp_times))
+        print(np.shape(chirp_ids))
+
+        # drop unassigned
+        chirp_times = chirp_times[~np.isnan(chirp_ids)]
+        chirp_ids = chirp_ids[~np.isnan(chirp_ids)]
+
+        # save the arrays
+        np.save(self.data.path / "chirp_times_rcnn.npy", chirp_times)
+        np.save(self.data.path / "chirp_ids_rcnn.npy", chirp_ids)

@@ -11,6 +11,7 @@ from gridtools.datasets.models import Dataset
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
 from rich.console import Console
+from PIL import Image
 
 console = Console()
 
@@ -40,6 +41,7 @@ def plot_batch_detections(
     data: Dataset,
     batch_no: int,
     ylims: str = "full",
+    interpolate: bool = False,
 ) -> None:
     """Plot the detections for each batch."""
     assert ylims in [
@@ -51,14 +53,34 @@ def plot_batch_detections(
         plt.style.use(style)
 
     cm = 1 / 2.54
-    lenmult = 0.5
+    lenmult = 1
     width = (np.max(times) - np.min(times)) * lenmult
     figsize = (width * cm, 30 * cm)
     fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
 
     for i in range(len(specs)):
         spec = specs[i].cpu().numpy()
-        ax.pcolormesh(times[i], freqs[i], spec[0, :, :], cmap="magma")
+
+        # interpolate as it looks better
+        if interpolate:
+            factor = 5
+            x = np.linspace(times[i][0], times[i][-1], len(times[i]) * factor)
+            y = np.linspace(freqs[i][0], freqs[i][-1], len(freqs[i]) * factor)
+            img = Image.fromarray(spec[0, :, :])
+            img = img.resize((len(times[i]) * factor, len(freqs[i]) * factor))
+            spec = np.array(img)
+            ax.pcolormesh(
+                x,
+                y,
+                spec,
+                cmap="magma",
+                rasterized=True,
+            )
+            print(f"Interpolated dims: {spec.shape}")
+        else:
+            ax.pcolormesh(
+                times[i], freqs[i], spec[0, :, :], cmap="magma", rasterized=True
+            )
 
     # get nice ligth colors for the tracks
     track_colors = [
@@ -205,21 +227,22 @@ def plot_batch_detections(
     if ylims == "fit":
         ax.set_ylim(min_freq - 200, max_freq + 500)
 
-    ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Frequency [Hz]")
+    ax.set_xlabel("Time [s]", fontsize=16)
+    ax.set_ylabel("Frequency [Hz]", fontsize=16)
     ax.legend(
         bbox_to_anchor=(0, 1.02, 1, 0.2),
         loc="lower left",
         borderaxespad=0,
         ncol=2,
+        fontsize=16,
     )
 
     savepath = pathlib.Path(f"{data.path}/plots")
     savepath.mkdir(exist_ok=True, parents=True)
     if ylims == "full":
-        plt.savefig(savepath / f"batch_{batch_no}_full.png", dpi=300)
+        plt.savefig(savepath / f"batch_{batch_no}_full.svg", dpi=300)
     if ylims == "fit":
-        plt.savefig(savepath / f"batch_{batch_no}_fit.png", dpi=300)
+        plt.savefig(savepath / f"batch_{batch_no}_fit.svg", dpi=300)
 
     plt.close()
 
