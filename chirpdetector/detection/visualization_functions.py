@@ -298,7 +298,7 @@ def plot_spec_tiling(specs, times, freqs):
     _, ax = plt.subplots()
     for j, (spec, time, freq) in enumerate(zip(specs, times, freqs)):
         spec = spec.cpu().numpy()
-        ax.pcolormesh(time, freq, spec[0])
+        ax.pcolormesh(time, freq, spec[0], rasterized=True)
         if j in [0, 3, 5, 7, 10, 11]:
             ax.add_patch(
                 Rectangle(
@@ -316,5 +316,5 @@ def plot_spec_tiling(specs, times, freqs):
     ax.set_ylim(np.min(freqs), np.max(freqs))
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Frequency [Hz]")
-    plt.savefig("/home/weygoldt/Projects/mscthesis/plots/spec_tiling.png")
+    plt.savefig("/home/weygoldt/Projects/mscthesis/plots/spec_tiling.svg")
     plt.close("all")
