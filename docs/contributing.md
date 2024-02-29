@@ -35,11 +35,10 @@ After the first release, this section will be removed an tasks will be
 organized as github issues. Until them, if you fixed something, please check it
 off on this list before opening a pull request.
 
-- [ ] Implement detector class that works with the trained yolov8
-- [ ] Convert all subsets to training dataset, fix annotations, build larger simulated dataset
 - [ ] Rethink the output: Needs to be a HDF5 file that not only includes 
       chirp time and ID but also the full chirp spectrograms so that 
       we can later cluster them nicely.
+- [ ] Convert all subsets to training dataset, fix annotations, build larger simulated dataset
 - [ ] Move the waveform preprocessing stuff into a nn.module as suggested by  
   the torchaudio docs here: https://pytorch.org/audio/main/transforms.html
 - [ ] Write data dumping for main loop
@@ -54,6 +53,7 @@ off on this list before opening a pull request.
 - [ ] Split the messy training loop into functions.
 - [ ] Remove all pyright warnings.
 - [ ] Build github actions CI/CD pipeline for codecov etc.
+- [x] Implement detector class that works with the trained yolov8
 - [x] Write an assingment benchmarking
 - [x] Try a small NN, might work better than the random forest in this case
 - [x] Give each chirp in df its own ID

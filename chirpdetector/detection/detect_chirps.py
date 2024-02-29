@@ -33,7 +33,7 @@ from chirpdetector.detection.assignment_models import (
 )
 from chirpdetector.detection.detection_models import (
     AbstractDetectionModel,
-    FasterRCNN,
+    YOLOv8,
 )
 from chirpdetector.detection.visualization_functions import (
     plot_batch_detections,
@@ -41,11 +41,9 @@ from chirpdetector.detection.visualization_functions import (
     plot_spec_tiling,
 )
 from chirpdetector.logging.logging import Timer, make_logger
-from chirpdetector.models.faster_rcnn_detector import (
-    load_finetuned_faster_rcnn,
-)
 from chirpdetector.models.mlp_assigner import load_trained_mlp
 from chirpdetector.models.utils import get_device
+from chirpdetector.models.yolov8_detector import load_finetuned_yolov8
 
 # initialize the progress bar
 prog = Progress(
@@ -199,11 +197,13 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
         raise FileNotFoundError(msg)
 
     # Get the box predictor
-    det_model = load_finetuned_faster_rcnn(config)
-    det_model.to(get_device()).eval()
-    predictor = FasterRCNN(model=det_model)
-    # model = load_finetuned_yolov8(config)
-    # predictor = YOLOV8(model=model)
+    # det_model = load_finetuned_faster_rcnn(config)
+    # det_model.to(get_device()).eval()
+    # predictor = FasterRCNN(model=det_model)
+    model = load_finetuned_yolov8(config)
+    # exit()
+    # model.to(get_device()).eval()
+    predictor = YOLOv8(model=model)
 
     # get the box assigner
     ass_model = load_trained_mlp(config)
@@ -328,7 +328,7 @@ class ChirpDetector:
 
             # STEP 3: Predict boxes for each spectrogram
             with Timer(prog.console, "Detect chirps"):
-                predictions = self.detector.predict(specs)
+                predictions = self.detector.predict(specs.copy())
 
             # STEP 4: Convert pixel values to time and frequency
             # and save everything in a dataframe
@@ -398,7 +398,7 @@ class ChirpDetector:
                 self.data,
                 i,
                 ylims="full",
-                interpolate=True,
+                interpolate=False,
             )
 
             dataframes.append(assigned_batch_df)
@@ -415,11 +415,13 @@ class ChirpDetector:
         dataframes.to_csv(savepath, index=False)
 
         # save chirp times and identities as numpy files
-        chirp_times = dataframes["t1"] + ((dataframes["t2"] - dataframes["t1"]) / 2)
+        chirp_times = dataframes["t1"] + (
+            (dataframes["t2"] - dataframes["t1"]) / 2
+        )
         chirp_times = chirp_times.to_numpy()
         chirp_ids = dataframes["track_id"].to_numpy()
-        print(np.shape(chirp_times))
-        print(np.shape(chirp_ids))
+        # print(np.shape(chirp_times))
+        # print(np.shape(chirp_ids))
 
         # drop unassigned
         chirp_times = chirp_times[~np.isnan(chirp_ids)]

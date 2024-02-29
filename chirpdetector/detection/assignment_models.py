@@ -9,11 +9,9 @@ import torch
 from gridtools.datasets.models import Dataset
 from PIL import Image
 from scipy.signal import find_peaks
-
-from chirpdetector.config import Config
-from chirpdetector.models.mlp_assigner import load_trained_mlp
-from chirpdetector.models.utils import get_device
 from torch import nn
+
+from chirpdetector.models.utils import get_device
 
 
 class AbstractBoxAssigner(ABC):
@@ -208,6 +206,7 @@ class AbstractBoxAssigner(ABC):
 #         return batch_detections
 #
 
+
 class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
     """Assign boxes to tracks based on power troughs on spectrograms.
 
@@ -351,7 +350,7 @@ class SpectrogramPowerTroughBoxAssignerMLP(AbstractBoxAssigner):
             # turn into 1d array
             while len(pred.shape) > 1:
                 pred = pred.flatten()
-            
+
             emitter = np.argmax(pred).item()
 
             thresh = 0.0  # should be thresh at f1 score

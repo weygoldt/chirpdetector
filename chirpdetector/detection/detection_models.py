@@ -77,69 +77,116 @@ class FasterRCNN(AbstractDetectionModel):
         return output
 
 
-class YOLOV8(AbstractDetectionModel):
+class YOLOv8(AbstractDetectionModel):
     """Wrapper for the YOLOv8 model."""
 
     def predictor(self: Self, batch: List) -> List:
         """Predict boxes for a batch of spectrograms."""
+        orig_batch = batch.copy()
+        oldx = batch[0].shape[2]
+        oldy = batch[0].shape[1]
+
         # Resize the spectrograms so that the longest side is 640 pixels
-        newx = 640
+        newx = 800
         newy = int(batch[0].shape[1] * newx // batch[0].shape[2])
 
         # vertically mirror the spectrograms
         for i in range(len(batch)):
             batch[i] = torch.flip(batch[i], [1])
 
-        print("ORIGINAL")
-        for i in range(len(batch)):
-            print(batch[i].shape)
+        # print("ORIGINAL")
+        # for i in range(len(batch)):
+        #     print(batch[i].shape)
 
-        print(newx, newy)
+        # print(newx, newy)
 
-        print("RESIZED")
+        # print("RESIZED")
         resize = Resize((newy, newx))
         for i in range(len(batch)):
             batch[i] = resize(batch[i])
-            print(batch[i].shape)
+            # print(batch[i].shape)
 
-        # Add padding to y axis so that the spectrograms are 640x640
-        print("PADDED")
+        # Add padding to y axis so that the spectrograms are newx x newx
+        # print("PADDED")
         for i in range(len(batch)):
             batch[i] = torch.nn.functional.pad(
                 batch[i],
-                pad=(0, 0, newx - newy, 0),
+                # pad=(0, 0, newx - newy, 0),
+                pad=(0, 0, 0, newx - newy),
                 mode="constant",
                 value=0.5,
             )
-            print(batch[i].shape)
+            # print(batch[i].shape)
 
         # convert list of tensors to tensor
         batch = torch.stack(batch)
 
-        return self.model(batch, save=True)
+        model_output = self.model(batch, save=False)
 
-    def convert_to_standard_format(self: Self, model_output: List) -> List:
-        """Convert the model output to a standardized format."""
-        output = []
+        transformed_model_output = []
         for i in range(len(model_output)):
             boxes = model_output[i].boxes.xyxy.detach().cpu().numpy()
             labels = model_output[i].boxes.cls.detach().cpu().numpy()
             scores = model_output[i].boxes.conf.detach().cpu().numpy()
 
+            # print("BOXES")
+            # print(boxes)
+            # print("LABELS")
+            # print(labels)
+            # print("SCORES")
+            # print(scores)
+
             # flip the boxes back so that y(0,0) is the bottom left corner
-            boxes[:, 1] = 640 - boxes[:, 1]
-            boxes[:, 3] = 640 - boxes[:, 3]
+            boxes[:, 1] = newy - boxes[:, 1]
+            boxes[:, 3] = newy - boxes[:, 3]
             boxes[:, [1, 3]] = boxes[:, [3, 1]]
 
-            # truncate y axis where padding was added
+            # scale the boxes back to the original size
+            boxes[:, 0] = boxes[:, 0] * oldx / newx
+            boxes[:, 2] = boxes[:, 2] * oldx / newx
+            boxes[:, 1] = boxes[:, 1] * oldy / newy
+            boxes[:, 3] = boxes[:, 3] * oldy / newy
 
-            print(boxes)
-            print(labels)
-            print(scores)
-            exit()
+            # truncate the boxes to the original size
+            boxes[:, 0] = boxes[:, 0].clip(0, oldx)
+            boxes[:, 2] = boxes[:, 2].clip(0, oldx)
+            boxes[:, 1] = boxes[:, 1].clip(0, oldy)
+            boxes[:, 3] = boxes[:, 3].clip(0, oldy)
 
-            boxes = boxes[labels == 1]
-            scores = scores[labels == 1]
+            # print("FLIPPED BOXES")
+            # print(boxes)
+
+            # plot the boxes
+            # mpl.use("TkAgg")
+            # fig, ax = plt.subplots()
+            # ax.imshow(orig_batch[i].detach().cpu().numpy().squeeze()[0, :, :], cmap="magma")
+            # for j in range(len(boxes)):
+            #     box = boxes[j]
+            #     rect = mpl.patches.Rectangle(
+            #         (box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor="r", facecolor="none"
+            #     )
+            #     ax.add_patch(rect)
+            # plt.show()
+            # exit()
+
+            output = {
+                "boxes": boxes,
+                "scores": scores,
+                "labels": labels,
+            }
+            transformed_model_output.append(output)
+        return transformed_model_output
+
+    def convert_to_standard_format(self: Self, model_output: List) -> List:
+        """Convert the model output to a standardized format."""
+        output = []
+        for i in range(len(model_output)):
+            boxes = model_output[i]["boxes"]
+            scores = model_output[i]["scores"]
+            labels = model_output[i]["labels"]
+
+            boxes = boxes[labels == 0]
+            scores = scores[labels == 0]
             output.append(
                 {
                     "boxes": boxes,

@@ -33,5 +33,18 @@ analyzes this signal in isolated individuals. This is **not** good.
 ## The Solution
 
 To tackle this isse, this package provides a simple tool to detect chirps of
-multiple fish on spectrogram images. This enables true quantitative analyses of
-chirping between freely interacting fish for the first time.
+multiple fish. Todo so, it uses GPU-accelerated spectrogram computation and
+deep neural networks to detect chirps in the spectrogram. The package is
+designed to be easy to use and to be integrated into existing data analysis
+pipelines. Have fun detecting chirps!
+
+## Features
+
+- 🐟 **Detect chirps** of multiple fish in a recording
+- 🧠 **Deep learning** based approach
+- 🚀 **Interchangeable and extendable** object detectin backends
+- ⚡ **GPU-accelerated** spectrogram computation
+- 📦 **Easy to use** and integrate into existing data analysis pipelines
+- 📚 **Well-documented** and **tested**
+- 🌐 **Cross-platform** support
+- 🎉 **Open-source** and **free**

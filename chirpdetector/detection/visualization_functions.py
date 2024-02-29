@@ -10,8 +10,8 @@ import pandas as pd
 from gridtools.datasets.models import Dataset
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
-from rich.console import Console
 from PIL import Image
+from rich.console import Console
 
 console = Console()
 
@@ -76,10 +76,14 @@ def plot_batch_detections(
                 cmap="magma",
                 rasterized=True,
             )
-            print(f"Interpolated dims: {spec.shape}")
+            # print(f"Interpolated dims: {spec.shape}")
         else:
             ax.pcolormesh(
-                times[i], freqs[i], spec[0, :, :], cmap="magma", rasterized=True
+                times[i],
+                freqs[i],
+                spec[0, :, :],
+                cmap="magma",
+                rasterized=True,
             )
 
     # get nice ligth colors for the tracks
@@ -222,11 +226,6 @@ def plot_batch_detections(
     ax.add_collection(PatchCollection(patches, match_original=True))
     ax.set_xlim(np.min(times), np.max(times))
 
-    if ylims == "full":
-        ax.set_ylim(np.min(freqs), np.max(freqs))
-    if ylims == "fit":
-        ax.set_ylim(min_freq - 200, max_freq + 500)
-
     ax.set_xlabel("Time [s]", fontsize=16)
     ax.set_ylabel("Frequency [Hz]", fontsize=16)
     ax.legend(
@@ -239,10 +238,13 @@ def plot_batch_detections(
 
     savepath = pathlib.Path(f"{data.path}/plots")
     savepath.mkdir(exist_ok=True, parents=True)
+
     if ylims == "full":
-        plt.savefig(savepath / f"batch_{batch_no}_full.svg", dpi=300)
+        ax.set_ylim(np.min(freqs), np.max(freqs))
+        plt.savefig(savepath / f"batch_{batch_no}_full.png", dpi=300)
     if ylims == "fit":
-        plt.savefig(savepath / f"batch_{batch_no}_fit.svg", dpi=300)
+        ax.set_ylim(min_freq - 200, max_freq + 500)
+        plt.savefig(savepath / f"batch_{batch_no}_fit.png", dpi=300)
 
     plt.close()
 
