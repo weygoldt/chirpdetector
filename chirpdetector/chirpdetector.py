@@ -12,7 +12,7 @@ import toml
 from chirpdetector.config import copy_config
 
 # from chirpdetector.conversion.convert_data import convert_cli
-from chirpdetector.conversion.detection_dataset import convert_cli
+from chirpdetector.datahandling.convert_to_training_data import convert_cli
 from chirpdetector.datahandling.yolo_dataset_utils import (
     clean_yolo_dataset,
     merge_yolo_datasets,

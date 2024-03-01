@@ -44,7 +44,8 @@ from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.models.mlp_assigner import load_trained_mlp
 from chirpdetector.models.utils import get_device
 from chirpdetector.models.yolov8_detector import load_finetuned_yolov8
-from chirpdetector.datahandling import ChirpDataset, ChirpDatasetSaver
+from chirpdetector.datahandling.output_data_model import ChirpDataset, ChirpDatasetSaver
+
 
 # initialize the progress bar
 prog = Progress(
@@ -53,6 +54,77 @@ prog = Progress(
     MofNCompleteColumn(),
     TimeElapsedColumn(),
 )
+
+def extract_spec_snippets(specs, times, freqs, batch_df):
+    """Extract the spectrogram snippet for each bbox."""
+    spec_snippets = []
+    time_snippets = []
+    freq_snippets = []
+    # import matplotlib.pyplot as plt
+    # import matplotlib as mpl
+    for i in range(len(batch_df)):
+        # get bbox
+        t1 = batch_df["t1"].iloc[i]
+        t2 = batch_df["t2"].iloc[i]
+        f1 = batch_df["f1"].iloc[i]
+        f2 = batch_df["f2"].iloc[i]
+        batch_spec_idx = batch_df["spec"].iloc[i]
+        batch_spec_idx = int(batch_spec_idx)
+
+        # get the spec
+        spec = specs[batch_spec_idx][0, :, :]
+        time = times[batch_spec_idx]
+        freq = freqs[batch_spec_idx]
+
+        # get snippet indices
+        t1_idx = np.argmin(np.abs(time - t1))
+        t2_idx = np.argmin(np.abs(time - t2))
+        f1_idx = np.argmin(np.abs(freq - f1))
+        f2_idx = np.argmin(np.abs(freq - f2))
+
+        # extract snippet
+        spec_snippet = spec[f1_idx:f2_idx, t1_idx:t2_idx]
+        time_snippet = time[t1_idx:t2_idx]
+        freq_snippet = freq[f1_idx:f2_idx]
+
+        # mpl.use("TkAgg")
+        # plt.imshow(spec.cpu().numpy(), aspect="auto", origin="lower", extent=[time[0], time[-1], freq[0], freq[-1]])
+        # plt.plot([t1, t2, t2, t1, t1], [f1, f1, f2, f2, f1], "r-")
+        # plt.show()
+        #
+        # plt.imshow(spec_snippet.cpu().numpy(), aspect="auto", origin="lower", extent=[time_snippet[0], time_snippet[-1], freq_snippet[0], freq_snippet[-1]])
+        # plt.plot([t1, t2, t2, t1, t1], [f1, f1, f2, f2, f1], "r-")
+        # plt.show()
+
+        spec_snippets.append(spec_snippet)
+        time_snippets.append(time_snippet)
+        freq_snippets.append(freq_snippet)
+
+    return spec_snippets, time_snippets, freq_snippets
+
+
+def resize_spec_snippets(spec_snippets, time_snippets, freq_snippets, size):
+    """Resize the spectrogram snippets to the same size."""
+    resized_specs = []
+    resized_times = []
+    resized_freqs = []
+    orig_sizes = []
+    for i in range(len(spec_snippets)):
+        spec = spec_snippets[i]
+        time = time_snippets[i]
+        freq = freq_snippets[i]
+        orig_sizes.append(spec.shape)
+
+        # resize the spec
+        spec = spec.resize((size, size))
+        time = np.linspace(time[0], time[-1], size)
+        freq = np.linspace(freq[0], freq[-1], size)
+
+        resized_specs.append(spec)
+        resized_times.append(time)
+        resized_freqs.append(freq)
+
+    return resized_specs, resized_times, resized_freqs
 
 
 def assign_ffreqs_to_tracks(
@@ -393,6 +465,15 @@ class ChirpDetector:
                 assigned_batch_df = assign_ffreqs_to_tracks(
                     assigned_batch_df, self.data
                 )
+
+            spec_snippets, time_snippets, freq_snippets = extract_spec_snippets(
+                specs, times, freqs, assigned_batch_df
+            )
+
+            # TODO: Move shape to config
+            spec_snippets, time_snippets, freq_snippets, orig_shapes = resize_spec_snippets(
+                spec_snippets, time_snippets, freq_snippets, 256
+            )
 
             # STEP 8: plot the detections
             plot_batch_detections(
