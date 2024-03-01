@@ -44,6 +44,7 @@ from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.models.mlp_assigner import load_trained_mlp
 from chirpdetector.models.utils import get_device
 from chirpdetector.models.yolov8_detector import load_finetuned_yolov8
+from chirpdetector.datahandling import ChirpDataset, ChirpDatasetSaver
 
 # initialize the progress bar
 prog = Progress(
@@ -217,6 +218,12 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
             prog.console.log(f"Detecting chirps in {dataset.name}")
             data = load(dataset)
             data = interpolate_tracks(data, samplerate=120)
+            chirpfile = input_path / dataset.name / "chirps.h5"
+
+            # delete chirpfile from previous runs
+            if chirpfile.exists():
+                chirpfile.unlink()
+
             cpd = ChirpDetector(
                 cfg=config,
                 data=data,
@@ -362,7 +369,7 @@ class ChirpDetector:
             with Timer(prog.console, "Non-maximum suppression"):
                 good_box_indices = dataframe_nms(
                     batch_df,
-                    overlapthresh=0.2,
+                    overlapthresh=0.2, #TODO: Move into config
                 )
                 nms_batch_df = batch_df.iloc[good_box_indices]
 
@@ -400,6 +407,9 @@ class ChirpDetector:
                 ylims="full",
                 interpolate=False,
             )
+
+            #TODO: Add function here that extracts chirp spec snippets, makes chirp dataset
+            # and saves it to disk with h5py
 
             dataframes.append(assigned_batch_df)
             del specs

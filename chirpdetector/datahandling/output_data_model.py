@@ -7,14 +7,13 @@ deserialize the output data model to and from HDF5 files.
 """
 
 import pathlib
-from typing import Self
+from typing import Self, Union
 import h5py
 import numpy as np
 from numpy import typing as npt
 import pandas as pd
 from pydantic import BaseModel
 from dataclasses import dataclass
-
 
 class ChirpDataset:
     """
@@ -140,6 +139,11 @@ class ChirpDataset:
         """Return a string representation of the object."""
         return f"ChirpDataset({self.recording})"
 
+    def _check_health(self: Self) -> None:
+        """Check the health of the object."""
+        #TODO: Implement this method
+        pass
+
 
 class ChirpDatasetSaver:
     """Methods to handle saving of the ChirpDataset object to disk."""
@@ -161,7 +165,9 @@ class ChirpDatasetSaver:
         # Check if a chirps.h5 file exists
         chirps_h5 = self.path / "chirps.h5"
         if chirps_h5.exists():
-            pass
+            self._append_h5()
+        else:
+            self._init_h5()
 
     def _init_h5(self: Self) -> None:
         """Initialize the HDF5 file."""
@@ -284,70 +290,66 @@ class ChirpDatasetSaver:
             )
             f.close()
 
-    def _append_h5(self: Self, path: pathlib.Path) -> None:
+    def _append_h5(self: Self) -> None:
         """Append the ChirpDataset object to an existing HDF5 file."""
         # open the HDF5 file
-        with h5py.File(path / "chirps.h5", "a") as f:
+        with h5py.File(self.path / "chirps.h5", "a") as f:
             # append the data
-            f["spectrogram_batch"].resize(
-                (
-                    f["spectrogram_batch"].shape[0]
-                    + self.chirp_dataset.spectrogram_batch.shape[0]
-                ),
-                axis=0,
+            resize_append(
+                f["spectrogram_batch"], self.chirp_dataset.spectrogram_batch
             )
-            f["spectrogram_batch"][
-                -self.chirp_dataset.spectrogram_batch.shape[0] :
-            ] = self.chirp_dataset.spectrogram_batch
+            resize_append(
+                f["waveform_indices"], self.chirp_dataset.waveform_indices
+            )
+            resize_append(
+                f["spectrogram_batch_index"],
+                self.chirp_dataset.spectrogram_batch_index,
+            )
+            resize_append(
+                f["spectrogram_window"], self.chirp_dataset.spectrogram_window
+            )
+            resize_append(
+                f["spectrogram_frequency_range"],
+                self.chirp_dataset.spectrogram_frequency_range,
+            )
+            resize_append(f["bbox_id"], self.chirp_dataset.bbox_id)
+            resize_append(f["bbox_xyxy"], self.chirp_dataset.bbox_xyxy)
+            resize_append(f["bbox_ftft"], self.chirp_dataset.bbox_ftft)
+            resize_append(
+                f["bbox_confidence"], self.chirp_dataset.bbox_confidence
+            )
+            resize_append(
+                f["bbox_spec_powers"], self.chirp_dataset.bbox_spec_powers
+            )
+            resize_append(
+                f["bbox_spec_times"], self.chirp_dataset.bbox_spec_times
+            )
+            resize_append(
+                f["bbox_spec_freqs"], self.chirp_dataset.bbox_spec_freqs
+            )
+            resize_append(
+                f["bbox_spec_orig_shape"],
+                self.chirp_dataset.bbox_spec_orig_shape,
+            )
+            resize_append(
+                f["assigned_emitter_eodf"],
+                self.chirp_dataset.assigned_emitter_eodf,
+            )
+            resize_append(
+                f["assigned_emitter_id"],
+                self.chirp_dataset.assigned_emitter_id,
+            )
+            f.close()
 
-            f["waveform_indices"].resize(
-                (
-                    f["waveform_indices"].shape[0]
-                    + self.chirp_dataset.waveform_indices.shape[0]
-                ),
-                axis=0,
-            )
-            f["waveform_indices"][
-                -self.chirp_dataset.waveform_indices.shape[0] :
-            ] = self.chirp_dataset.waveform_indices
 
-            f["spectrogram_batch_index"].resize(
-                (
-                    f["spectrogram_batch_index"].shape[0]
-                    + self.chirp_dataset.spectrogram_batch_index.shape[0]
-                ),
-                axis=0,
-            )
-            f["spectrogram_batch_index"][
-                -self.chirp_dataset.spectrogram_batch_index.shape[0] :
-            ] = self.chirp_dataset.spectrogram_batch_index
+def resize_append(h5_dataset: h5py.Dataset, data: npt.NDArray) -> None:
+    """Resize and append a numpy array to an h5py dataset."""
+    if not isinstance(h5_dataset, h5py.Dataset):
+        msg = "The first argument must be an h5py dataset."
+        raise TypeError(msg)
+    if not isinstance(data, np.ndarray):
+        msg = "The second argument must be a numpy array."
+        raise TypeError(msg)
 
-            f["spectrogram_window"].resize(
-                (
-                    f["spectrogram_window"].shape[0]
-                    + self.chirp_dataset.spectrogram_window.shape[0]
-                ),
-                axis=0,
-            )
-            f["spectrogram_window"][
-                -self.chirp_dataset.spectrogram_window.shape[0] :
-            ] = self.chirp_dataset.spectrogram_window
-
-            f["spectrogram_frequency_range"].resize(
-                (
-                    f["spectrogram_frequency_range"].shape[0]
-                    + self.chirp_dataset.spectrogram_frequency_range.shape[0]
-                ),
-                axis=0,
-            )
-            f["spectrogram_frequency_range"][
-                -self.chirp_dataset.spectrogram_frequency_range.shape[0] :
-            ] = self.chirp_dataset.spectrogram_frequency_range
-
-            f["bbox_id"].resize(
-                (f["bbox_id"].shape[0] + self.chirp_dataset.bbox_id.shape[0]),
-                axis=0,
-            )
-            f["bbox_id"][
-                -self.chirp_dataset.bbox_id.shape[0] :
-            ] = self.chirp_dataset.bbox_id
+    h5_dataset.resize((h5_dataset.shape[0] + data.shape[0]), axis=0)
+    h5_dataset[-data.shape[0] :] = data
