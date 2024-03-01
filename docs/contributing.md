@@ -35,9 +35,11 @@ After the first release, this section will be removed an tasks will be
 organized as github issues. Until them, if you fixed something, please check it
 off on this list before opening a pull request.
 
+- [ ] Move all dataframe operations to cudf
 - [ ] Rethink the output: Needs to be a HDF5 file that not only includes 
       chirp time and ID but also the full chirp spectrograms so that 
       we can later cluster them nicely.
+- [ ] Clean up training data converter, remove deprecated modules
 - [ ] Convert all subsets to training dataset, fix annotations, build larger simulated dataset
 - [ ] Move the waveform preprocessing stuff into a nn.module as suggested by  
   the torchaudio docs here: https://pytorch.org/audio/main/transforms.html

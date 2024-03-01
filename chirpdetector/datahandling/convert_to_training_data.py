@@ -1,4 +1,9 @@
-"""Detect chirps on a spectrogram."""
+"""
+Convert a dataset with or without already detected chirps to training data.
+
+... meaning: .png images of spectrograms. If chirp ids are known, it also
+genereates the assignment training dataset for the multilayer perceptron.
+"""
 
 import gc
 import logging
@@ -50,6 +55,8 @@ try:
     darkbg = "/home/weygoldt/Projects/mscthesis/src/light_background.mplstyle"
     plt.style.use([base, darkbg])
 except FileNotFoundError:
+    msg = "Could not find the coustom matplotlib style, freestyling."
+    prog.console.log(msg)
     pass
 
 
