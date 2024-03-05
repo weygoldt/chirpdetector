@@ -38,13 +38,14 @@ deep neural networks to detect chirps in the spectrogram. The package is
 designed to be easy to use and to be integrated into existing data analysis
 pipelines. Have fun detecting chirps!
 
-## Features
+## How it Works
 
-- 🐟 **Detect chirps** of multiple fish in a recording
-- 🧠 **Deep learning** based approach
-- 🚀 **Interchangeable and extendable** object detectin backends
-- ⚡ **GPU-accelerated** spectrogram computation
-- 📦 **Easy to use** and integrate into existing data analysis pipelines
-- 📚 **Well-documented** and **tested**
-- 🌐 **Cross-platform** support
-- 🎉 **Open-source** and **free**
+The following flowchart illustrates the basic worklow of the pipeline.
+It consists of two main steps: 
+1. Chirp detection: The raw audio data is transformed into a spectrogram and
+   then fed into a deep neural network to detect chirps.
+2. Chirp assignment: Based on power spectral densities of the frequency components
+of a single chirp, the detected chirps are assigned to individual fish.
+
+![Flowchart](assets/chirpdetector_pipeline.png)
+
