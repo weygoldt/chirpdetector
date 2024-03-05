@@ -78,7 +78,7 @@ class FasterRCNN(AbstractDetectionModel):
 
 
 class YOLOv8(AbstractDetectionModel):
-    """Wrapper for the YOLOv8 model."""
+    """Wrapper for the YOLOv model from ultralytics."""
 
     def predictor(self: Self, batch: List) -> List:
         """Predict boxes for a batch of spectrograms."""
@@ -121,7 +121,7 @@ class YOLOv8(AbstractDetectionModel):
         # convert list of tensors to tensor
         batch = torch.stack(batch)
 
-        model_output = self.model(batch, save=False)
+        model_output = self.model.predict(batch, save=False)
 
         transformed_model_output = []
         for i in range(len(model_output)):

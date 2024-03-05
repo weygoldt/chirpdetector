@@ -156,12 +156,7 @@ def convert(
     Convert wavetracker dataset to labeled or unlabeled
     spectrogram images to train the model.
     """
-    convert_cli(
-        input_path,
-        output_path,
-        # output_path,
-        # labels
-    )
+    convert_cli(input_path, output_path, labels)
 
 
 @chirpdetector.command()

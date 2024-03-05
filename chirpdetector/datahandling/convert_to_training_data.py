@@ -365,7 +365,9 @@ def extract_assignment_training_data(
     return x, y
 
 
-def convert_cli(input_path: pathlib.Path, output_path: pathlib.Path) -> None:
+def convert_cli(
+    input_path: pathlib.Path, output_path: pathlib.Path, mode: str
+) -> None:
     """Terminal interface for the detection function.
 
     Parameters
@@ -409,6 +411,7 @@ def convert_cli(input_path: pathlib.Path, output_path: pathlib.Path) -> None:
                 data=data,
                 output_path=output_path,
                 logger=logger,
+                mode=mode,
             )
             cpd.convert()
 
@@ -429,6 +432,7 @@ class Wavetracker2YOLOConverter:
         cfg: Config,
         data: Dataset,
         output_path: pathlib.Path,
+        mode: str,
         logger: logging.Logger,
     ) -> None:
         """Initialize the converter.
@@ -446,10 +450,19 @@ class Wavetracker2YOLOConverter:
         self.cfg = cfg
         self.data = data
         self.logger = logger
-        self.bbox_df = chirp_height_width_to_bbox(
-            data=data,
-            nfft=freqres_to_nfft(cfg.spec.freq_res, data.grid.samplerate),
-        )
+        self.mode = mode
+        if mode == "synthetic":
+            self.bbox_df = chirp_height_width_to_bbox(
+                data=data,
+                nfft=freqres_to_nfft(cfg.spec.freq_res, data.grid.samplerate),
+            )
+        if mode == "detected":
+            self.bbox_df = pd.read_csv(data.path / "chirpdetector_bboxes.csv")
+            self.bbox_df = self.bbox_df[["t1", "f1", "t2", "f2", "track_id"]]
+            self.bbox_df = self.bbox_df.dropna()
+        if mode == "none":
+            msg = "Not implemented yet."
+            raise NotImplementedError(msg)
         self.img_path = output_path / "images"
         self.label_path = output_path / "labels"
         self.assignment_path = output_path / "assignment"
@@ -474,7 +487,7 @@ class Wavetracker2YOLOConverter:
         dataframes = []
         assingment_x = []
         assignment_y = []
-        bbox_counter = 0
+        # bbox_counter = 0
         for i, batch_indices in enumerate(self.parser.batches):
             prog.console.rule(
                 f"[bold green]Batch {i} of {len(self.parser.batches)}"
@@ -527,15 +540,16 @@ class Wavetracker2YOLOConverter:
                     continue
 
                 # extract the assignment training data
-                x, y = extract_assignment_training_data(
-                    data=self.data,
-                    boxes=boxes,
-                    spec=spec.cpu().numpy()[1],
-                    times=time,
-                    freqs=freq,
-                )
-                assingment_x.append(x)
-                assignment_y.append(y)
+                if self.mode == "synthetic":
+                    x, y = extract_assignment_training_data(
+                        data=self.data,
+                        boxes=boxes,
+                        spec=spec.cpu().numpy()[1],
+                        times=time,
+                        freqs=freq,
+                    )
+                    assingment_x.append(x)
+                    assignment_y.append(y)
 
                 # correct overshooting freq bounds of bboxes
                 maxf = np.max(freq)
@@ -668,14 +682,15 @@ class Wavetracker2YOLOConverter:
         # for x in assingment_x:
         #     print(f"Assignment x shape: {x.shape}")
 
-        assignment_x = np.concatenate(assingment_x)
-        assignment_y = np.concatenate(assignment_y)
+        if len(assingment_x) > 0:
+            assignment_x = np.concatenate(assingment_x)
+            assignment_y = np.concatenate(assignment_y)
 
-        assignment_x_name = self.data.path.name + "_data.npy"
-        assignment_y_name = self.data.path.name + "_labels.npy"
+            assignment_x_name = self.data.path.name + "_data.npy"
+            assignment_y_name = self.data.path.name + "_labels.npy"
 
-        np.save(self.assignment_path / assignment_x_name, assignment_x)
-        np.save(self.assignment_path / assignment_y_name, assignment_y)
+            np.save(self.assignment_path / assignment_x_name, assignment_x)
+            np.save(self.assignment_path / assignment_y_name, assignment_y)
 
         dataframes = pd.concat(dataframes)
         dataframes = dataframes.reset_index(drop=True)

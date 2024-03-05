@@ -44,8 +44,6 @@ from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.models.mlp_assigner import load_trained_mlp
 from chirpdetector.models.utils import get_device
 from chirpdetector.models.yolov8_detector import load_finetuned_yolov8
-from chirpdetector.datahandling.output_data_model import ChirpDataset, ChirpDatasetSaver
-
 
 # initialize the progress bar
 prog = Progress(
@@ -54,6 +52,7 @@ prog = Progress(
     MofNCompleteColumn(),
     TimeElapsedColumn(),
 )
+
 
 def extract_spec_snippets(specs, times, freqs, batch_df):
     """Extract the spectrogram snippet for each bbox."""
@@ -441,7 +440,7 @@ class ChirpDetector:
             with Timer(prog.console, "Non-maximum suppression"):
                 good_box_indices = dataframe_nms(
                     batch_df,
-                    overlapthresh=0.2, #TODO: Move into config
+                    overlapthresh=0.2,  # TODO: Move into config
                 )
                 nms_batch_df = batch_df.iloc[good_box_indices]
 
@@ -466,14 +465,14 @@ class ChirpDetector:
                     assigned_batch_df, self.data
                 )
 
-            spec_snippets, time_snippets, freq_snippets = extract_spec_snippets(
-                specs, times, freqs, assigned_batch_df
-            )
-
-            # TODO: Move shape to config
-            spec_snippets, time_snippets, freq_snippets, orig_shapes = resize_spec_snippets(
-                spec_snippets, time_snippets, freq_snippets, 256
-            )
+            # spec_snippets, time_snippets, freq_snippets = extract_spec_snippets(
+            #     specs, times, freqs, assigned_batch_df
+            # )
+            #
+            # # TODO: Move shape to config
+            # spec_snippets, time_snippets, freq_snippets, orig_shapes = resize_spec_snippets(
+            #     spec_snippets, time_snippets, freq_snippets, 256
+            # )
 
             # STEP 8: plot the detections
             plot_batch_detections(
@@ -489,7 +488,7 @@ class ChirpDetector:
                 interpolate=False,
             )
 
-            #TODO: Add function here that extracts chirp spec snippets, makes chirp dataset
+            # TODO: Add function here that extracts chirp spec snippets, makes chirp dataset
             # and saves it to disk with h5py
 
             dataframes.append(assigned_batch_df)

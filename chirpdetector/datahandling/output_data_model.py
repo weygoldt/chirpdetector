@@ -7,13 +7,12 @@ deserialize the output data model to and from HDF5 files.
 """
 
 import pathlib
-from typing import Self, Union
+from typing import Self
+
 import h5py
 import numpy as np
 from numpy import typing as npt
-import pandas as pd
-from pydantic import BaseModel
-from dataclasses import dataclass
+
 
 class ChirpDataset:
     """
@@ -141,7 +140,7 @@ class ChirpDataset:
 
     def _check_health(self: Self) -> None:
         """Check the health of the object."""
-        #TODO: Implement this method
+        # TODO: Implement this method
         pass
 
 

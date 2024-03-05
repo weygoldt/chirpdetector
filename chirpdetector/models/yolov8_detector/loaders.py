@@ -21,5 +21,5 @@ def load_finetuned_yolov8(cfg: Config) -> torch.nn.Module:
     model : torch.nn.Module
         The trained model.
     """
-    path = pathlib.Path(cfg.hyper.modelpath) / "yolov8l.pt"
+    path = pathlib.Path(cfg.hyper.modelpath) / "yolov9e.pt"
     return YOLO(str(path))
