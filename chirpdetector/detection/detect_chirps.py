@@ -284,8 +284,12 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
 
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(datasets))
-        # for dataset in datasets[10:]:
         for dataset in datasets:
+            # check if .raw file is in dir
+            filenames = [str(file.name) for file in dataset.iterdir()]
+            if not any(".raw" in filename for filename in filenames):
+                continue
+
             prog.console.log(f"Detecting chirps in {dataset.name}")
             data = load(dataset)
             data = interpolate_tracks(data, samplerate=120)
@@ -384,7 +388,7 @@ class ChirpDetector:
 
             # STEP 1: Load the raw data as a batch
             batch_raw = [
-                np.array(self.data.grid.rec[idxs[0] : idxs[1], :])
+                np.array(self.data.grid.rec[idxs[0]: idxs[1], :])
                 for idxs in batch_indices
             ]
 
@@ -424,7 +428,7 @@ class ChirpDetector:
                 split_ids = []
                 for prediction in predictions:
                     sub_ids = bbox_ids[: len(prediction["boxes"])]
-                    bbox_ids = bbox_ids[len(prediction["boxes"]) :]
+                    bbox_ids = bbox_ids[len(prediction["boxes"]):]
                     split_ids.append(sub_ids)
 
                 batch_df = convert_detections(
