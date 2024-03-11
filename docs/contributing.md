@@ -35,13 +35,30 @@ After the first release, this section will be removed an tasks will be
 organized as github issues. Until them, if you fixed something, please check it
 off on this list before opening a pull request.
 
+- [ ] The assignment model is an issue:
+  - [ ] It is trained using BCE loss and has a sigmoid activation function,
+        instead, it should be trained using BCE with logits loss and no activation
+        function. This is because the sigmoid function is applied to the output
+        of the model in the loss function, so it is redundant to apply it to the
+        output of the model as well.
+  - [ ] As there are much more "not-emitter" than "emitter" samples in the dataset,
+        I simply took a subset so that the classes are balanced. This is not
+        good practice. Instead, I should use the weighted BCE loss, which is
+        implemented in pytorch as `torch.nn.BCEWithLogitsLoss`.
+  - [ ] The model is a MLP but XGBoost or a Random Forest might be better suited
+        for this task. I should try these models as well.
+  - [ ] Despite the fact that this is a simple task, I did not get around doing
+        any hyperparamter optimization. This should be implemented for the
+        model type (MLP, XGBoost, Random Forest) and the hyperparameters of the
+        model and the architecture of the MLP (at least).
 - [ ] Add meta-evaluation modulue (model agnostic) that can be used to evaluate
       the performance of the detection model and assignment algorithm
       but more importantly, to compare different models and algorithms,
       and most importantly, give us an idea of which data in the validation
       dataset is not well detected so that we can improve the training data
       using quantitative measures.
-- [ ] Move all dataframe operations to cudf
+- [ ] Move all dataframe operations to cudf, a pandas-like dataframe library
+      that runs on the GPU.
 - [ ] Rethink the output: Needs to be a HDF5 file that not only includes
       chirp time and ID but also the full chirp spectrograms so that
       we can later cluster them nicely.
