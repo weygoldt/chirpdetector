@@ -35,6 +35,9 @@ After the first release, this section will be removed an tasks will be
 organized as github issues. Until them, if you fixed something, please check it
 off on this list before opening a pull request.
 
+- [ ] Improve the simulation pipeline by adding more chirps and by buiding a
+      chirpGAN. And then quantify how close the model is to human performance.
+      This can apply to detection and assignment performance.
 - [ ] The assignment model is an issue:
   - [ ] It is trained using BCE loss and has a sigmoid activation function,
         instead, it should be trained using BCE with logits loss and no activation
@@ -75,7 +78,8 @@ off on this list before opening a pull request.
 - [ ] Finish a script to analyze the Json dumps from the training loop
 - [ ] Update all the docstrings after refactoring.
 - [ ] Move hardcoded params from assignment algo into config.toml
-- [ ] Split the messy training loop into functions.
+- [ ] Split the messy training loop into functions or remove it all together
+      and rely on external libraries for training
 - [ ] Remove all pyright warnings.
 - [ ] Build github actions CI/CD pipeline for codecov etc.
 - [x] Implement detector class that works with the trained yolov8
