@@ -35,6 +35,10 @@ After the first release, this section will be removed an tasks will be
 organized as github issues. Until them, if you fixed something, please check it
 off on this list before opening a pull request.
 
+- [ ] Idea: Instead of simple non maximum supression for the final output
+      we could try max averaging: Run non-max supression with a specific
+      threshold and then group overlapping bboxes and average their
+      coordinates. This could produce better bboxes.
 - [ ] Improve the simulation pipeline by adding more chirps and by buiding a
       chirpGAN. And then quantify how close the model is to human performance.
       This can apply to detection and assignment performance.
