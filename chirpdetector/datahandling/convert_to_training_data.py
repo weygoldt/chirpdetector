@@ -10,6 +10,7 @@ import logging
 import pathlib
 import shutil
 from typing import List, Self
+from uuid import uuid4
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -39,10 +40,8 @@ from chirpdetector.datahandling.dataset_parsing import (
 )
 from chirpdetector.logging.logging import Timer, make_logger
 
-# Use non-gui backend for matplotlib to avoid memory leaks
 mpl.use("Agg")
 
-# initialize the progress bar
 prog = Progress(
     SpinnerColumn(),
     *Progress.get_default_columns(),
@@ -213,24 +212,61 @@ def extract_assignment_training_data(
         baseline = np.median(track)
 
         # get the spectrogram window in box
-        spec_window = spec[
-            :,
-            (times >= box[0]) & (times <= box[2]),
-        ]
-        spec_window = spec_window[
-            (freqs >= box[1]) & (freqs <= (box[3] - (box[3] - box[1]) / 2)), :
-        ]
-        window_freqs = freqs[
-            (freqs >= box[1]) & (freqs <= (box[3] - (box[3] - box[1]) / 2))
-        ]
+
+        # only for plotting ---------------------------------------------------
+        pad_box = box.copy()
+        # print(f"Box: {box}")
+        time_pad = 0.5 * (box[2] - box[0])
+        freq_pad = 0.5 * (box[3] - box[1])
+        pad_box[0] -= time_pad
+        pad_box[1] -= freq_pad
+        pad_box[2] += time_pad
+        pad_box[3] += freq_pad
+        # print(f"Box padded: {box}")
+
+        # only for plotting end -----------------------------------------------
+
+        # spec_window = spec_window[
+        #     (freqs >= box[1]) & (freqs <= (box[3] - (box[3] - box[1]) / 2)), :
+        # ]
+        # window_freqs = freqs[
+        #     (freqs >= box[1]) & (freqs <= (box[3] - (box[3] - box[1]) / 2))
+        # ]
+        spec_window = spec[:, (times >= box[0]) & (times <= box[2])]
+        spec_window = spec_window[(freqs >= box[1]) & (freqs <= box[3]), :]
+        window_freqs = freqs[(freqs >= box[1]) & (freqs <= box[3])]
         window_times = times[(times >= box[0]) & (times <= box[2])]
+
+        pad_spec_window = spec[
+            :, (times >= pad_box[0]) & (times <= pad_box[2])
+        ]
+        pad_spec_window = pad_spec_window[
+            (freqs >= pad_box[1]) & (freqs <= pad_box[3]), :
+        ]
+        pad_window_freqs = freqs[(freqs >= pad_box[1]) & (freqs <= pad_box[3])]
+        pad_window_times = times[(times >= pad_box[0]) & (times <= pad_box[2])]
 
         # interpolate the spec window and axes to 100x100
         res = 100
+        # print(window_times)
+        # print(window_freqs)
+        # print(spec_window.shape)
+        # check if one of the two axes is zero
+        if len(window_times) == 0 or len(window_freqs) == 0:
+            continue
         spec_window = np.array(Image.fromarray(spec_window).resize((res, res)))
+        pad_spec_window = np.array(
+            Image.fromarray(pad_spec_window).resize((res, res))
+        )
 
         window_freqs = np.linspace(window_freqs[0], window_freqs[-1], res)
         window_times = np.linspace(window_times[0], window_times[-1], res)
+        pad_window_freqs = np.linspace(
+            pad_window_freqs[0], pad_window_freqs[-1], res
+        )
+        pad_window_times = np.linspace(
+            pad_window_times[0], pad_window_times[-1], res
+        )
 
         # get the baseline EODfs in the window by finding peaks on the
         # power spectrum
@@ -286,71 +322,105 @@ def extract_assignment_training_data(
             powers.append(mu)
         powers = np.array(powers)
 
-        # # plot
+        # plot
         # if len(np.shape(powers)) == 1:
-        # import matplotlib as mpl
-        # import matplotlib.pyplot as plt
-        # mpl.use("TkAgg")
-        #
-        # cm = 1/2.54  # centimeters in inches
-        # size = (16*cm, 8*cm)
-        # fig, (ax1, ax2, ax3) = plt.subplots(1,3, figsize=size, constrained_layout=True)
-        #
-        # # get 3 cool colors from magma palette
-        # # c1, c2, c3 = plt.cm.magma(np.linspace(0.5, 1, 3))
-        # c2 = "tab:orange"
-        # c1 = "tab:blue"
-        #
-        # # ax1.pcolormesh(window_times, window_freqs, spec_window, alpha=0.8)
-        # ax1.imshow(
-        #     spec_window,
-        #     aspect="auto",
-        #     origin="lower",
-        #     extent=[window_times[0], window_times[-1], window_freqs[0], window_freqs[-1]],
-        #     cmap="viridis",
-        # )
-        # ax1.plot(track_times, track, color=c2, lw=2)
-        #
-        # ax2.plot(power, window_freqs, color="black")
-        # ax2.plot(power[peaks], window_freqs[peaks], ".", color=c1)
-        #
-        # for s, e in zip(starts, ends):
-        #     ax2.fill_betweenx(
-        #         window_freqs[s:e],
-        #         power[s:e],
-        #         color=c1,
-        #         alpha=0.5,
-        #     )
-        #
-        # for ix, p in enumerate(powers):
-        #     if ix == closest:
-        #         ax3.plot(window_times, p, color=c2, lw=2, zorder=1000)
-        #     else:
-        #         ax3.plot(window_times, p, color="grey", lw=1)
-        #
-        # ax1.set_ylim([window_freqs[0], window_freqs[-1]])
-        # ax1.set_xlim([window_times[0], window_times[-1]])
-        # ax2.set_ylim([window_freqs[0], window_freqs[-1]])
-        # ax2.set_xlim([0, 1])
-        # ax3.set_ylim([0, np.max(powers)])
-        # ax3.set_xlim([window_times[0], window_times[-1]])
-        #
-        # ax1.set_xlabel("Time [s]")
-        # ax1.set_ylabel("Frequency [Hz]")
-        # ax2.set_xlabel("Power [a.u.]")
-        # ax3.set_xlabel("Time [s]")
-        # ax3.set_ylabel("Power [a.u.]")
-        #
-        # # remove ax2 y labels and axes and y spine
-        # ax2.spines["left"].set_visible(False)
-        # ax2.set_yticklabels([])
-        # ax2.set_yticks([])
-        # ax2.set_ylabel("")
-        #
-        # # make margins nicer
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+
+        mpl.use("TkAgg")
+
+        cm = 1 / 2.54  # centimeters in inches
+        size = (16 * cm, 8 * cm)
+        fig, (ax1, ax2, ax3) = plt.subplots(
+            1,
+            3,
+            figsize=size,
+            constrained_layout=True,
+        )
+
+        # get 3 cool colors from magma palette
+        # c1, c2, c3 = plt.cm.magma(np.linspace(0.5, 1, 3))
+        c2 = "tab:orange"
+        c1 = "tab:blue"
+
+        ax1.imshow(
+            pad_spec_window,
+            aspect="auto",
+            origin="lower",
+            extent=[
+                pad_window_times[0],
+                pad_window_times[-1],
+                pad_window_freqs[0],
+                pad_window_freqs[-1],
+            ],
+            cmap="viridis",
+        )
+        ax1.plot(track_times, track, color=c2, lw=2)
+
+        ax2.plot(power, window_freqs, color="black")
+        ax2.plot(power[peaks], window_freqs[peaks], ".", color=c1)
+
+        for s, e in zip(starts, ends):
+            ax2.fill_betweenx(
+                window_freqs[s:e],
+                power[s:e],
+                color=c1,
+                alpha=0.5,
+            )
+
+        for ix, p in enumerate(powers):
+            if ix == closest:
+                ax3.plot(window_times, p, color=c2, lw=2, zorder=1000)
+            else:
+                ax3.plot(window_times, p, color="grey", lw=1)
+
+        ax1.set_ylim([window_freqs[0], window_freqs[-1]])
+        ax1.set_xlim([window_times[0], window_times[-1]])
+        ax2.set_ylim([window_freqs[0], window_freqs[-1]])
+        ax2.set_xlim([0, 1])
+        ax3.set_ylim([0, np.max(powers)])
+        ax3.set_xlim([window_times[0], window_times[-1]])
+
+        ax1.set_xlabel("Time [s]")
+        ax1.set_ylabel("Frequency [Hz]")
+        ax2.set_xlabel("Power [a.u.]")
+        ax3.set_xlabel("Time [s]")
+        ax3.set_ylabel("Power [a.u.]")
+
+        # remove ax2 y labels and axes and y spine
+        ax2.spines["left"].set_visible(False)
+        ax2.set_yticklabels([])
+        ax2.set_yticks([])
+        ax2.set_ylabel("")
+
+        # make margins nicer
         # plt.savefig(f"plots/{uuid4()}.svg")
-        # plt.show()
-        #
+        plt.show()
+
+        inp = input("Save plot? [Yy/Nn]")
+        inp = False if not inp.lower() == "y" else True
+        if inp:
+            # prepare all the data used for the plot
+            data_export = {
+                "pad_spec_window": pad_spec_window,
+                "pad_window_times": pad_window_times,
+                "pad_window_freqs": pad_window_freqs,
+                "window_times": window_times,
+                "window_freqs": window_freqs,
+                "window_freq_powers": power,
+                "average_powers": powers,
+                "freq_power_peaks": peaks,
+                "freq_power_starts": starts,
+                "freq_power_ends": ends,
+                "true_power_idx": closest,
+                "box": box,
+                "emitter_baseline_eodf": baseline,
+            }
+            np.savez(
+                f"data/processed/assignment_feature_extraction/assignment_data_{uuid4()}.npz",
+                **data_export,
+            )
+
         # prepare data and labels for export
         labels = np.zeros(len(powers))
         labels[closest] = 1

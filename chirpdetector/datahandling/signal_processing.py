@@ -194,7 +194,6 @@ def spec_to_image(spec: torch.Tensor) -> torch.Tensor:
     desired_shape = (3, num_rows, num_cols)
     reshaped_tensor = spec.view(desired_shape)
 
-    # normalize the spectrogram to be between 0 and 1
     normalized_tensor = (reshaped_tensor - reshaped_tensor.min()) / (
         reshaped_tensor.max() - reshaped_tensor.min()
     )

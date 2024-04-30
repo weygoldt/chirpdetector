@@ -5,6 +5,7 @@ import logging
 import pathlib
 from typing import List, Self
 
+from IPython import embed
 import numpy as np
 import pandas as pd
 import torch
@@ -132,34 +133,45 @@ def assign_ffreqs_to_tracks(
     """Assign a bounding box to a track."""
     dist_threshold = 20  # Hz
     assigned_tracks = []
+
+    times = []
+    freqs = []
+    ids = []
+    for track_id in data.track.ids[~np.isnan(data.track.ids)]:
+        time = data.track.times[
+            data.track.indices[data.track.idents == track_id]
+        ]
+        freq = data.track.freqs[data.track.idents == track_id]
+        times.append(time)
+        freqs.append(freq)
+        ids.append(track_id)
+
     for i in range(len(bbox_df)):
         chirptime = (bbox_df["t1"].iloc[i] + bbox_df["t2"].iloc[i]) / 2
         emitter_ffreq = bbox_df["emitter_eodf"].iloc[i]
 
-        candidate_tracks = []
-        candidate_freqs = []
-        candidate_times = []
-        for track_id in data.track.ids[~np.isnan(data.track.ids)]:
-            time = data.track.times[
-                data.track.indices[data.track.idents == track_id]
-            ]
-            freq = data.track.freqs[data.track.idents == track_id]
-            closest_time = time[np.argmin(np.abs(time - chirptime))]
-            closest_freq = freq[np.argmin(np.abs(time - chirptime))]
-            candidate_tracks.append(track_id)
-            candidate_freqs.append(closest_freq)
-            candidate_times.append(closest_time)
+        closest_times = [np.argmin(abs(t - chirptime)) for t in times]
+        print("closest times")
+        print(closest_times)
+        distances = []
+        for i, f in enumerate(freqs):
+            track_f = f[closest_times[i]]
+            dist = np.abs(track_f - emitter_ffreq)
+            distances.append(dist)
 
-        # find the closest track
-        distances = np.abs(np.array(candidate_freqs) - emitter_ffreq)
-        closest_track = candidate_tracks[np.argmin(distances)]
+        emitter_id = ids[np.argmin(np.abs(distances))]
+
+        print(f"Emitter id: {emitter_id}")
+        print(f"All ids: {ids}")
+        print(f"Corresponding distances: {distances}")
 
         if np.min(distances) > dist_threshold:
             assigned_tracks.append(np.nan)
         else:
-            assigned_tracks.append(closest_track)
+            assigned_tracks.append(emitter_id)
     assigned_tracks = np.array(assigned_tracks)
     bbox_df["track_id"] = assigned_tracks
+
     return bbox_df
 
 
@@ -282,20 +294,49 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
     ass_model.to(get_device()).eval()
     assigner = SpectrogramPowerTroughBoxAssignerMLP(ass_model)
 
+    good_datasets = []
+    for dataset in datasets:
+        # check if .raw or .wav file is in dir
+        checktypes = ["raw", "wav"]
+        filenames = [str(file.name) for file in dataset.iterdir()]
+
+        foundfile = False
+        for filetype in checktypes:
+            if any(filetype in filename for filename in filenames):
+                foundfile = True
+
+        if not foundfile:
+            continue
+
+        # if pathlib.Path(dataset / "chirpdetector_bboxes.csv").exists():
+        #     print("chirpdetector_bboxes.csv exists, skipping")
+        #     continue
+
+        good_datasets.append(dataset)
+
+    print(
+        f"Out of {len(datasets)} a total of {len(good_datasets)} still need detecting"
+    )
     with prog:
-        task = prog.add_task("Detecting chirps...", total=len(datasets))
-        for dataset in datasets:
+        task = prog.add_task("Detecting chirps...", total=len(good_datasets))
+        for dataset in good_datasets:
             # check if .raw or .wav file is in dir
-            checktypes = ["raw", "wav"]
-            filenames = [str(file.name) for file in dataset.iterdir()]
-
-            foundfile = False
-            for filetype in checktypes:
-                if any(filetype in filename for filename in filenames):
-                    foundfile = True
-
-            if not foundfile:
-                continue
+            # checktypes = ["raw", "wav"]
+            # filenames = [str(file.name) for file in dataset.iterdir()]
+            #
+            # foundfile = False
+            # for filetype in checktypes:
+            #     if any(filetype in filename for filename in filenames):
+            #         foundfile = True
+            #
+            # if not foundfile:
+            #     prog.advance(task, 1)
+            #     continue
+            #
+            # if pathlib.Path(dataset / "chirpdetector_bboxes.csv").exists():
+            #     print("chirpdetector_bboxes.csv exists, skipping")
+            #     prog.advance(task, 1)
+            #     continue
 
             prog.console.log(f"Detecting chirps in {dataset.name}")
             data = load(dataset)
@@ -457,7 +498,7 @@ class ChirpDetector:
 
             # STEP 6: Predict the fundamental frequency of the emitter
             # for each box
-            with Timer(prog.console, "Assign boxes to wavetracker tracks"):
+            with Timer(prog.console, "Predicting emitter EODfs"):
                 assigned_batch_df = self.assigner.assign(
                     batch_specs=specs,
                     batch_times=times,
@@ -471,10 +512,10 @@ class ChirpDetector:
 
             # STEP 7: Associate the fundamental frequency of the emitter
             # to the closest wavetracker track
-            with Timer(prog.console, "Associate emitter frequency to tracks"):
-                assigned_batch_df = assign_ffreqs_to_tracks(
-                    assigned_batch_df, self.data
-                )
+            # with Timer(prog.console, "Associate emitter frequency to tracks"):
+            #     assigned_batch_df = assign_ffreqs_to_tracks(
+            #         assigned_batch_df, self.data
+            #     )
 
             # spec_snippets, time_snippets, freq_snippets = extract_spec_snippets(
             #     specs, times, freqs, assigned_batch_df
@@ -486,18 +527,20 @@ class ChirpDetector:
             # )
 
             # STEP 8: plot the detections
-            plot_batch_detections(
-                specs,
-                times,
-                freqs,
-                batch_df,
-                nms_batch_df,
-                assigned_batch_df,
-                self.data,
-                i,
-                ylims="full",
-                interpolate=False,
-            )
+            with Timer(prog.console, "Saving plot for current batch"):
+                plot_batch_detections(
+                    specs,
+                    times,
+                    freqs,
+                    batch_df,
+                    nms_batch_df,
+                    assigned_batch_df,
+                    self.data,
+                    i,
+                    ylims="full",
+                    interpolate=False,
+                    save_data=False,
+                )
 
             # TODO: Add function here that extracts chirp spec snippets, makes chirp dataset
             # and saves it to disk with h5py
@@ -509,25 +552,37 @@ class ChirpDetector:
             gc.collect()
 
         # Save the dataframe
-        dataframes = pd.concat(dataframes)
-        dataframes = dataframes.reset_index(drop=True)
-        dataframes = dataframes.sort_values(by=["t1"])
-        savepath = self.data.path / "chirpdetector_bboxes.csv"
-        dataframes.to_csv(savepath, index=False)
+        if len(dataframes) > 0:
+            dataframes = pd.concat(dataframes)
+            dataframes = dataframes.reset_index(drop=True)
+            dataframes = dataframes.sort_values(by=["t1"])
 
-        # save chirp times and identities as numpy files
-        chirp_times = dataframes["t1"] + (
-            (dataframes["t2"] - dataframes["t1"]) / 2
-        )
-        chirp_times = chirp_times.to_numpy()
-        chirp_ids = dataframes["track_id"].to_numpy()
-        # print(np.shape(chirp_times))
-        # print(np.shape(chirp_ids))
+            # Associate emitter eodfs with wavetracker track
+            # with Timer(prog.console, "Associate emitter frequency to tracks"):
+            #     dataframes = assign_ffreqs_to_tracks(dataframes, self.data)
 
-        # drop unassigned
-        chirp_times = chirp_times[~np.isnan(chirp_ids)]
-        chirp_ids = chirp_ids[~np.isnan(chirp_ids)]
+            savepath = self.data.path / "chirpdetector_bboxes.csv"
+            dataframes.to_csv(savepath, index=False)
 
-        # save the arrays
-        np.save(self.data.path / "chirp_times_rcnn.npy", chirp_times)
-        np.save(self.data.path / "chirp_ids_rcnn.npy", chirp_ids)
+            # save chirp times and identities as numpy files
+            # chirp_times = dataframes["t1"] + (
+            #     (dataframes["t2"] - dataframes["t1"]) / 2
+            # )
+            # chirp_times = chirp_times.to_numpy()
+            # chirp_ids = dataframes["track_id"].to_numpy()
+            # print(np.shape(chirp_times))
+            # print(np.shape(chirp_ids))
+
+            # drop unassigned
+            # chirp_times = chirp_times[~np.isnan(chirp_ids)]
+            # chirp_ids = chirp_ids[~np.isnan(chirp_ids)]
+
+            # save the arrays
+            # np.save(self.data.path / "chirp_times_rcnn.npy", chirp_times)
+            # np.save(self.data.path / "chirp_ids_rcnn.npy", chirp_ids)
+        else:
+            savepath = self.data.path / "chirpdetector_bboxes.csv"
+            empty_df = pd.DataFrame()
+            empty_df.to_csv(savepath, index=False)
+            # np.save(self.data.path / "chirp_times_rcnn.npy", np.array([]))
+            # np.save(self.data.path / "chirp_ids_rcnn.npy", np.array([]))

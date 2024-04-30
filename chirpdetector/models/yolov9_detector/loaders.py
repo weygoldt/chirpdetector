@@ -1,4 +1,4 @@
-"""Loaders for the YOLOV8 model."""
+"""Loaders for the YOLOv9 model."""
 
 import pathlib
 
@@ -9,7 +9,7 @@ from chirpdetector.config import Config
 
 
 def load_finetuned_yolov8(cfg: Config) -> torch.nn.Module:
-    """Load the trained YOLOV8 model.
+    """Load the trained YOLOv9 model.
 
     Parameters
     ----------
@@ -21,5 +21,5 @@ def load_finetuned_yolov8(cfg: Config) -> torch.nn.Module:
     model : torch.nn.Module
         The trained model.
     """
-    path = pathlib.Path(cfg.hyper.modelpath) / "yolov8l.pt"
+    path = pathlib.Path(cfg.hyper.modelpath) / "yolov9e.pt"
     return YOLO(str(path))

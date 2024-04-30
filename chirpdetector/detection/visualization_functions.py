@@ -16,7 +16,7 @@ from rich.console import Console
 console = Console()
 
 # Use non-gui backend for matplotlib to avoid memory leaks
-backend = "Agg"
+backend = "TkAgg"
 
 try:
     basepath = pathlib.Path("/home/weygoldt/Projects/mscthesis/src")
@@ -42,6 +42,7 @@ def plot_batch_detections(
     batch_no: int,
     ylims: str = "full",
     interpolate: bool = False,
+    save_data: bool = False,
 ) -> None:
     """Plot the detections for each batch."""
     assert ylims in [
@@ -58,6 +59,8 @@ def plot_batch_detections(
     figsize = (width * cm, 30 * cm)
     fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
 
+    vmin = np.min([np.min(spec.cpu().numpy()) for spec in specs])
+    vmax = np.max([np.max(spec.cpu().numpy()) for spec in specs])
     for i in range(len(specs)):
         spec = specs[i].cpu().numpy()
 
@@ -75,6 +78,8 @@ def plot_batch_detections(
                 spec,
                 cmap="magma",
                 rasterized=True,
+                vmin=vmin,
+                vmax=vmax,
             )
             # print(f"Interpolated dims: {spec.shape}")
         else:
@@ -84,36 +89,41 @@ def plot_batch_detections(
                 spec[0, :, :],
                 cmap="magma",
                 rasterized=True,
+                vmin=vmin,
+                vmax=vmax,
             )
 
     # get nice ligth colors for the tracks
-    track_colors = [
-        "#1f77b4",
-        "#d62728",
-        "#e377c2",
-        "#ff7f0e",
-        "#2ca02c",
-        "#9467bd",
-        "#8c564b",
-        "#7f7f7f",
-        "#bcbd22",
-        "#17becf",
-    ]
-    track_colors = np.array(track_colors)[: len(data.track.ids)]
-
-    min_freq = np.inf
-    max_freq = -np.inf
-    for j, track_id in enumerate(data.track.ids[~np.isnan(data.track.ids)]):
-        track_freqs = data.track.freqs[data.track.idents == track_id]
-        track_time = data.track.times[
-            data.track.indices[data.track.idents == track_id]
-        ]
-        color = track_colors[data.track.ids == track_id][0]
-        ax.plot(
-            track_time, track_freqs, color=color, lw=2, label=f"Fish {j+1}"
-        )
-        min_freq = min(min_freq, np.min(track_freqs))
-        max_freq = max(max_freq, np.max(track_freqs))
+    # track_colors = [
+    #     "#1f77b4",
+    #     "#d62728",
+    #     "#e377c2",
+    #     "#ff7f0e",
+    #     "#2ca02c",
+    #     "#9467bd",
+    #     "#8c564b",
+    #     "#7f7f7f",
+    #     "#bcbd22",
+    #     "#17becf",
+    # ]
+    # track_colors = np.array(track_colors)[: len(data.track.ids)]
+    #
+    # min_freq = np.inf
+    # max_freq = -np.inf
+    # indices = np.arange(len(data.track.ids))
+    # for j, track_id in enumerate(data.track.ids[~np.isnan(data.track.ids)]):
+    #     track_freqs = data.track.freqs[data.track.idents == track_id]
+    #     track_time = data.track.times[
+    #         data.track.indices[data.track.idents == track_id]
+    #     ]
+    #     index = indices[data.track.ids == track_id][0]
+    #     color_index = index % len(track_colors)
+    #     color = track_colors[color_index]
+    #     ax.plot(
+    #         track_time, track_freqs, color=color, lw=2, label=f"Fish {j+1}"
+    #     )
+    #     min_freq = min(min_freq, np.min(track_freqs))
+    #     max_freq = max(max_freq, np.max(track_freqs))
 
     patches = []
     # get bboxes before nms
@@ -183,13 +193,14 @@ def plot_batch_detections(
         t2 = assigned_batch_df["t2"].iloc[j]
         f2 = assigned_batch_df["f2"].iloc[j]
         score = assigned_batch_df["score"].iloc[j]
-        track_id = assigned_batch_df["track_id"].iloc[j]
+        # track_id = assigned_batch_df["track_id"].iloc[j]
         predicted_eodf = assigned_batch_df["emitter_eodf"].iloc[j]
 
-        if np.isnan(track_id):
-            continue
+        # if np.isnan(track_id):
+        # continue
 
-        color = track_colors[data.track.ids == track_id][0]
+        # color = track_colors[data.track.ids == track_id][0]
+        color = "white"
 
         patches.append(
             plt.Rectangle(
@@ -224,8 +235,8 @@ def plot_batch_detections(
         )
 
     ax.add_collection(PatchCollection(patches, match_original=True))
-    ax.set_xlim(np.min(times), np.max(times))
 
+    ax.set_xlim(np.min(times), np.max(times))
     ax.set_xlabel("Time [s]", fontsize=16)
     ax.set_ylabel("Frequency [Hz]", fontsize=16)
     ax.legend(
@@ -240,11 +251,38 @@ def plot_batch_detections(
     savepath.mkdir(exist_ok=True, parents=True)
 
     if ylims == "full":
+        filename = savepath / f"batch_{batch_no}_full.png"
         ax.set_ylim(np.min(freqs), np.max(freqs))
-        plt.savefig(savepath / f"batch_{batch_no}_full.png", dpi=300)
+        plt.savefig(filename, dpi=300)
     if ylims == "fit":
-        ax.set_ylim(min_freq - 200, max_freq + 500)
-        plt.savefig(savepath / f"batch_{batch_no}_fit.png", dpi=300)
+        filename = savepath / f"batch_{batch_no}_fit.png"
+        # ax.set_ylim(min_freq - 200, max_freq + 500)
+        plt.savefig(filename, dpi=300)
+
+    if save_data:
+        datapath = pathlib.Path(f"{data.path}/plots/{filename.stem}")
+        datapath.mkdir(exist_ok=True, parents=True)
+
+        # save all input data
+        spec = {
+            "specs": specs,
+            "times": times,
+            "freqs": freqs,
+        }
+        np.save(datapath / "specs.npy", spec)
+
+        # save all detections
+        batch_df.to_csv(datapath / "batch_df.csv", index=False)
+        nms_batch_df.to_csv(datapath / "nms_batch_df.csv", index=False)
+        assigned_batch_df.to_csv(
+            datapath / "assigned_batch_df.csv", index=False
+        )
+
+        raw_dataset_path = data.path
+        # save path as txt
+        with open(datapath / "raw_dataset_path.txt", "w") as f:
+            f.write(str(raw_dataset_path))
+            f.close()
 
     plt.close()
 
