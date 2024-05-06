@@ -1,1 +1,0 @@
-:::chirpdetector.detect_chirps
