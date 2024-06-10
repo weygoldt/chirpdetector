@@ -17,18 +17,19 @@ console = Console()
 
 # Use non-gui backend for matplotlib to avoid memory leaks
 backend = "TkAgg"
+mpl.use(backend)
 
-try:
-    basepath = pathlib.Path("/home/weygoldt/Projects/mscthesis/src")
-    basestyle = basepath / "base.mplstyle"
-    background = basepath / "dark_background.mplstyle"
-    console.log("Found custom style.")
-    style = [basestyle, background]
-except FileNotFoundError as e:
-    console.log("Could not find custom style.")
-    console.log(e)
-    style = None
-    pass
+# try:
+#     basepath = pathlib.Path("/home/weygoldt/Projects/mscthesis/src")
+#     basestyle = basepath / "base.mplstyle"
+#     background = basepath / "dark_background.mplstyle"
+#     console.log("Found custom style.")
+#     style = [basestyle, background]
+#     plt.style.use(style)
+# except FileNotFoundError as e:
+#     console.log("Could not find custom style.")
+#     console.log(e)
+#     pass
 
 
 def plot_batch_detections(
@@ -49,9 +50,6 @@ def plot_batch_detections(
         "full",
         "fit",
     ], "Invalid ylims argument. Must be 'full' or 'fit'."
-    mpl.use(backend)
-    if style is not None:
-        plt.style.use(style)
 
     cm = 1 / 2.54
     lenmult = 1

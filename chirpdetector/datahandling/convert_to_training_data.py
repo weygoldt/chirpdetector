@@ -49,14 +49,14 @@ prog = Progress(
     TimeElapsedColumn(),
 )
 
-try:
-    base = "/home/weygoldt/Projects/mscthesis/src/base.mplstyle"
-    darkbg = "/home/weygoldt/Projects/mscthesis/src/light_background.mplstyle"
-    plt.style.use([base, darkbg])
-except FileNotFoundError:
-    msg = "Could not find the coustom matplotlib style, freestyling."
-    prog.console.log(msg)
-    pass
+# try:
+#     base = "/home/weygoldt/Projects/mscthesis/src/base.mplstyle"
+#     darkbg = "/home/weygoldt/Projects/mscthesis/src/light_background.mplstyle"
+#     plt.style.use([base, darkbg])
+# except FileNotFoundError:
+#     msg = "Could not find the coustom matplotlib style, freestyling."
+#     prog.console.log(msg)
+#     pass
 
 
 def numpy_to_pil(img: np.ndarray) -> Image.Image:

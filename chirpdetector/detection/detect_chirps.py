@@ -440,8 +440,8 @@ class ChirpDetector:
                 for idxs in batch_indices
             ]
 
-            if i == 1:
-                plot_raw_batch(self.data, batch_indices, batch_raw)
+            # if i == 1:
+            #     plot_raw_batch(self.data, batch_indices, batch_raw)
 
             # STEP 2: Compute the spectrograms for each raw data snippet
             with Timer(prog.console, "Compute spectrograms"):
@@ -453,8 +453,8 @@ class ChirpDetector:
                     self.cfg,
                 )
 
-            if i == 1:
-                plot_spec_tiling(specs, times, freqs)
+            # if i == 1:
+            #     plot_spec_tiling(specs, times, freqs)
 
             # STEP 3: Predict boxes for each spectrogram
             with Timer(prog.console, "Detect chirps"):
