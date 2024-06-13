@@ -558,31 +558,31 @@ class ChirpDetector:
             dataframes = dataframes.sort_values(by=["t1"])
 
             # Associate emitter eodfs with wavetracker track
-            # with Timer(prog.console, "Associate emitter frequency to tracks"):
-            #     dataframes = assign_ffreqs_to_tracks(dataframes, self.data)
+            with Timer(prog.console, "Associate emitter frequency to tracks"):
+                dataframes = assign_ffreqs_to_tracks(dataframes, self.data)
 
             savepath = self.data.path / "chirpdetector_bboxes.csv"
             dataframes.to_csv(savepath, index=False)
 
             # save chirp times and identities as numpy files
-            # chirp_times = dataframes["t1"] + (
-            #     (dataframes["t2"] - dataframes["t1"]) / 2
-            # )
-            # chirp_times = chirp_times.to_numpy()
-            # chirp_ids = dataframes["track_id"].to_numpy()
-            # print(np.shape(chirp_times))
-            # print(np.shape(chirp_ids))
+            chirp_times = dataframes["t1"] + (
+                (dataframes["t2"] - dataframes["t1"]) / 2
+            )
+            chirp_times = chirp_times.to_numpy()
+            chirp_ids = dataframes["track_id"].to_numpy()
+            print(np.shape(chirp_times))
+            print(np.shape(chirp_ids))
 
             # drop unassigned
-            # chirp_times = chirp_times[~np.isnan(chirp_ids)]
-            # chirp_ids = chirp_ids[~np.isnan(chirp_ids)]
+            chirp_times = chirp_times[~np.isnan(chirp_ids)]
+            chirp_ids = chirp_ids[~np.isnan(chirp_ids)]
 
             # save the arrays
-            # np.save(self.data.path / "chirp_times_rcnn.npy", chirp_times)
-            # np.save(self.data.path / "chirp_ids_rcnn.npy", chirp_ids)
+            np.save(self.data.path / "chirp_times_rcnn.npy", chirp_times)
+            np.save(self.data.path / "chirp_ids_rcnn.npy", chirp_ids)
         else:
             savepath = self.data.path / "chirpdetector_bboxes.csv"
             empty_df = pd.DataFrame()
             empty_df.to_csv(savepath, index=False)
-            # np.save(self.data.path / "chirp_times_rcnn.npy", np.array([]))
-            # np.save(self.data.path / "chirp_ids_rcnn.npy", np.array([]))
+            np.save(self.data.path / "chirp_times_rcnn.npy", np.array([]))
+            np.save(self.data.path / "chirp_ids_rcnn.npy", np.array([]))
