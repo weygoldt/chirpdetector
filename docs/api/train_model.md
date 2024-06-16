@@ -1,1 +1,0 @@
-:::chirpdetector.train_model

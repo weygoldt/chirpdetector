@@ -87,9 +87,4 @@ nav:
   - "Contributing": "contributing.md"
   - "CLI Reference": "cli_reference.md"
   - "API Reference":
-      - "train_model": "api/train_model.md"
-      - "detect_chirps": "api/detect_chirps.md"
-      - "assign_chirps": "api/assign_chirps.md"
-      - "plot_detections": "api/plot_detections.md"
-      - "convert_data": "api/convert_data.md"
-      - "dataset_utils": "api/dataset_utils.md"
+      - "Configuration": "api/config.md"
