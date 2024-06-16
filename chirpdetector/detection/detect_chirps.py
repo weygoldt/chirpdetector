@@ -5,7 +5,6 @@ import logging
 import pathlib
 from typing import List, Self
 
-from IPython import embed
 import numpy as np
 import pandas as pd
 import torch
@@ -38,8 +37,6 @@ from chirpdetector.detection.detection_models import (
 )
 from chirpdetector.detection.visualization_functions import (
     plot_batch_detections,
-    plot_raw_batch,
-    plot_spec_tiling,
 )
 from chirpdetector.logging.logging import Timer, make_logger
 from chirpdetector.models.mlp_assigner import load_trained_mlp
@@ -56,12 +53,15 @@ prog = Progress(
 
 
 def extract_spec_snippets(specs, times, freqs, batch_df):
-    """Extract the spectrogram snippet for each bbox."""
+    """Extract the spectrogram snippet for each bbox.
+
+    This is useful to save the spectrogram snippet of each
+    detected chirp to disk, e.g., for clustering purposes.
+    The saving step has not been implemented yet.
+    """
     spec_snippets = []
     time_snippets = []
     freq_snippets = []
-    # import matplotlib.pyplot as plt
-    # import matplotlib as mpl
     for i in range(len(batch_df)):
         # get bbox
         t1 = batch_df["t1"].iloc[i]
@@ -86,15 +86,6 @@ def extract_spec_snippets(specs, times, freqs, batch_df):
         spec_snippet = spec[f1_idx:f2_idx, t1_idx:t2_idx]
         time_snippet = time[t1_idx:t2_idx]
         freq_snippet = freq[f1_idx:f2_idx]
-
-        # mpl.use("TkAgg")
-        # plt.imshow(spec.cpu().numpy(), aspect="auto", origin="lower", extent=[time[0], time[-1], freq[0], freq[-1]])
-        # plt.plot([t1, t2, t2, t1, t1], [f1, f1, f2, f2, f1], "r-")
-        # plt.show()
-        #
-        # plt.imshow(spec_snippet.cpu().numpy(), aspect="auto", origin="lower", extent=[time_snippet[0], time_snippet[-1], freq_snippet[0], freq_snippet[-1]])
-        # plt.plot([t1, t2, t2, t1, t1], [f1, f1, f2, f2, f1], "r-")
-        # plt.show()
 
         spec_snippets.append(spec_snippet)
         time_snippets.append(time_snippet)
@@ -130,7 +121,7 @@ def resize_spec_snippets(spec_snippets, time_snippets, freq_snippets, size):
 def assign_ffreqs_to_tracks(
     bbox_df: pd.DataFrame, data: Dataset
 ) -> pd.DataFrame:
-    """Assign a bounding box to a track."""
+    """Assign a bounding box to a wavetracker track."""
     dist_threshold = 20  # Hz
     assigned_tracks = []
 
@@ -280,16 +271,11 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
         )
         raise FileNotFoundError(msg)
 
-    # Get the box predictor
-    # det_model = load_finetuned_faster_rcnn(config)
-    # det_model.to(get_device()).eval()
-    # predictor = FasterRCNN(model=det_model)
+    # Get the detection predictor
     model = load_finetuned_yolov8(config)
-    # exit()
-    # model.to(get_device()).eval()
     predictor = YOLOv8(model=model)
 
-    # get the box assigner
+    # get the emitter EODf predictor
     ass_model = load_trained_mlp(config)
     ass_model.to(get_device()).eval()
     assigner = SpectrogramPowerTroughBoxAssignerMLP(ass_model)
@@ -320,33 +306,27 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(good_datasets))
         for dataset in good_datasets:
-            # check if .raw or .wav file is in dir
-            # checktypes = ["raw", "wav"]
-            # filenames = [str(file.name) for file in dataset.iterdir()]
-            #
-            # foundfile = False
-            # for filetype in checktypes:
-            #     if any(filetype in filename for filename in filenames):
-            #         foundfile = True
-            #
-            # if not foundfile:
-            #     prog.advance(task, 1)
-            #     continue
-            #
-            # if pathlib.Path(dataset / "chirpdetector_bboxes.csv").exists():
-            #     print("chirpdetector_bboxes.csv exists, skipping")
-            #     prog.advance(task, 1)
-            #     continue
-
             prog.console.log(f"Detecting chirps in {dataset.name}")
             data = load(dataset)
             data = interpolate_tracks(data, samplerate=120)
-            chirpfile = input_path / dataset.name / "chirps.h5"
 
-            # delete chirpfile from previous runs
-            if chirpfile.exists():
-                chirpfile.unlink()
+            # TODO: This is a mess,standardize this
+            chirpfiles = [
+                "chirps.h5",
+                "chirp_times_rcnn.npy",
+                "chirp_ids_rcnn.npy",
+                "chirpdetector_bboxes.csv",
+                "plots/",
+                "chirpdetector/",
+            ]
 
+            # remove old files
+            for file in chirpfiles:
+                file = dataset / file
+                if file.exists():
+                    file.unlink()
+
+            # Initialize the chirp detector
             cpd = ChirpDetector(
                 cfg=config,
                 data=data,
@@ -354,8 +334,10 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
                 assigner=assigner,
                 logger=logger,
             )
+            # Detect chirps
             cpd.detect()
 
+            # Clean up mo
             del data
             del cpd
             if torch.cuda.is_available():
@@ -440,9 +422,6 @@ class ChirpDetector:
                 for idxs in batch_indices
             ]
 
-            # if i == 1:
-            #     plot_raw_batch(self.data, batch_indices, batch_raw)
-
             # STEP 2: Compute the spectrograms for each raw data snippet
             with Timer(prog.console, "Compute spectrograms"):
                 batch_metadata, specs, times, freqs = make_batch_specs(
@@ -453,9 +432,6 @@ class ChirpDetector:
                     self.cfg,
                 )
 
-            # if i == 1:
-            #     plot_spec_tiling(specs, times, freqs)
-
             # STEP 3: Predict boxes for each spectrogram
             with Timer(prog.console, "Detect chirps"):
                 predictions = self.detector.predict(specs.copy())
@@ -463,22 +439,27 @@ class ChirpDetector:
             # STEP 4: Convert pixel values to time and frequency
             # and save everything in a dataframe
             with Timer(prog.console, "Convert detections"):
-                # give every bbox a unique identifier
+                # give every bbox a unique integer identifier
                 # first get total number of new bboxes
                 n_bboxes = 0
+                # TODO: This does not require a for-loop
                 for prediction in predictions:
                     n_bboxes += len(prediction["boxes"])
+
                 # then create the ids
                 bbox_ids = np.arange(bbox_counter, bbox_counter + n_bboxes)
                 bbox_counter += n_bboxes
+
                 # now split the bbox ids in sublists with same length as
                 # detections for each spec
                 split_ids = []
+                # TODO: This can probably be done more elegantly
                 for prediction in predictions:
                     sub_ids = bbox_ids[: len(prediction["boxes"])]
                     bbox_ids = bbox_ids[len(prediction["boxes"]) :]
                     split_ids.append(sub_ids)
 
+                # Convert detections from pixel to time and frequency
                 batch_df = convert_detections(
                     predictions,
                     split_ids,
@@ -511,6 +492,8 @@ class ChirpDetector:
                     continue
 
             # STEP 7: Associate the fundamental frequency of the emitter
+            # TODO: This should be all done at once after the full file is processed
+
             # to the closest wavetracker track
             # with Timer(prog.console, "Associate emitter frequency to tracks"):
             #     assigned_batch_df = assign_ffreqs_to_tracks(
@@ -520,8 +503,9 @@ class ChirpDetector:
             # spec_snippets, time_snippets, freq_snippets = extract_spec_snippets(
             #     specs, times, freqs, assigned_batch_df
             # )
-            #
-            # # TODO: Move shape to config
+
+            # TODO: Move shape to config
+
             # spec_snippets, time_snippets, freq_snippets, orig_shapes = resize_spec_snippets(
             #     spec_snippets, time_snippets, freq_snippets, 256
             # )
@@ -570,8 +554,6 @@ class ChirpDetector:
             )
             chirp_times = chirp_times.to_numpy()
             chirp_ids = dataframes["track_id"].to_numpy()
-            print(np.shape(chirp_times))
-            print(np.shape(chirp_ids))
 
             # drop unassigned
             chirp_times = chirp_times[~np.isnan(chirp_ids)]

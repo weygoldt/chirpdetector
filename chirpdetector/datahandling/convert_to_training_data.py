@@ -13,7 +13,6 @@ from typing import List, Self
 from uuid import uuid4
 
 import matplotlib as mpl
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -398,7 +397,7 @@ def extract_assignment_training_data(
         plt.show()
 
         inp = input("Save plot? [Yy/Nn]")
-        inp = False if not inp.lower() == "y" else True
+        inp = False if inp.lower() != "y" else True
         if inp:
             # prepare all the data used for the plot
             data_export = {

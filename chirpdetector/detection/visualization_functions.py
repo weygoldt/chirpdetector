@@ -14,22 +14,8 @@ from PIL import Image
 from rich.console import Console
 
 console = Console()
-
-# Use non-gui backend for matplotlib to avoid memory leaks
 backend = "Agg"
 mpl.use(backend)
-
-# try:
-#     basepath = pathlib.Path("/home/weygoldt/Projects/mscthesis/src")
-#     basestyle = basepath / "base.mplstyle"
-#     background = basepath / "dark_background.mplstyle"
-#     console.log("Found custom style.")
-#     style = [basestyle, background]
-#     plt.style.use(style)
-# except FileNotFoundError as e:
-#     console.log("Could not find custom style.")
-#     console.log(e)
-#     pass
 
 
 def plot_batch_detections(
@@ -91,40 +77,8 @@ def plot_batch_detections(
                 vmax=vmax,
             )
 
-    # get nice ligth colors for the tracks
-    # track_colors = [
-    #     "#1f77b4",
-    #     "#d62728",
-    #     "#e377c2",
-    #     "#ff7f0e",
-    #     "#2ca02c",
-    #     "#9467bd",
-    #     "#8c564b",
-    #     "#7f7f7f",
-    #     "#bcbd22",
-    #     "#17becf",
-    # ]
-    # track_colors = np.array(track_colors)[: len(data.track.ids)]
-    #
-    # min_freq = np.inf
-    # max_freq = -np.inf
-    # indices = np.arange(len(data.track.ids))
-    # for j, track_id in enumerate(data.track.ids[~np.isnan(data.track.ids)]):
-    #     track_freqs = data.track.freqs[data.track.idents == track_id]
-    #     track_time = data.track.times[
-    #         data.track.indices[data.track.idents == track_id]
-    #     ]
-    #     index = indices[data.track.ids == track_id][0]
-    #     color_index = index % len(track_colors)
-    #     color = track_colors[color_index]
-    #     ax.plot(
-    #         track_time, track_freqs, color=color, lw=2, label=f"Fish {j+1}"
-    #     )
-    #     min_freq = min(min_freq, np.min(track_freqs))
-    #     max_freq = max(max_freq, np.max(track_freqs))
-
     patches = []
-    # get bboxes before nms
+    # bboxes before nms
     for j in range(len(batch_df)):
         t1 = batch_df["t1"].iloc[j]
         f1 = batch_df["f1"].iloc[j]
@@ -154,7 +108,7 @@ def plot_batch_detections(
             rotation=45,
         )
 
-    # get bboxes after nms
+    # bboxes after nms
     for j in range(len(nms_batch_df)):
         t1 = nms_batch_df["t1"].iloc[j]
         f1 = nms_batch_df["f1"].iloc[j]
@@ -237,15 +191,8 @@ def plot_batch_detections(
     ax.set_xlim(np.min(times), np.max(times))
     ax.set_xlabel("Time [s]", fontsize=16)
     ax.set_ylabel("Frequency [Hz]", fontsize=16)
-    ax.legend(
-        bbox_to_anchor=(0, 1.02, 1, 0.2),
-        loc="lower left",
-        borderaxespad=0,
-        ncol=2,
-        fontsize=16,
-    )
 
-    savepath = pathlib.Path(f"{data.path}/plots")
+    savepath = pathlib.Path(f"{data.path}/chirpdetection")
     savepath.mkdir(exist_ok=True, parents=True)
 
     if ylims == "full":
@@ -258,7 +205,7 @@ def plot_batch_detections(
         plt.savefig(filename, dpi=300)
 
     if save_data:
-        datapath = pathlib.Path(f"{data.path}/plots/{filename.stem}")
+        datapath = pathlib.Path(f"{data.path}/chirpdetection/{filename.stem}")
         datapath.mkdir(exist_ok=True, parents=True)
 
         # save all input data

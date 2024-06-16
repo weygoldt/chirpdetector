@@ -1,17 +1,13 @@
 """Evaluate detection model"""
 
-import gc
-import logging
 import pathlib
-from typing import List, Self, Tuple
+from typing import List, Self
 
 import matplotlib.pyplot as plt
-from PIL import Image
-import torchvision
 import numpy as np
 import pandas as pd
-import torch
-from torch.utils.data import DataLoader
+import torchvision
+from PIL import Image
 from rich.progress import (
     MofNCompleteColumn,
     Progress,
@@ -19,27 +15,12 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from chirpdetector.config import Config, load_config
-from chirpdetector.datahandling.bbox_tools import (
-    dataframe_nms,
-    pixel_box_to_timefreq,
-)
-from chirpdetector.detection.assignment_models import (
-    AbstractBoxAssigner,
-    SpectrogramPowerTroughBoxAssignerMLP,
-)
+from chirpdetector.config import load_config
 from chirpdetector.detection.detection_models import (
     AbstractDetectionModel,
     YOLOv8,
-    FasterRCNN,
 )
-from chirpdetector.logging.logging import Timer, make_logger
-from chirpdetector.models.mlp_assigner import load_trained_mlp
-from chirpdetector.models.utils import get_device
 from chirpdetector.models.yolov8_detector import load_finetuned_yolov8
-from chirpdetector.models.faster_rcnn_detector import (
-    load_finetuned_faster_rcnn,
-)
 
 # initialize the progress bar
 prog = Progress(
@@ -65,7 +46,6 @@ class DetectionEvaluator:
 
     def evaluate(self: Self, dataset: pathlib.Path) -> pd.DataFrame:
         """Evaluate the detection model on the given dataset."""
-
         img_paths = list(dataset.glob("images/*.png"))
         labels_paths = list(dataset.glob("labels/*.txt"))
         img_paths.sort()

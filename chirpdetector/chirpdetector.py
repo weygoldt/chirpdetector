@@ -5,6 +5,7 @@ This is the main entry point of the chirpdetector command line tool.
 
 import pathlib
 from typing import Callable
+
 import rich_click as click
 import toml
 
@@ -26,7 +27,6 @@ from chirpdetector.visualization.plot_detections import (
     plot_all_detections_cli,
     plot_detections_cli,
 )
-from chirpdetector.evaluation.eval_detection import eval_detection_cli
 
 click.rich_click.USE_MARKDOWN = True
 # click.rich_click.SHOW_ARGUMENTS = True
