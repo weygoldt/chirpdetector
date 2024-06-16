@@ -5,7 +5,6 @@ This is the main entry point of the chirpdetector command line tool.
 
 import pathlib
 from typing import Callable
-
 import rich_click as click
 import toml
 
