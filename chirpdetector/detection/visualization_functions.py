@@ -16,7 +16,7 @@ from rich.console import Console
 console = Console()
 
 # Use non-gui backend for matplotlib to avoid memory leaks
-backend = "TkAgg"
+backend = "Agg"
 mpl.use(backend)
 
 # try:
