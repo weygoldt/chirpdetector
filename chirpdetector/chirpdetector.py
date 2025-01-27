@@ -209,7 +209,8 @@ def train(config_path: pathlib.Path, mode: str) -> None:
 )
 def detect(path: pathlib.Path, make_training_data: bool) -> None:
     """Detect chirps on a spectrogram."""
-    detect_cli(path, make_training_data)
+    # detect_cli(path, make_training_data)
+    detect_cli(path)
 
 
 #

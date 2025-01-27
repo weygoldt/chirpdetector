@@ -245,7 +245,7 @@ def convert_detections(
     return out_df.reset_index(drop=True)
 
 
-def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
+def detect_cli(input_path: pathlib.Path) -> None:
     """Terminal interface for the detection function.
 
     Parameters
@@ -282,6 +282,9 @@ def detect_cli(input_path: pathlib.Path, make_training_data: bool) -> None:
 
     good_datasets = []
     for dataset in datasets:
+        # temporary fix for new competition data:
+        dataset = dataset / "recordings"
+
         # check if .raw or .wav file is in dir
         checktypes = ["raw", "wav"]
         filenames = [str(file.name) for file in dataset.iterdir()]
