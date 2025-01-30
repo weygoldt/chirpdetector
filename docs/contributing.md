@@ -35,6 +35,7 @@ After the first release, this section will be removed an tasks will be
 organized as github issues. Until them, if you fixed something, please check it
 off on this list before opening a pull request.
 
+- [ ] Rebuild the logging, verbosity and progress bar system like in the wavetracker
 - [ ] Idea: Instead of simple non maximum supression for the final output
       we could try max averaging: Run non-max supression with a specific
       threshold and then group overlapping bboxes and average their
@@ -64,7 +65,7 @@ off on this list before opening a pull request.
       and most importantly, give us an idea of which data in the validation
       dataset is not well detected so that we can improve the training data
       using quantitative measures.
-- [ ] Move all dataframe operations to cudf, a pandas-like dataframe library
+- [ ] Move all dataframe operations to cudf/polars, a pandas-like dataframe library
       that runs on the GPU.
 - [ ] Rethink the output: Needs to be a HDF5 file that not only includes
       chirp time and ID but also the full chirp spectrograms so that
@@ -79,13 +80,15 @@ off on this list before opening a pull request.
 - [ ] Find out why current assignment algo is failing at raw = raw1 - raw2
 - [ ] Try a random forest classifier on PCAed envelope extractions to assign
       chirps
-- [ ] Finish a script to analyze the Json dumps from the training loop
 - [ ] Update all the docstrings after refactoring.
 - [ ] Move hardcoded params from assignment algo into config.toml
 - [ ] Split the messy training loop into functions or remove it all together
-      and rely on external libraries for training
+      and rely on external libraries for training. Regarding this:
+      Only thing this package should do is genreate good training data, then
+      train wiht external libraries (e.g. ultralytics, ...).
 - [ ] Remove all pyright warnings.
 - [ ] Build github actions CI/CD pipeline for codecov etc.
+- [x] Finish a script to analyze the Json dumps from the training loop
 - [x] Implement detector class that works with the trained yolov8
 - [x] Write an assingment benchmarking
 - [x] Try a small NN, might work better than the random forest in this case

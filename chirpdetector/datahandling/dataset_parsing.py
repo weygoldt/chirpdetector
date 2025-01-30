@@ -125,6 +125,7 @@ def make_batch_specs(
         for idxs in indices
     ]
     batch_specs = [(spec, *ax) for spec, ax in zip(batch_sum_specs, axes)]
+
     # Add the metadata to each spec tuple
     batch_specs = [(meta, *spec) for meta, spec in zip(metadata, batch_specs)]
 

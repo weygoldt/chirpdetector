@@ -11,14 +11,14 @@ from pydantic import BaseModel, ConfigDict
 class Hyperparams(BaseModel):
     """Class to store hyperparameters for training and finetuning."""
 
-    classes: List
-    num_epochs: int
-    batch_size: int
-    kfolds: int
-    learning_rate: float
-    momentum: float
-    weight_decay: float
-    num_workers: int
+    # classes: List
+    # num_epochs: int
+    # batch_size: int
+    # kfolds: int
+    # learning_rate: float
+    # momentum: float
+    # weight_decay: float
+    # num_workers: int
     modelpath: str
 
 
@@ -46,7 +46,7 @@ class Spectrogram(BaseModel):
     time_window: float
     freq_ranges: List
     freq_res: float
-    freq_pad: float
+    # freq_pad: float
     overlap_frac: float
     spec_overlap: float
     batch_size: int
@@ -58,8 +58,8 @@ class Config(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     path: str
     hyper: Hyperparams
-    train: Training
-    finetune: Finetune
+    # train: Training
+    # finetune: Finetune
     det: Detection
     spec: Spectrogram
 
@@ -118,15 +118,15 @@ def load_config(path: Union[str, pathlib.Path]) -> Config:
     """
     file = toml.load(path)
     hy = Hyperparams(**file["hyperparameters"])
-    tr = Training(**file["training"])
-    fi = Finetune(**file["finetuning"])
+    # tr = Training(**file["training"])
+    # fi = Finetune(**file["finetuning"])
     det = Detection(**file["detection"])
     spec = Spectrogram(**file["spectrogram"])
     return Config(
         path=str(path),
         hyper=hy,
-        train=tr,
-        finetune=fi,
+        # train=tr,
+        # finetune=fi,
         det=det,
         spec=spec,
     )

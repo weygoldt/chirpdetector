@@ -49,3 +49,28 @@ It consists of two main steps:
    of a single chirp, the detected chirps are assigned to individual fish.
 
 ![Flowchart](assets/chirpdetector_pipeline.png)
+
+## Ho to use
+
+**Step 1:** Track frequencies of fish using the [`wavetracker`](https://github.com/weygoldt/wavetracker).
+**Step 2:** Install this package using pip:
+
+```bash
+pip install git+https://github.com/weygoldt/chirpdetector.git
+```
+
+**Step 3:** Copy the default config to the dataset root:
+
+```bash
+chirpdetector copyconfig -p /path/to/dataset
+```
+
+**Step 4:** Run the pipeline:
+```bash
+chirpdetector detect -p /path/to/dataset
+```
+
+## Open issues
+
+There are many things that still need to done here! A list can be found in the [docs](docs/contributing.md).
+

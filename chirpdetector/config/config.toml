@@ -1,31 +1,32 @@
 [hyperparameters]
-classes = ["__background__", "chirp"] # classes for the detection
+modelpath = "/home/weygoldt/wrk/analyses/chirp_competition/models"  # path to save and load models from
 
-### The following params are deprecated and do not have any effect
-num_epochs = 10 # number of epochs to train for
-batch_size = 2  # batch size for training
-kfolds = 5 # number of folds for cross validation
-learning_rate = 0.001  # learning rate for SGD
-momentum = 0.9 # momentum for SGD
-weight_decay = 0.0005 # regularization parameter
-num_workers = 4 # number of workers for the data loader
-###
-modelpath = "/home/weygoldt/Projects/mscthesis/models"  # path to save and load models from
+# classes = ["__background__", "chirp"] # classes for the detection
 
-[training] 
-datapath = "/home/weygoldt/Projects/mscthesis/data/interrim/labeled200" # path to training data
+# ### The following params are deprecated and do not have any effect
+# num_epochs = 10 # number of epochs to train for
+# batch_size = 2  # batch size for training
+# kfolds = 5 # number of folds for cross validation
+# learning_rate = 0.001  # learning rate for SGD
+# momentum = 0.9 # momentum for SGD
+# weight_decay = 0.0005 # regularization parameter
+# num_workers = 4 # number of workers for the data loader
+# ###
 
-[finetuning]
-datapath = "/home/weygoldt/Projects/mscthesis/data/interrim/finetune" # path to finetuning data
+# [training] 
+# datapath = "/home/weygoldt/wrk/analyses/chirp_competition/data/interrim/labeled200" # path to training data
+
+# [finetuning]
+# datapath = "/home/weygoldt/Projects/mscthesis/data/interrim/finetune" # path to finetuning data
 
 [detection]
 threshold = 0.5 # threshold for the detection
 
 [spectrogram]
 time_window = 15  # time window in seconds, determines size of the images
-freq_ranges = [500, 1500] # frequency ranges to split the spectrograms into
-batch_size = 4 # how many spectrograms to detect on at once,
-freq_pad = 600 # padding in Hz so that limits are (lowest fish - padding, highest fish + padding)
+freq_ranges = [0, 1000, 500, 1500, 1000, 2000] # frequency ranges to split the spectrograms into
+batch_size = 4 # how many spectrograms (time windows) to detect on at once,
+# freq_pad = 600 # padding in Hz so that limits are (lowest fish - padding, highest fish + padding)
 freq_res = 6 # target frequency resolution of the spectrograms in Hz
 overlap_frac = 0.9 # overlap of the fft windows in % 
 spec_overlap = 1 # overlap of the whole spectrogram in seconds

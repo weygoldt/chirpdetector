@@ -301,16 +301,21 @@ def detect_cli(input_path: pathlib.Path) -> None:
         #     print("chirpdetector_bboxes.csv exists, skipping")
         #     continue
 
+        dataset = dataset.parent
         good_datasets.append(dataset)
 
     print(
         f"Out of {len(datasets)} a total of {len(good_datasets)} still need detecting"
     )
+    good_datasets = sorted(good_datasets)
+    good_datasets = good_datasets[:4]
+    print(good_datasets)
+
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(good_datasets))
         for dataset in good_datasets:
             prog.console.log(f"Detecting chirps in {dataset.name}")
-            data = load(dataset)
+            data = load(dataset, search_intermediate=True)
             data = interpolate_tracks(data, samplerate=120)
 
             # TODO: This is a mess,standardize this
@@ -494,24 +499,21 @@ class ChirpDetector:
                     prog.console.log(f"No detections in batch {i}.")
                     continue
 
-            # STEP 7: Associate the fundamental frequency of the emitter
-            # TODO: This should be all done at once after the full file is processed
+            # UNDER CONSTRUCTION 🚧 -----------------------------------------
+            # TODO: Move shape of spec snippets for each chirp to config file
+            # TODO: Build a saving function to write all data into a HDF5
+            # TODO: Use the gridtools.datasets.models.ChirpDataV2 for this
 
-            # to the closest wavetracker track
-            # with Timer(prog.console, "Associate emitter frequency to tracks"):
-            #     assigned_batch_df = assign_ffreqs_to_tracks(
-            #         assigned_batch_df, self.data
-            #     )
-
+            # Extract spec snippet of every detected chirp for saving
             # spec_snippets, time_snippets, freq_snippets = extract_spec_snippets(
             #     specs, times, freqs, assigned_batch_df
             # )
 
-            # TODO: Move shape to config
-
+            # Resize each spec snippet to same dimensions for saving
             # spec_snippets, time_snippets, freq_snippets, orig_shapes = resize_spec_snippets(
             #     spec_snippets, time_snippets, freq_snippets, 256
             # )
+            # ---------------------------------------------------------------
 
             # STEP 8: plot the detections
             with Timer(prog.console, "Saving plot for current batch"):

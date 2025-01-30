@@ -12,6 +12,7 @@ from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
 from PIL import Image
 from rich.console import Console
+import seaborn as sns
 
 console = Console()
 backend = "Agg"
@@ -145,13 +146,8 @@ def plot_batch_detections(
         t2 = assigned_batch_df["t2"].iloc[j]
         f2 = assigned_batch_df["f2"].iloc[j]
         score = assigned_batch_df["score"].iloc[j]
-        # track_id = assigned_batch_df["track_id"].iloc[j]
         predicted_eodf = assigned_batch_df["emitter_eodf"].iloc[j]
 
-        # if np.isnan(track_id):
-        # continue
-
-        # color = track_colors[data.track.ids == track_id][0]
         color = "white"
 
         patches.append(
