@@ -12,7 +12,6 @@ from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
 from PIL import Image
 from rich.console import Console
-import seaborn as sns
 
 console = Console()
 backend = "Agg"
@@ -188,7 +187,7 @@ def plot_batch_detections(
     ax.set_xlabel("Time [s]", fontsize=16)
     ax.set_ylabel("Frequency [Hz]", fontsize=16)
 
-    savepath = pathlib.Path(f"{data.path}/chirpdetection")
+    savepath = pathlib.Path(f"{data.track.path}/chirpdetection")
     savepath.mkdir(exist_ok=True, parents=True)
 
     if ylims == "full":
@@ -201,7 +200,9 @@ def plot_batch_detections(
         plt.savefig(filename, dpi=300)
 
     if save_data:
-        datapath = pathlib.Path(f"{data.path}/chirpdetection/{filename.stem}")
+        datapath = pathlib.Path(
+            f"{data.track.path}/chirpdetection/{filename.stem}"
+        )
         datapath.mkdir(exist_ok=True, parents=True)
 
         # save all input data

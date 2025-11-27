@@ -308,8 +308,6 @@ def detect_cli(input_path: pathlib.Path) -> None:
         f"Out of {len(datasets)} a total of {len(good_datasets)} still need detecting"
     )
     good_datasets = sorted(good_datasets)
-    good_datasets = good_datasets[:4]
-    print(good_datasets)
 
     with prog:
         task = prog.add_task("Detecting chirps...", total=len(good_datasets))
@@ -550,7 +548,7 @@ class ChirpDetector:
             with Timer(prog.console, "Associate emitter frequency to tracks"):
                 dataframes = assign_ffreqs_to_tracks(dataframes, self.data)
 
-            savepath = self.data.path / "chirpdetector_bboxes.csv"
+            savepath = self.data.track.path / "chirpdetector_bboxes.csv"
             dataframes.to_csv(savepath, index=False)
 
             # save chirp times and identities as numpy files
@@ -565,11 +563,13 @@ class ChirpDetector:
             chirp_ids = chirp_ids[~np.isnan(chirp_ids)]
 
             # save the arrays
-            np.save(self.data.path / "chirp_times_rcnn.npy", chirp_times)
-            np.save(self.data.path / "chirp_ids_rcnn.npy", chirp_ids)
+            np.save(self.data.track.path / "chirp_times_rcnn.npy", chirp_times)
+            np.save(self.data.track.path / "chirp_ids_rcnn.npy", chirp_ids)
         else:
-            savepath = self.data.path / "chirpdetector_bboxes.csv"
+            savepath = self.data.track.path / "chirpdetector_bboxes.csv"
             empty_df = pd.DataFrame()
             empty_df.to_csv(savepath, index=False)
-            np.save(self.data.path / "chirp_times_rcnn.npy", np.array([]))
-            np.save(self.data.path / "chirp_ids_rcnn.npy", np.array([]))
+            np.save(
+                self.data.track.path / "chirp_times_rcnn.npy", np.array([])
+            )
+            np.save(self.data.track.path / "chirp_ids_rcnn.npy", np.array([]))

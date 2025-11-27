@@ -117,8 +117,7 @@ def make_chunk_indices(
         start = sint(current_chunk * chunksize - window_overlap_samples)
         stop = sint((current_chunk + 1) * chunksize + window_overlap_samples)
 
-    if stop > max_end:
-        stop = max_end
+    stop = min(stop, max_end)
 
     return start, stop
 
