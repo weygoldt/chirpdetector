@@ -283,7 +283,7 @@ def detect_cli(input_path: pathlib.Path) -> None:
     good_datasets = []
     for dataset in datasets:
         # temporary fix for new competition data:
-        dataset = dataset / "recordings"
+        # dataset = dataset / "recordings"
 
         # check if .raw or .wav file is in dir
         checktypes = ["raw", "wav"]
@@ -301,7 +301,7 @@ def detect_cli(input_path: pathlib.Path) -> None:
         #     print("chirpdetector_bboxes.csv exists, skipping")
         #     continue
 
-        dataset = dataset.parent
+        # dataset = dataset.parent
         good_datasets.append(dataset)
 
     print(
@@ -314,7 +314,7 @@ def detect_cli(input_path: pathlib.Path) -> None:
         for dataset in good_datasets:
             prog.console.log(f"Detecting chirps in {dataset.name}")
             data = load(dataset, search_intermediate=True)
-            data = interpolate_tracks(data, samplerate=120)
+            # data = interpolate_tracks(data, samplerate=120)
 
             # TODO: This is a mess,standardize this
             chirpfiles = [
@@ -545,8 +545,8 @@ class ChirpDetector:
             dataframes = dataframes.sort_values(by=["t1"])
 
             # Associate emitter eodfs with wavetracker track
-            with Timer(prog.console, "Associate emitter frequency to tracks"):
-                dataframes = assign_ffreqs_to_tracks(dataframes, self.data)
+            # with Timer(prog.console, "Associate emitter frequency to tracks"):
+            #     dataframes = assign_ffreqs_to_tracks(dataframes, self.data)
 
             savepath = self.data.track.path / "chirpdetector_bboxes.csv"
             dataframes.to_csv(savepath, index=False)

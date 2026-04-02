@@ -47,31 +47,32 @@ click.rich_click.USE_MARKDOWN = True
 #     ]
 # }
 
-pyproject = toml.load(pathlib.Path(__file__).parent.parent / "pyproject.toml")
-__version__ = pyproject["tool"]["poetry"]["version"]
+# # pyproject = toml.load(pathlib.Path(__file__).parent.parent / "pyproject.toml")
+# __version__ = pyproject["tool"]["poetry"]["version"]
 
 
-def add_version(f: Callable) -> Callable:
-    """Add the version of the chirpdetector to the help heading."""
-    doc = f.__doc__
-    f.__doc__ = (
-        "**Welcome to Chirpdetector Version: "
-        + __version__
-        + " :fish::zap:**\n\n"
-        + doc
-    )
-    return f
+# def add_version(f: Callable) -> Callable:
+#     """Add the version of the chirpdetector to the help heading."""
+#     doc = f.__doc__
+#     f.__doc__ = (
+#         "**Welcome to Chirpdetector Version: "
+#         # + __version__
+#         + " :fish::zap:**\n\n"
+#         + doc
+#     )
+#     return f
+#
 
 
 @click.group()
 @click.version_option(
-    __version__,
+    # __version__,
     "-V",
     "--version",
     prog_name="Chirpdetector",
     message="Chirpdetector, version %(version)s",
 )
-@add_version
+# @add_version
 def chirpdetector() -> None:
     """The chirpdetector command line tool is a collection of commands that
     make it easier to detect chirps of wave-type weakly electric
