@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -528,3 +530,91 @@ def test_training_can_continue_from_a_weights_file(tmp_path: Path) -> None:
         )
     with pytest.raises(ValueError, match=r"\.pt"):
         DualHeadModelConfig(**{**TINY, "weights": "start.bin"})
+
+
+# ------------------------------------------------------------ stop and resume
+
+
+def _config(**model: object) -> DetectorTrainingConfig:
+    return DetectorTrainingConfig.from_dict(
+        {
+            "device": "cpu",
+            "model": {"type": "dualhead", **TINY, "time_shift_px": 8, **model},
+            "optim": {"epochs": 2, "batch": 4, "workers": 0, "warmup_epochs": 0.0},
+            "cv": {"n_folds": 0},
+        }
+    )
+
+
+def _sigterm_on_call(
+    monkeypatch: pytest.MonkeyPatch, name: str, call: int
+) -> Callable[[], int]:
+    """Send this process SIGTERM when ``engine.<name>`` is called the n-th time."""
+    original = getattr(engine, name)
+    calls = [0]
+
+    def wrapped(*args: object, **kwargs: object) -> object:
+        calls[0] += 1
+        if calls[0] == call:
+            os.kill(os.getpid(), signal.SIGTERM)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(engine, name, wrapped)
+    return lambda: calls[0]
+
+
+def _fit(run: Path) -> dict:
+    return json.loads((run / "final" / "fit.json").read_text())
+
+
+def test_a_stop_signal_ships_the_best_checkpoint_as_a_bundle(
+    tmp_path: Path,
+    dualhead_dataset_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHIRP_MAX_VRAM_FRACTION", raising=False)
+    previous = signal.getsignal(signal.SIGTERM)
+    _sigterm_on_call(monkeypatch, "validate", 2)  # during epoch 2's validation
+    result = train_detector(dualhead_dataset_dir, _config(), tmp_path / "run")
+    assert signal.getsignal(signal.SIGTERM) == previous  # handlers restored
+    fit = _fit(tmp_path / "run")
+    assert fit["details"]["stopped"] == {"signal": "SIGTERM", "epoch": 2, "step": 6}
+    assert fit["epochs_run"] == 1
+    assert fit["best_epoch"] == 1
+    assert result.bundle is not None
+    assert load_bundle(result.bundle).model_type == "dualhead"
+    assert len(pd.read_csv(tmp_path / "run" / "final" / "curves.csv")) == 1
+    assert (tmp_path / "run" / "final" / "dualhead" / "state.pt").is_file()
+
+
+def test_a_resumed_fit_continues_exactly_where_it_stopped(
+    tmp_path: Path,
+    dualhead_dataset_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHIRP_MAX_VRAM_FRACTION", raising=False)
+    train_detector(dualhead_dataset_dir, _config(), tmp_path / "whole")
+    with monkeypatch.context() as patch:
+        _sigterm_on_call(patch, "compute_loss", 4)  # first step of epoch 2
+        train_detector(dualhead_dataset_dir, _config(), tmp_path / "stopped")
+    assert _fit(tmp_path / "stopped")["epochs_run"] == 1
+    state = tmp_path / "stopped" / "final" / "dualhead" / "state.pt"
+    bad = _config(resume=str(state), emitter_loss_weight=3.0)
+    with pytest.raises(ValueError, match="another training config"):
+        train_detector(dualhead_dataset_dir, bad, tmp_path / "bad")
+    train_detector(
+        dualhead_dataset_dir, _config(resume=str(state)), tmp_path / "resumed"
+    )
+    fit = _fit(tmp_path / "resumed")
+    assert fit["epochs_run"] == 2
+    assert fit["details"]["resumed_from"]["epoch"] == 1
+    assert fit["details"]["resumed_from"]["sha256"] == sha256_file(state)
+    whole = pd.read_csv(tmp_path / "whole" / "final" / "curves.csv")
+    resumed = pd.read_csv(tmp_path / "resumed" / "final" / "curves.csv")
+    pd.testing.assert_frame_equal(
+        whole.filter(like="train/"), resumed.filter(like="train/")
+    )
+    a = torch.load(tmp_path / "whole/final/dualhead/last.pt", weights_only=True)
+    b = torch.load(tmp_path / "resumed/final/dualhead/last.pt", weights_only=True)
+    for name, value in a["state_dict"].items():
+        torch.testing.assert_close(b["state_dict"][name], value, msg=name)

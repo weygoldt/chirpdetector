@@ -46,11 +46,15 @@ from __future__ import annotations
 
 import copy
 import csv
+import hashlib
 import logging
 import math
 import random
+import shutil
+import signal
+import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -92,6 +96,7 @@ log = logging.getLogger(__name__)
 
 WEIGHTS_FORMAT = "chirpdetector-dualhead-weights"
 WEIGHTS_FORMAT_VERSION = 1
+STATE_FORMAT = "chirpdetector-dualhead-training-state-1"
 PAD_VALUE = 0
 """Value of the padding pixels: the bottom of the normalised dB range."""
 EMITTER_SCALE = 0.1
@@ -823,8 +828,12 @@ def predict_items(
     amp: bool,
     max_det: int,
     score_threshold: float = VAL_SCORE_FLOOR,
+    should_stop: Callable[[], None] | None = None,
 ) -> pd.DataFrame:
-    """Predictions of a model on dataset images (``recording`` = image id)."""
+    """Predictions of a model on dataset images (``recording`` = image id).
+
+    ``should_stop`` is called before every batch (it raises to abort).
+    """
     manifest = dataset.manifest
     tiling = manifest.tiling
     items = make_items(dataset, image_ids)
@@ -834,11 +843,14 @@ def predict_items(
         shuffle=False,
         num_workers=workers,
         collate_fn=collate,
+        worker_init_fn=worker_init if workers > 0 else None,
     )
     tables: list[pd.DataFrame] = []
     model.eval()
     with torch.inference_mode():
         for x, _ in loader:
+            if should_stop is not None:
+                should_stop()
             x = x.to(device, non_blocking=True).float() / 255
             with _autocast(device, amp):
                 outputs = model(x)
@@ -902,6 +914,7 @@ def validate(
     amp: bool,
     max_det: int,
     score_threshold: float,
+    should_stop: Callable[[], None] | None = None,
 ) -> dict[str, float]:
     """Detection and emitter metrics on validation images (module docstring)."""
     from chirpdetector.evaluation import EvaluationConfig, evaluate
@@ -916,6 +929,7 @@ def validate(
         workers=workers,
         amp=amp,
         max_det=min(max_det, VAL_MAX_DET),
+        should_stop=should_stop,
     )
     truth = dataset_ground_truth(dataset, image_ids)
     result = evaluate(
@@ -1039,11 +1053,158 @@ def _subset(ids: Sequence[str], n: int) -> list[str]:
     return [str(ids[int(i)]) for i in index]
 
 
-def fit(request: FitRequest) -> FitOutput:
-    """Train one fresh dual-head model on the request's images.
+class Stop(Exception):
+    """Raised inside a fit when a stop signal arrived (see `StopSignals`)."""
 
-    Writes ``out_dir/dualhead/{best,last}.pt`` (exported weights), the epoch
-    curves ``out_dir/curves.csv`` and the shipped ``out_dir/weights.pt``.
+
+class StopSignals:
+    """Turn SIGTERM and SIGINT into a stop request for the duration of a fit.
+
+    ``systemctl stop`` (the GPU watchdog, a person stopping a guarded job)
+    sends SIGTERM to every process of the job. The fit then finishes its
+    current step, skips the unfinished epoch and ships the best validated
+    checkpoint, so the run's bundle is still written. Outside the main
+    thread signals cannot be caught and nothing is installed.
+    """
+
+    SIGNALS = (signal.SIGTERM, signal.SIGINT)
+
+    def __init__(self) -> None:
+        self.received: str | None = None
+        self._previous: dict[int, Any] = {}
+
+    def __enter__(self) -> StopSignals:
+        if threading.current_thread() is threading.main_thread():
+            for sig in self.SIGNALS:
+                self._previous[sig] = signal.signal(sig, self._handle)
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        for sig, handler in self._previous.items():
+            signal.signal(sig, handler)
+        self._previous.clear()
+
+    def _handle(self, signum: int, _frame: object) -> None:
+        if self.received is None:
+            log.warning(
+                "%s received: stopping after this step", signal.Signals(signum).name
+            )
+        self.received = signal.Signals(signum).name
+
+    def check(self) -> None:
+        """Raise `Stop` if a stop signal arrived."""
+        if self.received is not None:
+            raise Stop(self.received)
+
+
+def worker_init(_: int) -> None:
+    """Data-loader workers leave SIGTERM and SIGINT to the main process."""
+    for sig in StopSignals.SIGNALS:
+        signal.signal(sig, signal.SIG_IGN)
+
+
+def _ids_sha256(ids: Sequence[str]) -> str:
+    return hashlib.sha256("\n".join(ids).encode()).hexdigest()
+
+
+def _comparable(config: Mapping[str, Any]) -> dict[str, Any]:
+    """A resolved training config without what a resumed fit may change."""
+    out = copy.deepcopy(dict(config))
+    out["model"] = {k: v for k, v in out["model"].items() if k != "resume"}
+    out["optim"] = {k: v for k, v in out["optim"].items() if k != "workers"}
+    out.pop("device", None)
+    return out
+
+
+def _save_atomic(data: Any, path: Path) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(data, tmp)
+    tmp.replace(path)
+
+
+@dataclass
+class _Progress:
+    """Everything a fit needs to continue after its last validated epoch."""
+
+    epoch: int = 0
+    step: int = 0
+    best_fitness: float = -math.inf
+    best_epoch: int | None = None
+    best_metrics: dict[str, float] | None = None
+    stale: int = 0
+    rows: list[dict[str, Any]] | None = None
+
+
+def _load_state(
+    path: Path,
+    request: FitRequest,
+    model: DualHeadRTDetr,
+    ema: ModelEMA | None,
+    optimizer: Any,
+    generator: torch.Generator,
+    work: Path,
+) -> tuple[_Progress, dict[str, Any]]:
+    """Restore an interrupted fit's state (`fit`); return its progress."""
+    from chirpdetector.data.contract import sha256_file
+
+    path = path.expanduser().resolve()
+    if not path.is_file():
+        msg = f"training state {path} does not exist"
+        raise FileNotFoundError(msg)
+    state = torch.load(path, map_location="cpu", weights_only=False)
+    if state.get("format") != STATE_FORMAT:
+        msg = f"{path} is not a {STATE_FORMAT} file"
+        raise ValueError(msg)
+    if _comparable(state["config"]) != _comparable(request.config.to_dict()):
+        msg = f"{path} was made with another training config; resume needs the same one"
+        raise ValueError(msg)
+    for name, ids in (("train", request.train_ids), ("val", request.val_ids)):
+        if state[f"{name}_ids_sha256"] != _ids_sha256(ids):
+            msg = f"{path} was trained on other {name} images"
+            raise ValueError(msg)
+    if state["dataset_sha256"] != request.dataset.manifest.content_sha256:
+        msg = f"{path} was trained on another dataset"
+        raise ValueError(msg)
+    model.load_state_dict(state["model"], strict=True)
+    model.emitter_unit = float(state["emitter_unit"])
+    if ema is not None:
+        ema.ema.load_state_dict(state["ema"], strict=True)
+        ema.updates = int(state["ema_updates"])
+    optimizer.load_state_dict(state["optimizer"])
+    generator.set_state(state["rng"]["generator"])
+    torch.set_rng_state(state["rng"]["torch"])
+    np.random.set_state(state["rng"]["numpy"])  # noqa: NPY002 - restored global state
+    random.setstate(state["rng"]["python"])
+    best = path.parent / "best.pt"
+    if best.is_file():
+        shutil.copyfile(best, work / "best.pt")
+    progress = _Progress(
+        epoch=int(state["epoch"]),
+        step=int(state["step"]),
+        best_fitness=float(state["best_fitness"]),
+        best_epoch=state["best_epoch"],
+        best_metrics=dict(state["best_metrics"] or {}),
+        stale=int(state["stale"]),
+        rows=list(state["rows"]),
+    )
+    record = {
+        "path": str(path),
+        "sha256": sha256_file(path),
+        "epoch": progress.epoch,
+        "step": progress.step,
+    }
+    return progress, {**record, "start": state.get("start")}
+
+
+def fit(request: FitRequest) -> FitOutput:
+    """Train one dual-head model on the request's images.
+
+    Writes, in ``out_dir``: ``curves.csv`` (one row per epoch),
+    ``dualhead/best.pt`` and ``dualhead/last.pt`` (exported weights of the
+    best and the last validated epoch), ``dualhead/state.pt`` (everything
+    needed to continue after the last validated epoch: ``[model] resume``)
+    and the shipped ``weights.pt`` (= best). A stop signal ends the fit
+    early with the best checkpoint (`StopSignals`).
     """
     cfg = request.config
     model_cfg = DualHeadModelConfig(**cfg.model)
@@ -1062,7 +1223,12 @@ def fit(request: FitRequest) -> FitOutput:
     work.mkdir(parents=True, exist_ok=True)
 
     unit = image_hw[0] / shape[0]
-    model, start = build_model(model_cfg, emitter_unit=unit)
+    if model_cfg.resume is not None:
+        # architecture only; the weights come from the state
+        model = DualHeadRTDetr(hf_config(model_cfg))
+        start: dict[str, Any] = {}
+    else:
+        model, start = build_model(model_cfg, emitter_unit=unit)
     model = cast("DualHeadRTDetr", model.to(device))  # type: ignore[arg-type]
     criterion = DualHeadLoss(model.config, model_cfg.emitter_loss_weight, unit).to(
         device
@@ -1073,10 +1239,26 @@ def fit(request: FitRequest) -> FitOutput:
     )
     optimizer = _optimizer(optim.optimizer, groups, optim.momentum)
     base_lrs = [g["lr"] for g in optimizer.param_groups]
+    generator = torch.Generator().manual_seed(cfg.seed)
+    progress, resumed = _Progress(rows=[]), None
+    if model_cfg.resume is not None:
+        progress, resumed = _load_state(
+            Path(model_cfg.resume), request, model, ema, optimizer, generator, work
+        )
+        start = dict(resumed.pop("start") or {})
+        model.to(device)  # type: ignore[arg-type]
+        if ema is not None:
+            ema.ema.to(device)
+        log.info(
+            "%s: resuming after epoch %d (step %d) from %s",
+            request.name,
+            progress.epoch,
+            progress.step,
+            resumed["path"],
+        )
 
     log.info("%s: indexing %d training images", request.name, len(request.train_ids))
     train_items = make_items(request.dataset, request.train_ids)
-    generator = torch.Generator().manual_seed(cfg.seed)
     loader = torch.utils.data.DataLoader(
         TileDataset(train_items, shape, model_cfg.time_shift_px),
         batch_size=optim.batch,
@@ -1085,7 +1267,7 @@ def fit(request: FitRequest) -> FitOutput:
         num_workers=optim.workers,
         collate_fn=collate,
         pin_memory=device.type == "cuda",
-        persistent_workers=optim.workers > 0,
+        worker_init_fn=worker_init if optim.workers > 0 else None,
         generator=generator,
     )
     val_ids = _subset(request.val_ids, model_cfg.val_max_images)
@@ -1094,8 +1276,7 @@ def fit(request: FitRequest) -> FitOutput:
     warmup = round(optim.warmup_epochs * steps)
     curves = out_dir / "curves.csv"
     best_path, last_path = work / "best.pt", work / "last.pt"
-    best_fitness, best_epoch, best_metrics = -math.inf, None, {}
-    stale, step, epochs_run = 0, 0, 0
+    state_path = work / "state.pt"
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
     log.info(
@@ -1109,96 +1290,150 @@ def fit(request: FitRequest) -> FitOutput:
         device,
         vram,
     )
-    with curves.open("w", newline="") as handle:
-        writer: csv.DictWriter | None = None
-        for epoch in range(1, optim.epochs + 1):
+    rows = list(progress.rows or [])
+    step, stopped = progress.step, None
+    with StopSignals() as stop:
+        for epoch in range(progress.epoch + 1, optim.epochs + 1):
+            if optim.patience and progress.stale >= optim.patience:
+                break
             model.train()
             t0 = time.time()
             sums: dict[str, float] = dict.fromkeys(
                 ("loss", "vfl", "bbox", "giou", "emitter"), 0.0
             )
-            for k, (x, targets) in enumerate(loader):
-                factor = lr_factor(step, total, warmup, optim.lrf, optim.schedule)
-                for group, base in zip(optimizer.param_groups, base_lrs, strict=True):
-                    group["lr"] = base * factor
-                x = x.to(device, non_blocking=True).float() / 255
-                targets = [{key: v.to(device) for key, v in t.items()} for t in targets]
-                with _autocast(device, optim.amp):
-                    outputs = model(x, labels=targets)
-                loss, terms = compute_loss(criterion, outputs, targets)
-                if not torch.isfinite(loss):
-                    msg = f"{request.name}: loss is {float(loss)} at step {step}"
-                    raise FloatingPointError(msg)
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                if model_cfg.grad_clip > 0:
-                    nn.utils.clip_grad_norm_(model.parameters(), model_cfg.grad_clip)
-                optimizer.step()
-                if ema is not None:
-                    ema.update(model)
-                step += 1
-                sums["loss"] += float(loss.detach())
-                for name, value in loss_summary(terms).items():
-                    sums[name] += value
-                if (k + 1) % 200 == 0:
-                    log.info(
-                        "%s epoch %d step %d/%d loss %.3f (%.0f img/s)",
-                        request.name,
-                        epoch,
-                        k + 1,
-                        steps,
-                        sums["loss"] / (k + 1),
-                        (k + 1) * optim.batch / (time.time() - t0),
-                    )
-            train_s = time.time() - t0
-            evaluated = ema.ema if ema is not None else model
-            metrics = validate(
-                cast("DualHeadRTDetr", evaluated),
-                request.dataset,
-                val_ids,
-                shape=shape,
-                device=device,
-                batch_size=max(optim.batch, 16),
-                workers=optim.workers,
-                amp=optim.amp,
-                max_det=model_cfg.max_det,
-                score_threshold=cfg.score_threshold,
-            )
-            epochs_run = epoch
-            export_weights(cast("DualHeadRTDetr", evaluated), last_path)
-            improved = metrics["fitness"] > best_fitness
-            if improved:
-                best_fitness, best_epoch, best_metrics = (
-                    metrics["fitness"],
-                    epoch,
-                    metrics,
+            iterator = iter(loader)
+            try:
+                for k in range(steps):
+                    stop.check()
+                    x, targets = next(iterator)
+                    factor = lr_factor(step, total, warmup, optim.lrf, optim.schedule)
+                    for group, base in zip(
+                        optimizer.param_groups, base_lrs, strict=True
+                    ):
+                        group["lr"] = base * factor
+                    x = x.to(device, non_blocking=True).float() / 255
+                    targets = [
+                        {key: v.to(device) for key, v in t.items()} for t in targets
+                    ]
+                    with _autocast(device, optim.amp):
+                        outputs = model(x, labels=targets)
+                    loss, terms = compute_loss(criterion, outputs, targets)
+                    if not torch.isfinite(loss):
+                        msg = f"{request.name}: loss is {float(loss)} at step {step}"
+                        raise FloatingPointError(msg)
+                    optimizer.zero_grad(set_to_none=True)
+                    loss.backward()
+                    if model_cfg.grad_clip > 0:
+                        nn.utils.clip_grad_norm_(
+                            model.parameters(), model_cfg.grad_clip
+                        )
+                    optimizer.step()
+                    if ema is not None:
+                        ema.update(model)
+                    step += 1
+                    sums["loss"] += float(loss.detach())
+                    for name, value in loss_summary(terms).items():
+                        sums[name] += value
+                    if (k + 1) % 200 == 0:
+                        log.info(
+                            "%s epoch %d step %d/%d loss %.3f (%.0f img/s)",
+                            request.name,
+                            epoch,
+                            k + 1,
+                            steps,
+                            sums["loss"] / (k + 1),
+                            (k + 1) * optim.batch / (time.time() - t0),
+                        )
+                train_s = time.time() - t0
+                evaluated = cast(
+                    "DualHeadRTDetr", ema.ema if ema is not None else model
                 )
-                export_weights(cast("DualHeadRTDetr", evaluated), best_path)
-                stale = 0
+                metrics = validate(
+                    evaluated,
+                    request.dataset,
+                    val_ids,
+                    shape=shape,
+                    device=device,
+                    batch_size=max(optim.batch, 16),
+                    workers=optim.workers,
+                    amp=optim.amp,
+                    max_det=model_cfg.max_det,
+                    score_threshold=cfg.score_threshold,
+                    should_stop=stop.check,
+                )
+            except Stop as signal_name:
+                stopped = {"signal": str(signal_name), "epoch": epoch, "step": step}
+                log.warning(
+                    "%s: stopped by %s in epoch %d; shipping the best checkpoint "
+                    "(epoch %s)",
+                    request.name,
+                    signal_name,
+                    epoch,
+                    progress.best_epoch,
+                )
+                break
+            finally:
+                del iterator
+            export_weights(evaluated, last_path)
+            improved = metrics["fitness"] > progress.best_fitness
+            if improved:
+                progress.best_fitness = metrics["fitness"]
+                progress.best_epoch = epoch
+                progress.best_metrics = metrics
+                export_weights(evaluated, best_path)
+                progress.stale = 0
             else:
-                stale += 1
-            row = {
-                "epoch": epoch,
-                **{f"train/{k}": v / max(1, steps) for k, v in sums.items()},
-                **{f"val/{k}": v for k, v in metrics.items()},
-                **{f"lr/{g['name']}": g["lr"] for g in optimizer.param_groups},
-                "time/train_s": train_s,
-                "time/val_s": time.time() - t0 - train_s,
-                "gpu/peak_gib": torch.cuda.max_memory_allocated(device) / 2**30
-                if device.type == "cuda"
-                else 0.0,
-            }
-            if writer is None:
-                writer = csv.DictWriter(handle, fieldnames=list(row))
-                writer.writeheader()
-            writer.writerow(row)
-            handle.flush()
+                progress.stale += 1
+            rows.append(
+                {
+                    "epoch": epoch,
+                    **{f"train/{k}": v / max(1, steps) for k, v in sums.items()},
+                    **{f"val/{k}": v for k, v in metrics.items()},
+                    **{f"lr/{g['name']}": g["lr"] for g in optimizer.param_groups},
+                    "time/train_s": train_s,
+                    "time/val_s": time.time() - t0 - train_s,
+                    "gpu/peak_gib": torch.cuda.max_memory_allocated(device) / 2**30
+                    if device.type == "cuda"
+                    else 0.0,
+                }
+            )
+            _write_curves(rows, curves)
+            progress.epoch, progress.step = epoch, step
+            _save_atomic(
+                {
+                    "format": STATE_FORMAT,
+                    "config": request.config.to_dict(),
+                    "dataset_sha256": request.dataset.manifest.content_sha256,
+                    "train_ids_sha256": _ids_sha256(request.train_ids),
+                    "val_ids_sha256": _ids_sha256(request.val_ids),
+                    "epoch": epoch,
+                    "step": step,
+                    "model": model.state_dict(),
+                    "emitter_unit": float(model.emitter_unit),
+                    "ema": None if ema is None else ema.ema.state_dict(),
+                    "ema_updates": 0 if ema is None else ema.updates,
+                    "optimizer": optimizer.state_dict(),
+                    "best_fitness": progress.best_fitness,
+                    "best_epoch": progress.best_epoch,
+                    "best_metrics": progress.best_metrics,
+                    "stale": progress.stale,
+                    "rows": rows,
+                    "start": start,
+                    "rng": {
+                        "generator": generator.get_state(),
+                        "torch": torch.get_rng_state(),
+                        "numpy": np.random.get_state(),  # noqa: NPY002
+                        "python": random.getstate(),
+                    },
+                },
+                state_path,
+            )
             log.info(
                 "%s epoch %d: loss %.3f | P %.3f R %.3f F1 %.3f AP %.3f | emitter "
                 "MAE %.1f Hz, assignment %.3f | fitness %.4f%s",
                 request.name,
                 epoch,
-                row["train/loss"],
+                rows[-1]["train/loss"],
                 metrics["precision"],
                 metrics["recall"],
                 metrics["f1"],
@@ -1208,13 +1443,18 @@ def fit(request: FitRequest) -> FitOutput:
                 metrics["fitness"],
                 " (best)" if improved else "",
             )
-            if optim.patience and stale >= optim.patience:
+            if optim.patience and progress.stale >= optim.patience:
                 log.info(
-                    "%s: no improvement for %d epochs; stopping", request.name, stale
+                    "%s: no improvement for %d epochs; stopping",
+                    request.name,
+                    progress.stale,
                 )
                 break
+    if progress.best_epoch is None or not best_path.is_file():
+        msg = f"{request.name}: stopped before the first validated epoch; no model"
+        raise RuntimeError(msg)
     weights = out_dir / "weights.pt"
-    weights.write_bytes(best_path.read_bytes())
+    shutil.copyfile(best_path, weights)
     peak = (
         torch.cuda.max_memory_allocated(device) / 2**30
         if device.type == "cuda"
@@ -1237,6 +1477,8 @@ def fit(request: FitRequest) -> FitOutput:
     }
     details = {
         "start_weights": start,
+        "resumed_from": resumed,
+        "stopped": stopped,
         "selected": "ema" if ema is not None else "model",
         "batch_used": optim.batch,
         "device": str(device),
@@ -1249,12 +1491,25 @@ def fit(request: FitRequest) -> FitOutput:
         "n_val_images_scored": len(val_ids),
         "steps": step,
     }
+    best_metrics = progress.best_metrics or {}
     return FitOutput(
         weights=weights,
         model=model_info,
         curves=curves,
-        best_epoch=best_epoch,
-        epochs_run=epochs_run,
+        best_epoch=progress.best_epoch,
+        epochs_run=progress.epoch,
         metrics={k: float(v) for k, v in best_metrics.items() if math.isfinite(v)},
         details=details,
     )
+
+
+def _write_curves(rows: Sequence[Mapping[str, Any]], path: Path) -> None:
+    columns: list[str] = []
+    for row in rows:
+        columns += [c for c in row if c not in columns]
+    tmp = path.with_suffix(".csv.tmp")
+    with tmp.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp.replace(path)

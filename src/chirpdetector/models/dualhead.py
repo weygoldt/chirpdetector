@@ -123,6 +123,13 @@ class DualHeadModelConfig:
         fit's ``dualhead/best.pt``) to continue from instead (overrides
         ``pretrained``); its sha256 is recorded with the fit. It must be of
         ``architecture`` and made for the same image height.
+    resume
+        Path of a fit's ``dualhead/state.pt`` to continue that fit after its
+        last validated epoch (optimizer, EMA, schedule, random state, curves
+        and best checkpoint included). Every other setting must equal the
+        interrupted fit's (``optim.workers`` and ``device`` may differ), as
+        must the dataset and the train and validation images. Use a new run
+        directory.
     num_queries
         Decoder queries per image (upper bound on chirps per tile).
     num_denoising
@@ -149,6 +156,7 @@ class DualHeadModelConfig:
     architecture: str = "rtdetr_v2_r18vd"
     pretrained: bool = True
     weights: str | None = None
+    resume: str | None = None
     num_queries: int = 300
     num_denoising: int = 100
     max_det: int = 300
@@ -174,11 +182,12 @@ class DualHeadModelConfig:
             ),
             f"{self.architecture!r} has no pretrained weights; set pretrained = false",
         )
-        _check(
-            self.weights is None
-            or (isinstance(self.weights, str) and self.weights.endswith(".pt")),
-            f"weights must be the path of a .pt file, got {self.weights!r}",
-        )
+        for name in ("weights", "resume"):
+            value = getattr(self, name)
+            _check(
+                value is None or (isinstance(value, str) and value.endswith(".pt")),
+                f"{name} must be the path of a .pt file, got {value!r}",
+            )
         for name in ("num_queries", "max_det"):
             value = getattr(self, name)
             _check(_integer(value) and value >= 1, f"{name} must be a positive integer")
