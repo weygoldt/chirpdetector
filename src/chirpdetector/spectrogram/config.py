@@ -50,7 +50,9 @@ class SpectrogramConfig:
     f_min_hz, f_max_hz
         Frequency crop, inclusive on both ends: the grid contains the
         reference window's bins ``k * samplerate_hz / n_fft`` that fall
-        inside ``[f_min_hz, f_max_hz]``.
+        inside ``[f_min_hz, f_max_hz]``. The default, 500-1500 Hz, is the
+        band of the v1 production run: EOD frequencies of A. leptorhynchus
+        and their chirps, without most second harmonics.
     aggregation
         How per-electrode power is combined: ``"sum"`` (total power) or
         ``"max"`` (loudest electrode). Always applied to linear power, never
@@ -67,8 +69,8 @@ class SpectrogramConfig:
     window_lengths_samples: tuple[int, ...] = (4096, 1024, 256)
     window: WindowName = "hann"
     hop_samples: int = 100
-    f_min_hz: float = 400.0
-    f_max_hz: float = 2000.0
+    f_min_hz: float = 500.0
+    f_max_hz: float = 1500.0
     aggregation: Aggregation = "sum"
     dynamic_range_db: float = 60.0
     headroom_db: float = 10.0
