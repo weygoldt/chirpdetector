@@ -22,7 +22,9 @@ emitter's baseline), which `chirpdetector.prediction` maps to
 ``emitter_hz``.
 
 Backends register a factory with `register_backend`; ``ultralytics-yolo``
-(YOLO26, `chirpdetector.models.yolo`) is built in.
+(YOLO26, `chirpdetector.models.yolo`) and ``dualhead`` (RT-DETRv2 with an
+emitter-frequency head, `chirpdetector.models.dualhead`; needs the
+``dualhead`` extra) are built in.
 """
 
 from __future__ import annotations
@@ -212,4 +214,11 @@ def _yolo() -> DetectorBackend:
     return YoloBackend()
 
 
+def _dualhead() -> DetectorBackend:
+    from chirpdetector.models.dualhead import DualHeadBackend
+
+    return DualHeadBackend()
+
+
 register_backend("ultralytics-yolo", _yolo)
+register_backend("dualhead", _dualhead)
