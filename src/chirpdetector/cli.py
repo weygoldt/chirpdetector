@@ -419,6 +419,49 @@ def bundle_inspect(
     typer.echo(describe_bundle(bundle))
 
 
+@app.command("showcase")
+def showcase_command(
+    snippets: Annotated[
+        Path, typer.Option(exists=True, help="TOML file with [[snippet]] entries.")
+    ],
+    out: Annotated[Path, typer.Option(help="Output directory (sheet, panels, index).")],
+    bundle: Annotated[
+        list[Path] | None,
+        typer.Option(help="Model bundle; repeat for several (one column each)."),
+    ] = None,
+    v1: Annotated[
+        bool, typer.Option("--v1", help="Add v1's production detections as a column.")
+    ] = False,
+    threshold: Annotated[
+        float | None,
+        typer.Option(help="Score threshold for the bundles (default: each bundle's)."),
+    ] = None,
+    device: Annotated[
+        str | None, typer.Option(help="Torch device (e.g. cpu, cuda).")
+    ] = None,
+    force: Annotated[bool, typer.Option(help="Re-render existing panels.")] = False,
+) -> None:
+    """Render models side by side on hard snippets of real recordings.
+
+    One panel per snippet and model (tracks, boxes, scores, predicted emitter
+    EODf, hand labels), collected in a contact sheet. Columns already in
+    ``--out`` are kept, so the sheet grows with every model tried.
+    """
+    from chirpdetector.evaluation.showcase import (
+        bundle_column,
+        read_snippets,
+        render_showcase,
+        v1_column,
+    )
+
+    columns = [v1_column()] if v1 else []
+    columns += [bundle_column(path, threshold) for path in bundle or []]
+    sheet = render_showcase(
+        columns, read_snippets(snippets), out, device=device, force=force
+    )
+    typer.echo(f"contact sheet: {sheet}")
+
+
 # ----------------------------------------------------------------- datasets
 
 dataset_app = typer.Typer(no_args_is_help=True, help="Detector datasets.")
