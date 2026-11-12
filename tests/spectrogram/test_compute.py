@@ -14,7 +14,8 @@ from chirpdetector.spectrogram import (
     plan_span,
 )
 
-CFG = SpectrogramConfig()
+# Explicit band: these tests index bins and must not depend on the default band.
+CFG = SpectrogramConfig(f_min_hz=400.0, f_max_hz=2000.0)
 FS = CFG.samplerate_hz
 
 

@@ -16,6 +16,14 @@ def test_defaults_keep_the_long_reference_window() -> None:
     assert cfg.n_windows == 3
 
 
+def test_default_band_is_the_v1_production_band() -> None:
+    # Author's decision (2026-11-12): 500-1500 Hz, as in the v1 production run.
+    cfg = SpectrogramConfig()
+    assert (cfg.f_min_hz, cfg.f_max_hz) == (500.0, 1500.0)
+    assert cfg.freqs_hz[0] >= 500.0
+    assert cfg.freqs_hz[-1] <= 1500.0
+
+
 def test_frequency_grid_is_reference_bins_inside_crop() -> None:
     cfg = SpectrogramConfig(f_min_hz=400.0, f_max_hz=2000.0)
     freqs = cfg.freqs_hz
