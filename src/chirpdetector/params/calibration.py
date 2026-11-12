@@ -94,6 +94,12 @@ class CalibrationConfig:
     flag_quantile
         Calibrated sigma above this quantile of the val sigmas flags a
         chirp as ``uncertain`` (`chirpdetector.params.inference`).
+    fit_from
+        Per parameter, the smallest true value (natural units) the bias
+        curve is fitted on; below its first knot the curve continues with
+        slope 1. The default excludes undershoots below 1 Hz: many chirps
+        have none (a point mass at 0), and inverting a curve through a
+        point mass would spread those chirps into an artificial mode.
     """
 
     method: Method = "inverse-median"
@@ -101,8 +107,18 @@ class CalibrationConfig:
     min_count: int = 50
     min_slope: float = 0.2
     flag_quantile: float = 0.995
+    fit_from: Mapping[str, float] = field(
+        default_factory=lambda: {"undershoot_hz": 1.0}
+    )
 
     def __post_init__(self) -> None:
+        unknown = sorted(set(self.fit_from) - set(PARAMETERS))
+        if unknown:
+            msg = f"calibration.fit_from: unknown parameters {unknown}"
+            raise ValueError(msg)
+        object.__setattr__(
+            self, "fit_from", {k: float(v) for k, v in self.fit_from.items()}
+        )
         if self.method not in ("inverse-median", "none"):
             msg = f"calibration.method must be 'inverse-median' or 'none', got {self.method!r}"
             raise ValueError(msg)
@@ -327,12 +343,18 @@ def fit_calibration(
     y = np.asarray(true_log, dtype=np.float64).reshape(-1, len(PARAMETERS))
     m = np.asarray(mean_log, dtype=np.float64).reshape(y.shape)
     s = np.asarray(sigma_log, dtype=np.float64).reshape(y.shape)
+    from chirpdetector.params.model import LOG_OFFSETS
+
     maps: dict[str, MonotoneMap] = {}
     for j, name in enumerate(PARAMETERS):
         if config.method == "inverse-median":
+            lowest = config.fit_from.get(name)
+            use = np.ones(len(y), dtype=bool)
+            if lowest is not None:
+                use = y[:, j] >= np.log(lowest + LOG_OFFSETS[name])
             maps[name] = fit_bias_map(
-                y[:, j],
-                m[:, j],
+                y[use, j],
+                m[use, j],
                 n_bins=config.n_bins,
                 min_count=config.min_count,
                 min_slope=config.min_slope,

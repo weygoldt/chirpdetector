@@ -119,3 +119,23 @@ def test_config_validates() -> None:
         CalibrationConfig(method="isotonic")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="min_slope"):
         CalibrationConfig(min_slope=0.0)
+
+
+def test_a_point_mass_is_not_spread_into_a_mode() -> None:
+    """Undershoot: many chirps have none. Below `fit_from` the map is a shift."""
+    rng = np.random.default_rng(4)
+    n = 20_000
+    undershoot = np.where(rng.random(n) < 0.4, 0.0, rng.uniform(1.0, 30.0, n))
+    true = np.tile(np.log(undershoot + 1.0)[:, None], (1, len(PARAMETERS)))
+    pred = true + 0.4 * np.exp(-true) + rng.normal(0, 0.15, true.shape)
+    sigma = np.full(true.shape, 0.15)
+    j = PARAMETERS.index("undershoot_hz")
+    zero = undershoot == 0
+    for fit_from, spread_kept in (({"undershoot_hz": 1.0}, True), ({}, False)):
+        config = CalibrationConfig(fit_from=fit_from)
+        cal, _ = fit_calibration(true, pred, sigma, config).apply(pred, sigma)
+        iqr_raw = np.subtract(*np.quantile(pred[zero, j], [0.75, 0.25]))
+        iqr_cal = np.subtract(*np.quantile(cal[zero, j], [0.75, 0.25]))
+        assert bool(iqr_cal == pytest.approx(iqr_raw, rel=0.05)) is spread_kept
+    with pytest.raises(ValueError, match="unknown parameters"):
+        CalibrationConfig(fit_from={"depth_hz": 1.0})

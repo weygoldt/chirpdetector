@@ -262,6 +262,7 @@ class ParamsTrainingConfig:
             "optim": asdict(self.optim),
             "calibration": {
                 **asdict(self.calibration),
+                "fit_from": dict(self.calibration.fit_from),
                 "min_score": self.calibration_min_score,
             },
         }
