@@ -1,76 +1,36 @@
 <p align="center">
-    <img src="assets/logo.png" width="100" />
-    <h1 align="center">Chirpdetector</h2>
+  <img src="assets/logo.png" width="100" alt="chirpdetector logo">
 </p>
 
-<p align="center">Detect communication signals of electric fish using deep neural networks 🐟⚡🧠 </p>
+# chirpdetector
 
-<p align="center">
-  <a href="https://weygoldt.com/chirpdetector"><strong>Explore the docs »</strong></a>
-  <br />
-  <br />
-  <a href="https://weygoldt.com/chirpdetector/demo">View Demo</a>
-  |
-  <a href="https://github.com/weygoldt/chirpdetector/issues">Report Bug</a>
-  |
-  <a href="https://github.com/weygoldt/chirpdetector/issues">Request Feature</a>
-</p>
+Detect chirps of wave-type weakly electric fish in multi-electrode grid
+recordings and assign each chirp to the fish that emitted it. Ships with the
+tools to build training data from simulations, train and evaluate the models,
+and label real data.
 
-![Codecov](https://img.shields.io/codecov/c/github/weygoldt/chirpdetector)
+> **Status:** version 2 is being rebuilt on the `v2` branch. The code used for
+> the chirp competition paper (2024) is available as tag
+> `paper-chirp-competition-v1`.
 
-**This project is still work in progress and will approximately be released in
-summer of 2024.**
+## Installation
 
----
-
-## The Problem
-
-Chirps are by far the most thoroughly studied communication signal of weakly
-electric, probably even all fish. But detecting chirps becomes so hard when
-more than one fish is recorded. As a result, most of the research to date
-analyzes this signal in isolated individuals. This is **not** good.
-
-## The Solution
-
-To tackle this issue, this package provides a simple tool to detect chirps of
-multiple fish. To do so, it uses GPU-accelerated spectrogram computation and
-deep neural networks to detect chirps in spectrograms. The package is
-designed to be easy to use and to be integrated into existing data analysis
-pipelines. Have fun detecting chirps!
-
-## How it Works
-
-The following flowchart illustrates the basic workflow of the pipeline.
-It consists of two main steps:
-
-1. Chirp detection: The raw audio data is transformed into a spectrogram and
-   then fed into a deep neural network to detect chirps.
-2. Chirp assignment: Based on power spectral densities of the frequency components
-   of a single chirp, the detected chirps are assigned to individual fish.
-
-![Flowchart](assets/chirpdetector_pipeline.png)
-
-## Ho to use
-
-**Step 1:** Track frequencies of fish using the [`wavetracker`](https://github.com/weygoldt/wavetracker).
-**Step 2:** Install this package using pip:
-
-```bash
-pip install git+https://github.com/weygoldt/chirpdetector.git
+```sh
+uv add "chirpdetector @ git+https://github.com/weygoldt/chirpdetector@v2"
 ```
 
-**Step 3:** Copy the default config to the dataset root:
+## Development
 
-```bash
-chirpdetector copyconfig -p /path/to/dataset
+chirpdetector depends on [gridtools](https://github.com/weygoldt/gridtools),
+expected as a sibling checkout (`../gridtools`, branch `v2`).
+
+```sh
+uv sync
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+uv run pyright
 ```
 
-**Step 4:** Run the pipeline:
-```bash
-chirpdetector detect -p /path/to/dataset
-```
+## License
 
-## Open issues
-
-There are many things that still need to done here! A list can be found in the [docs](docs/contributing.md).
-
+MIT
