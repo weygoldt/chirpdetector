@@ -1,7 +1,9 @@
 """Detector datasets from simulated scenes (``gridtools sim run``).
 
-Every scene becomes one source and one group (its id, ``<name>-<seed>``).
-Its recording is cleaned of clicks exactly as inference will clean it
+Every scene becomes one source and one group (its id, ``<name>-<seed>``),
+of kind ``hybrid`` when it has a real background segment (``scene.json``
+``background.used``), else ``simulation``. Splits go by seed or by the
+directory a scene lies in (`SplitRule`). Its recording is cleaned of clicks exactly as inference will clean it
 (`ClickRemoval` when `can_remove_clicks` allows it for the scene's
 electrode count and rate, otherwise not at all, so that the detector learns
 to reject the clicks it will see), its spectrogram is computed once with
@@ -24,9 +26,11 @@ reference channel (`footprints_match`), otherwise recomputed with
 
 Every row carries ``emitter_hz`` (the emitter's baseline at the chirp
 centre), ``emitter_id`` (its track id), ``live_tracks_hz`` (all fish's
-baselines at the chirp centre from the scene's tracks), and the scene's
-per-chirp SNR, family, excursion, duration, ΔF to the nearest fish,
-overlap flag and template id.
+baselines at the chirp centre from the scene's tracks, including the real,
+non-chirping fish of a hybrid background, idents >= 1000),
+``min_df_live_hz`` (ΔF to the nearest of those other fish), and the
+scene's per-chirp SNR, family, excursion, duration, ΔF to the nearest
+simulated fish, overlap flag and template id.
 
 Workers compute the tiles of one scene each and return images and box
 tables; the parent process alone writes through `DatasetWriter` (which is
@@ -114,22 +118,27 @@ _HARMONIC_BOX = (
 
 @dataclass(frozen=True)
 class SplitRule:
-    """Which split each scene (by seed) goes to.
+    """Which split each scene goes to.
 
-    Either ``ranges`` (split -> half-open seed range ``[lo, hi)``; every
-    seed must fall in one) or ``fractions`` (split -> fraction; seeds are
-    shuffled with ``seed`` and cut in the order train, val, test).
+    Exactly one of ``ranges`` (split -> half-open seed range ``[lo, hi)``;
+    every seed must fall in one), ``fractions`` (split -> fraction; seeds
+    are shuffled with ``seed`` and cut in the order train, val, test) or
+    ``roots`` (split -> directory; a scene belongs to the split whose
+    directory contains it, e.g. scenes whose backgrounds come from
+    disjoint recordings per split).
     """
 
     ranges: Mapping[str, tuple[int, int]] | None = None
     fractions: Mapping[str, float] | None = None
     seed: int = 0
+    roots: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
-        if (self.ranges is None) == (self.fractions is None):
-            msg = "give either seed ranges or fractions"
+        given = [x is not None for x in (self.ranges, self.fractions, self.roots)]
+        if sum(given) != 1:
+            msg = "give exactly one of seed ranges, fractions or split roots"
             raise ValueError(msg)
-        names = set(self.ranges or self.fractions or {})
+        names = set(self.ranges or self.fractions or self.roots or {})
         unknown = sorted(names - set(SPLITS))
         if unknown:
             msg = f"unknown splits {unknown}; allowed {SPLITS}"
@@ -151,6 +160,25 @@ class SplitRule:
                     f"fractions must lie in [0, 1] and sum to 1: {dict(self.fractions)}"
                 )
                 raise ValueError(msg)
+        if self.roots is not None:
+            paths = [Path(p).resolve() for p in self.roots.values()]
+            for a, b in itertools.permutations(paths, 2):
+                if a.is_relative_to(b):
+                    msg = f"split roots must not contain each other: {dict(self.roots)}"
+                    raise ValueError(msg)
+
+    @classmethod
+    def from_roots(cls, items: Iterable[str]) -> SplitRule:
+        """Parse ``split=DIRECTORY`` items (one per split)."""
+        roots: dict[str, str] = {}
+        for item in items:
+            name, _, path = item.partition("=")
+            name = name.strip()
+            if not path or name in roots:
+                msg = f"expected one split=DIRECTORY per split, got {item!r}"
+                raise ValueError(msg)
+            roots[name] = path.strip()
+        return cls(roots=roots)
 
     @classmethod
     def parse(cls, text: str, *, seed: int = 0) -> SplitRule:
@@ -173,8 +201,28 @@ class SplitRule:
             raise ValueError(msg)
         return cls(fractions={k: float(v) for k, v in items.items()}, seed=seed)
 
+    def assign_scenes(self, seeds: Mapping[Path, int]) -> dict[Path, Split]:
+        """Split of every scene directory (scene dir -> seed given)."""
+        if self.roots is None:
+            by_seed = self.assign(seeds.values())
+            return {d: by_seed[int(s)] for d, s in seeds.items()}
+        roots = {k: Path(v).resolve() for k, v in self.roots.items()}
+        out: dict[Path, Split] = {}
+        for d in seeds:
+            hits = [
+                k for k, root in roots.items() if Path(d).resolve().is_relative_to(root)
+            ]
+            if len(hits) != 1:
+                msg = f"scene {d} lies in no split root {dict(self.roots)}"
+                raise ValueError(msg)
+            out[d] = cast("Split", hits[0])
+        return out
+
     def assign(self, seeds: Iterable[int]) -> dict[int, Split]:
-        """Split of every seed."""
+        """Split of every seed (seed ranges or fractions)."""
+        if self.roots is not None:
+            msg = "split roots assign scene directories, not seeds; use assign_scenes"
+            raise ValueError(msg)
         seeds = sorted(set(int(s) for s in seeds))
         out: dict[int, Split] = {}
         if self.ranges is not None:
@@ -208,6 +256,8 @@ class SplitRule:
         """JSON-serialisable form (for the provenance)."""
         if self.ranges is not None:
             return {"ranges": {k: list(v) for k, v in self.ranges.items()}}
+        if self.roots is not None:
+            return {"roots": {k: str(Path(v).resolve()) for k, v in self.roots.items()}}
         return {"fractions": dict(self.fractions or {}), "seed": self.seed}
 
 
@@ -397,19 +447,31 @@ def scene_boxes(
         "emitter_id",
         "live_tracks_hz",
         *_EXTRA_COLUMNS,
+        "min_df_live_hz",
     ]
     if len(chirps) == 0:
         return pd.DataFrame({c: pd.Series(dtype=object) for c in columns})
     centres = chirps["t_center_s"].to_numpy(dtype=np.float64)
-    per_track = [t.frequency_at(centres) for t in tracks]
+    track_list = list(tracks)
+    per_track = [t.frequency_at(centres) for t in track_list]
     live = np.stack(per_track, axis=1) if per_track else np.zeros((len(centres), 0))
     live_lists = [[float(f) for f in row if np.isfinite(f) and f > 0] for row in live]
+    # ΔF to the nearest other live fish (simulated or real) at the centre
+    idents = np.array([int(t.ident) for t in track_list], dtype=np.int64)
+    emitters = chirps["emitter_id"].to_numpy(dtype=np.int64)
+    baselines = chirps["baseline_hz"].to_numpy(dtype=np.float64)
+    others = np.where(idents[None, :] != emitters[:, None], live, np.nan)
+    df = np.abs(others - baselines[:, None])
+    has = np.isfinite(df).any(axis=1)
+    min_df_live = np.full(len(centres), np.nan)
+    min_df_live[has] = np.nanmin(df[has], axis=1)
     base = {
         "t_center_s": centres,
         "emitter_hz": chirps["baseline_hz"].to_numpy(dtype=np.float64),
         "emitter_id": chirps["emitter_id"].to_numpy(dtype=np.int64),
         "live_tracks_hz": live_lists,
         **{c: chirps[c].to_numpy() for c in _EXTRA_COLUMNS},
+        "min_df_live_hz": min_df_live,
     }
     fundamental = pd.DataFrame(
         {
@@ -453,6 +515,7 @@ class SceneTiles:
     source_id: str
     seed: int
     scene_dir: str
+    kind: Literal["simulation", "hybrid"]
     samplerate_hz: float
     source_extra: dict[str, Any]
     images: list[tuple[str, NDArray[np.uint8], ImageGeometry, dict[str, Any]]]
@@ -567,6 +630,9 @@ def tile_scene(
         "device": used,
         "footprints": "scene" if match else "recomputed",
     }
+    background = dict(info.get("background") or {})
+    hybrid = bool(background.get("used", False))
+    real_fish = list(info.get("real_fish") or [])
     source_extra = {
         "scene_dir": str(scene_dir),
         "seed": int(info["seed"]),
@@ -578,11 +644,19 @@ def tile_scene(
         "footprints": stats["footprints"],
         "n_chirps": len(chirps),
         "n_visible": int(visible.sum()),
+        "background": {
+            k: background.get(k)
+            for k in ("segment_id", "dataset", "recording", "split_group")
+        }
+        if hybrid
+        else None,
+        "real_fish_idents": [int(f["ident"]) for f in real_fish],
     }
     return SceneTiles(
         source_id=source,
         seed=int(info["seed"]),
         scene_dir=str(scene_dir),
+        kind="hybrid" if hybrid else "simulation",
         samplerate_hz=fs,
         source_extra=source_extra,
         images=images,
@@ -716,7 +790,8 @@ def build_scene_dataset(
     if len(set(ids.values())) != len(ids):
         msg = "two scene directories have the same name and seed"
         raise ValueError(msg)
-    splits = cfg.split.assign(int(info["seed"]) for info in infos.values())
+    seeds = {d: int(info["seed"]) for d, info in infos.items()}
+    splits = cfg.split.assign_scenes(seeds)
     device = _resolve_device(cfg.device)
     workers = max(1, int(cfg.workers))
     started = time.perf_counter()
@@ -749,7 +824,7 @@ def build_scene_dataset(
             "scenes": {
                 "n": len(dirs),
                 "roots": sorted({str(d.parent) for d in dirs}),
-                "seeds": [min(splits), max(splits)],
+                "seeds": [min(seeds.values()), max(seeds.values())],
             },
             **dict(provenance or {}),
         },
@@ -766,12 +841,12 @@ def build_scene_dataset(
         writer.add_source(
             result.source_id,
             group=result.source_id,
-            kind="simulation",
+            kind=result.kind,
             tracks=result.scene_dir,
             samplerate_hz=result.samplerate_hz,
             extra=result.source_extra,
         )
-        writer.assign_split(result.source_id, splits[result.seed])
+        writer.assign_split(result.source_id, splits[Path(result.scene_dir)])
         for (image_id, image, geometry, extra), chirps, ignore in zip(
             result.images, result.chirps, result.ignore, strict=True
         ):

@@ -126,11 +126,13 @@ def write_template_library(path: Path) -> Path:
 
 
 def scene_config(library: Path, *, layout: tuple[int, int], **changes: Any) -> Any:
-    """An 8-s scene on a real (regular) layout; ``changes`` replace sections."""
+    """An 8-s scene on a real (regular) layout, synthetic noise only (no real
+    background segment); ``changes`` replace sections."""
     from gridtools.sim.config import (
         ChirpConfig,
         ClickConfig,
         GridConfig,
+        HybridConfig,
         NoiseConfig,
         PlotConfig,
         PopulationConfig,
@@ -140,6 +142,7 @@ def scene_config(library: Path, *, layout: tuple[int, int], **changes: Any) -> A
     config = SceneConfig(
         name="test",
         duration_s=8.0,
+        background=HybridConfig(prob=0.0),
         grid=GridConfig(layouts=(layout,), real_layout_prob=1.0),
         population=PopulationConfig(n_fish=(3, 3)),
         chirps=ChirpConfig(library=str(library), rate_hz=(0.8, 1.0)),

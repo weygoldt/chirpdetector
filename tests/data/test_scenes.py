@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -327,3 +328,79 @@ def test_worker_processes_give_the_same_dataset(
     assert load_dataset(tmp_path / "parallel").manifest.images == (
         dataset.manifest.images
     )
+
+
+# ------------------------------------------------- split roots, hybrid scenes
+
+
+def test_split_by_directories(tmp_path: Path) -> None:
+    roots = {k: tmp_path / k for k in ("train", "val", "test")}
+    rule = SplitRule.from_roots(f"{k}={v}" for k, v in roots.items())
+    scenes = {roots["train"] / "000001": 1, roots["val"] / "000001": 1}
+    scenes[roots["test"] / "000007"] = 7
+    assert rule.assign_scenes(scenes) == {
+        roots["train"] / "000001": "train",
+        roots["val"] / "000001": "val",
+        roots["test"] / "000007": "test",
+    }
+    assert rule.to_dict() == {"roots": {k: str(v) for k, v in roots.items()}}
+    with pytest.raises(ValueError, match="no split root"):
+        rule.assign_scenes({tmp_path / "other" / "000001": 1})
+    with pytest.raises(ValueError, match="assign_scenes"):
+        rule.assign([1])
+    with pytest.raises(ValueError, match="contain each other"):
+        SplitRule.from_roots([f"train={tmp_path}", f"val={roots['val']}"])
+    with pytest.raises(ValueError, match="one split=DIRECTORY"):
+        SplitRule.from_roots([f"train={tmp_path}", f"train={roots['val']}"])
+    by_seed = DEFAULT_SPLIT.assign_scenes({tmp_path / "a": 3, tmp_path / "b": 1700})
+    assert by_seed == {tmp_path / "a": "train", tmp_path / "b": "val"}
+
+
+def _as_hybrid(scene: Path, out: Path) -> Path:
+    """A copy of a scene with a (pretend) real background and one real fish."""
+    shutil.copytree(scene, out)
+    info = json.loads((out / "scene.json").read_text())
+    info["background"] = {
+        "used": True,
+        "segment_id": "competition2019_x_000001",
+        "dataset": "competition2019",
+        "recording": "x",
+        "split_group": "competition2019/x",
+    }
+    info["real_fish"] = [{"ident": 1000, "real_fish": True, "eodf_hz": 1100.0}]
+    (out / "scene.json").write_text(json.dumps(info))
+    times = np.load(out / "times.npy")
+    n = len(times)
+    for name, extra in (
+        ("fund_v", np.full(n, 1100.0)),
+        ("ident_v", np.full(n, 1000.0)),
+        ("idx_v", np.arange(n)),
+    ):
+        values = np.load(out / f"{name}.npy")
+        np.save(
+            out / f"{name}.npy", np.concatenate([values, extra.astype(values.dtype)])
+        )
+    sign = np.load(out / "sign_v.npy")
+    np.save(out / "sign_v.npy", np.concatenate([sign, sign[:n]]))
+    return out
+
+
+def test_hybrid_scenes_list_their_real_fish(
+    scene_dirs: dict[str, Path], tmp_path: Path
+) -> None:
+    hybrid = _as_hybrid(scene_dirs["grid9"], tmp_path / "hybrid" / "000003")
+    tiles = tile_scene(hybrid, CONFIG)
+    assert tiles.kind == "hybrid"
+    assert tiles.source_extra["real_fish_idents"] == [1000]
+    assert tiles.source_extra["background"]["segment_id"] == "competition2019_x_000001"
+    assert tile_scene(scene_dirs["grid9"], CONFIG).kind == "simulation"
+    rows = pd.concat(tiles.chirps, ignore_index=True)
+    assert len(rows)
+    for row in rows.to_dict(orient="records"):
+        live = np.asarray(row["live_tracks_hz"])
+        assert live.size == 4
+        assert np.any(np.abs(live - 1100.0) < 1e-9)
+        others = live[np.abs(live - row["emitter_hz"]) > 0.5]
+        assert row["min_df_live_hz"] == pytest.approx(
+            np.min(np.abs(others - row["emitter_hz"]))
+        )

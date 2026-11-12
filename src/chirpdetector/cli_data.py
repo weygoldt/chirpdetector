@@ -19,16 +19,18 @@ data_app = typer.Typer(
 
 @data_app.command("build-scenes")
 def build_scenes(
+    out: Annotated[Path, typer.Option(help="Output dataset directory.")],
     scenes: Annotated[
-        str,
+        str | None,
         typer.Argument(
             help=(
                 "Scene directories: a glob (quote it), e.g. "
-                "'/mnt/data1/chirp_v2/scenes/train_v1/*', or a directory of scenes."
+                "'/mnt/data1/chirp_v2/scenes/train_v1/*', or a directory of "
+                "scenes. Optional with --split-dir (default: all scenes in "
+                "the split directories)."
             )
         ),
-    ],
-    out: Annotated[Path, typer.Option(help="Output dataset directory.")],
+    ] = None,
     workers: Annotated[int, typer.Option(help="Worker processes.")] = 12,
     threads: Annotated[int, typer.Option(help="Torch threads per worker.")] = 2,
     split: Annotated[
@@ -41,6 +43,17 @@ def build_scenes(
         ),
     ] = "train=0:1600,val=1600:1800,test=1800:2000",
     split_seed: Annotated[int, typer.Option(help="Shuffle seed of fractions.")] = 0,
+    split_dir: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--split-dir",
+            help=(
+                "SPLIT=DIRECTORY, repeatable: the scenes in DIRECTORY go to "
+                "SPLIT (replaces --split), e.g. --split-dir "
+                "train=/mnt/data1/chirp_v2/scenes/train_v2/train"
+            ),
+        ),
+    ] = None,
     device: Annotated[
         str, typer.Option(help="STFT device: cpu, cuda or auto.")
     ] = "cpu",
@@ -63,8 +76,20 @@ def build_scenes(
         msg = f"--device must be cpu, cuda or auto, got {device!r}"
         raise typer.BadParameter(msg)
     try:
-        rule = SplitRule.parse(split, seed=split_seed)
-        dirs = find_scenes(scenes)
+        if split_dir:
+            rule = SplitRule.from_roots(split_dir)
+            roots = (rule.roots or {}).values()
+            dirs = (
+                find_scenes(scenes)
+                if scenes is not None
+                else sorted(d for root in roots for d in find_scenes(root))
+            )
+        elif scenes is None:
+            msg = "give SCENES or --split-dir"
+            raise ValueError(msg)
+        else:
+            rule = SplitRule.parse(split, seed=split_seed)
+            dirs = find_scenes(scenes)
     except (ValueError, FileNotFoundError) as err:
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
@@ -81,7 +106,11 @@ def build_scenes(
         out,
         config,
         overwrite=overwrite,
-        provenance={"command": sys.argv, "scenes_glob": scenes},
+        provenance={
+            "command": sys.argv,
+            "scenes_glob": scenes,
+            "split_dirs": split_dir,
+        },
     )
     manifest = dataset.manifest
     counts = {s: len(manifest.image_ids(split=s)) for s in ("train", "val", "test")}
