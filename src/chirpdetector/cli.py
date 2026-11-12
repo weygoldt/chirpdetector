@@ -5,7 +5,7 @@ from __future__ import annotations
 import getpass
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 import typer
 
@@ -328,3 +328,122 @@ def evaluate_command(
             f"{pooled.get('n_regions', 0)} regions)"
         )
     typer.echo(f"wrote {len(written)} files to {out}")
+
+
+# ----------------------------------------------------------------- training
+
+train_app = typer.Typer(no_args_is_help=True, help="Train models.")
+app.add_typer(train_app, name="train")
+
+
+def _parse_fold(fold: str | None) -> int | Literal["final"] | None:
+    if fold is None:
+        return None
+    if fold == "final":
+        return "final"
+    try:
+        return int(fold)
+    except ValueError:
+        msg = f"--fold must be a fold number or 'final', got {fold!r}"
+        raise typer.BadParameter(msg) from None
+
+
+@train_app.command("detector")
+def train_detector_command(
+    config: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, help="Training config (TOML)."),
+    ],
+    dataset: Annotated[
+        Path,
+        typer.Option(exists=True, file_okay=False, help="Detector dataset directory."),
+    ],
+    run_dir: Annotated[Path, typer.Option(help="Run directory (created).")],
+    fold: Annotated[
+        str | None,
+        typer.Option(
+            help="Train only this fold (0..k-1) or 'final'; default: all folds, then the final fit."
+        ),
+    ] = None,
+    check_files: Annotated[
+        bool, typer.Option(help="Hash and decode every dataset file first.")
+    ] = True,
+) -> None:
+    """Train chirp detectors: grouped k-fold CV and a final fit, with bundles.
+
+    Run it through scripts/guarded on a shared GPU (caps RAM and sets
+    CHIRP_MAX_VRAM_FRACTION).
+    """
+    from chirpdetector.data import DatasetError
+    from chirpdetector.training import train_detector
+
+    try:
+        result = train_detector(
+            dataset, config, run_dir, fold=_parse_fold(fold), check_files=check_files
+        )
+    except (DatasetError, ValueError, FileExistsError, KeyError) as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+    for fit in result.fits:
+        metrics = ", ".join(
+            f"{k.split('/')[-1]} {v:.3f}"
+            for k, v in fit.metrics.items()
+            if k.startswith("metrics/")
+        )
+        typer.echo(f"{fit.name}: best epoch {fit.best_epoch}, {metrics}")
+    if result.bundle is not None:
+        typer.echo(f"bundle: {result.bundle}")
+    typer.echo(f"run {result.run_id} in {result.run_dir}")
+
+
+# ------------------------------------------------------------------ bundles
+
+bundle_app = typer.Typer(no_args_is_help=True, help="Model bundles.")
+app.add_typer(bundle_app, name="bundle")
+
+
+@bundle_app.command("inspect")
+def bundle_inspect(
+    path: Annotated[
+        Path, typer.Argument(exists=True, help="Bundle directory or its bundle.json.")
+    ],
+) -> None:
+    """Verify a bundle's weight hash and print what it holds."""
+    from chirpdetector.bundle import BundleError, describe_bundle, load_bundle
+
+    try:
+        bundle = load_bundle(path)
+    except (BundleError, FileNotFoundError) as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+    typer.echo(describe_bundle(bundle))
+
+
+# ----------------------------------------------------------------- datasets
+
+dataset_app = typer.Typer(no_args_is_help=True, help="Detector datasets.")
+app.add_typer(dataset_app, name="dataset")
+
+
+@dataset_app.command("validate")
+def dataset_validate(
+    directory: Annotated[
+        Path, typer.Argument(exists=True, file_okay=False, help="Dataset directory.")
+    ],
+    check_files: Annotated[
+        bool, typer.Option(help="Hash and decode every image and label file.")
+    ] = True,
+) -> None:
+    """Check a detector dataset against the contract."""
+    from chirpdetector.data import DatasetError, validate_dataset
+
+    try:
+        manifest = validate_dataset(directory, check_files=check_files)
+    except DatasetError as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+    counts = {s: len(manifest.image_ids(s)) for s in ("train", "val", "test")}
+    typer.echo(
+        f"valid: {len(manifest.images)} images ({counts}), "
+        f"{len(manifest.splits)} groups, content sha256 {manifest.content_sha256}"
+    )
