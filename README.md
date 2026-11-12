@@ -140,12 +140,16 @@ Splits follow the detector datasets (seeds 0-1599 train, 1600-1799 val,
 ```sh
 scripts/guarded --name params --mem 12G --vram 0.1 -- \
     uv run chirpdetector train params params.toml \
-        --scenes /mnt/data1/chirp_v2/scenes/train_v3 \
+        --scenes /mnt/data1/chirp_v2/scenes/train_v4 \
         --detector /mnt/data1/chirp_v2/runs/<detector run>/final/bundle \
         --run-dir /mnt/data1/chirp_v2/params/runs/p1
 uv run chirpdetector evaluate params /mnt/data1/chirp_v2/params/runs/p1/bundle \
-    --scenes /mnt/data1/chirp_v2/scenes/train_v3
+    --scenes /mnt/data1/chirp_v2/scenes/train_v4
 ```
+
+The config keys and their defaults are listed in `chirpdetector.params.training`
+(every key is optional); the sample set (crops, truth, matched boxes) lands in
+`RUN/samples` unless `--samples` points to one made with the same settings.
 
 **Calibration** (`chirpdetector.params.calibration`). A regressor shrinks
 toward the middle of its training population (small chirps overestimated,
