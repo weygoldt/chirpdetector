@@ -117,12 +117,16 @@ def label_emitters(
         raise typer.Exit(code=1) from err
 
     queue = load_or_build_queue(trials, config, out)
-    with LabelStore(out, labeler, chirpdetector.__version__) as store:
-        run(
-            queue,
-            {t.name: t for t in trials},
-            store,
-            config=cutout_config,
-            grid=rows_cols,
-            tolerance_hz=tolerance_hz,
-        )
+    try:
+        with LabelStore(out, labeler, chirpdetector.__version__) as store:
+            run(
+                queue,
+                {t.name: t for t in trials},
+                store,
+                config=cutout_config,
+                grid=rows_cols,
+                tolerance_hz=tolerance_hz,
+            )
+    except RuntimeError as err:  # no display, or another session on --out
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err

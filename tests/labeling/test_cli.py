@@ -49,3 +49,14 @@ def test_rejects_a_malformed_grid(synthetic_trial: Path, tmp_path: Path) -> None
     )
     assert result.exit_code != 0
     assert "4x6" in result.output
+
+
+def test_reports_a_missing_display_cleanly(
+    synthetic_trial: Path, tmp_path: Path
+) -> None:
+    result = runner.invoke(
+        app, ["label-emitters", str(synthetic_trial), "--out", str(tmp_path)]
+    )
+    assert result.exit_code == 1
+    assert "not interactive" in result.output
+    assert (tmp_path / "queues").is_dir()
