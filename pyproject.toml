@@ -17,10 +17,13 @@ classifiers = [
 dependencies = [
     "gridtools",
     "numpy>=2.5",
+    "opencv-python>=4.12",
     "pandas>=3.1.1",
+    "pyarrow>=26",
     "scipy>=1.18.1",
     "torch>=2.15",
     "typer>=0.29.1",
+    "ultralytics>=8.4.211,<8.5",
 ]
 
 [project.scripts]
