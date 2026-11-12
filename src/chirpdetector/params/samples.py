@@ -100,6 +100,7 @@ MANIFEST_FILE = "manifest.json"
 TABLE_FILE = "samples.parquet"
 CROPS_FILE = "crops.npy"
 SHARDS_DIR = "shards"
+_TASKS_PER_WORKER = 20
 FISH_IN_BAND_MARGIN_HZ = 30.0
 """Another fish counts as in the chirp's band within this margin of it."""
 
@@ -1009,12 +1010,19 @@ def extract_samples(
         for ref in todo:
             handle(_prepare_scene(ref, click))
     else:
-        with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker) as pool:
+        # Workers are replaced every few scenes: gridtools caches scene
+        # models per process, and a long extraction must stay under its
+        # memory cap.
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=_init_worker,
+            max_tasks_per_child=_TASKS_PER_WORKER,
+        ) as pool:
             queue: deque[Future[_Prepared]] = deque()
             it = iter(todo)
             for ref in it:
                 queue.append(pool.submit(_prepare_scene, ref, click))
-                if len(queue) >= workers + 1:
+                if len(queue) >= workers:
                     break
             while queue:
                 prepared = queue.popleft().result()
