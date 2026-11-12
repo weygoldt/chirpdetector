@@ -21,6 +21,7 @@ from transformers.loss.loss_rt_detr import RTDetrLoss
 
 from chirpdetector.bundle import Bundle, load_bundle
 from chirpdetector.data import Dataset, Tiling, dataset_ground_truth, read_image
+from chirpdetector.data.contract import sha256_file
 from chirpdetector.evaluation import EvaluationConfig, attach_to_bundle, evaluate
 from chirpdetector.inference import predict_span
 from chirpdetector.models import _dualhead_engine as engine
@@ -501,3 +502,29 @@ def test_predict_span_returns_the_emitter_frequency(
     assert "emitter_hz" in out.columns
     low, high = config.f_min_hz - 5, config.f_max_hz + 5
     assert out["emitter_hz"].between(low, high).all()
+
+
+def test_training_can_continue_from_a_weights_file(tmp_path: Path) -> None:
+    first, start = engine.build_model(DualHeadModelConfig(**TINY), emitter_unit=63 / 64)
+    assert start["source"] == "random"
+    with torch.no_grad():
+        for p in first.emitter_embed.parameters():
+            p.add_(0.5)  # differs from a fresh head
+    path = tmp_path / "start.pt"
+    engine.export_weights(first, path)
+    config = DualHeadModelConfig(**{**TINY, "weights": str(path), "num_queries": 30})
+    assert config.repository is None
+    model, start = engine.build_model(config, emitter_unit=63 / 64)
+    assert start["source"] == "file"
+    assert start["sha256"] == sha256_file(path)
+    assert model.config.num_queries == 30
+    for name, value in first.state_dict().items():
+        torch.testing.assert_close(model.state_dict()[name], value, msg=name)
+    with pytest.raises(ValueError, match="emitter unit"):
+        engine.build_model(config, emitter_unit=200 / 224)
+    with pytest.raises(FileNotFoundError):
+        engine.build_model(
+            DualHeadModelConfig(**{**TINY, "weights": str(tmp_path / "no.pt")}), 1.0
+        )
+    with pytest.raises(ValueError, match=r"\.pt"):
+        DualHeadModelConfig(**{**TINY, "weights": "start.bin"})

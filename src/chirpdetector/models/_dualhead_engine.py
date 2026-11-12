@@ -217,8 +217,10 @@ class DualHeadRTDetr(RTDetrV2ForObjectDetection):
 def build_model(
     model_cfg: DualHeadModelConfig, emitter_unit: float
 ) -> tuple[DualHeadRTDetr, dict[str, Any]]:
-    """A fresh model (COCO weights or random) and a record of its start."""
+    """A model to train (COCO weights, random or a weights file) and its start."""
     config = hf_config(model_cfg)
+    if model_cfg.weights is not None:
+        return _continue_from(Path(model_cfg.weights), config, emitter_unit)
     repository = model_cfg.repository
     if repository is not None:
         model = DualHeadRTDetr.from_pretrained(
@@ -232,6 +234,48 @@ def build_model(
     model.reset_emitter_head()
     model.emitter_unit = float(emitter_unit)
     return model, start
+
+
+def _as_dict(config: Any) -> dict[str, Any]:
+    if config is None:
+        return {}
+    return dict(config) if isinstance(config, Mapping) else dict(config.to_dict())
+
+
+def _continue_from(
+    path: Path, config: RTDetrV2Config, emitter_unit: float
+) -> tuple[DualHeadRTDetr, dict[str, Any]]:
+    """A model initialised from a weights file of the same architecture."""
+    from chirpdetector.data.contract import sha256_file
+
+    path = path.expanduser().resolve()
+    if not path.is_file():
+        msg = f"starting weights {path} do not exist"
+        raise FileNotFoundError(msg)
+    model, data = load_weights(path)
+    stored = RTDetrV2Config.from_dict(dict(data["hf_config"]))
+    keys = ("d_model", "decoder_layers", "encoder_in_channels", "encoder_hidden_dim")
+    mismatch = [k for k in keys if getattr(stored, k) != getattr(config, k)]
+    stored_backbone = _as_dict(stored.backbone_config)
+    wanted_backbone = _as_dict(config.backbone_config)
+    for k in ("hidden_sizes", "depths", "layer_type"):
+        if stored_backbone.get(k) != wanted_backbone.get(k):
+            mismatch.append(f"backbone {k}")
+    if mismatch:
+        msg = f"{path} is not of the configured architecture ({', '.join(mismatch)})"
+        raise ValueError(msg)
+    if not math.isclose(model.emitter_unit, emitter_unit, rel_tol=1e-9):
+        msg = (
+            f"{path} was trained for emitter unit {model.emitter_unit:g} (image / "
+            f"input height), the dataset needs {emitter_unit:g}"
+        )
+        raise ValueError(msg)
+    # query counts are runtime settings of the config, not weights
+    model.config.num_queries = config.num_queries
+    model.config.num_denoising = config.num_denoising
+    model.model.config.num_queries = config.num_queries
+    model.model.config.num_denoising = config.num_denoising
+    return model, {"source": "file", "path": str(path), "sha256": sha256_file(path)}
 
 
 # -------------------------------------------------------------------- loss

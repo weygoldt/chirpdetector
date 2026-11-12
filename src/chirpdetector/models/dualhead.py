@@ -118,6 +118,11 @@ class DualHeadModelConfig:
     pretrained
         Start from the architecture's COCO weights (Hugging Face hub,
         cached in ``HF_HOME``); else from random weights. ``tiny`` has none.
+    weights
+        Path of a ``dualhead`` weights file (a bundle's ``weights.pt`` or a
+        fit's ``dualhead/best.pt``) to continue from instead (overrides
+        ``pretrained``); its sha256 is recorded with the fit. It must be of
+        ``architecture`` and made for the same image height.
     num_queries
         Decoder queries per image (upper bound on chirps per tile).
     num_denoising
@@ -143,6 +148,7 @@ class DualHeadModelConfig:
 
     architecture: str = "rtdetr_v2_r18vd"
     pretrained: bool = True
+    weights: str | None = None
     num_queries: int = 300
     num_denoising: int = 100
     max_det: int = 300
@@ -161,8 +167,17 @@ class DualHeadModelConfig:
         )
         _check(isinstance(self.pretrained, bool), "pretrained must be true or false")
         _check(
-            not (self.pretrained and ARCHITECTURES[self.architecture] is None),
+            not (
+                self.pretrained
+                and self.weights is None
+                and ARCHITECTURES[self.architecture] is None
+            ),
             f"{self.architecture!r} has no pretrained weights; set pretrained = false",
+        )
+        _check(
+            self.weights is None
+            or (isinstance(self.weights, str) and self.weights.endswith(".pt")),
+            f"weights must be the path of a .pt file, got {self.weights!r}",
         )
         for name in ("num_queries", "max_det"):
             value = getattr(self, name)
@@ -181,8 +196,10 @@ class DualHeadModelConfig:
 
     @property
     def repository(self) -> str | None:
-        """Hugging Face repository of the starting weights (None: random)."""
-        return ARCHITECTURES[self.architecture] if self.pretrained else None
+        """Hugging Face repository of the starting weights (None: random or file)."""
+        if self.weights is not None or not self.pretrained:
+            return None
+        return ARCHITECTURES[self.architecture]
 
 
 def input_shape(height_px: int, width_px: int) -> tuple[int, int]:
