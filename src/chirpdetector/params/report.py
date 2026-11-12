@@ -545,8 +545,8 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         "",
         _fidelity_table(result.tables["fidelity"]),
         "",
-        f"**Natural template mix** (importance weights p_natural / p_equalised per "
-        f"template; effective sample size {metrics['natural_prior'].get('ess', float('nan')):.0f} "
+        f"**Natural template mix** (importance weights p_natural / p_equalised of each "
+        f"template's excursion x duration bin; effective sample size {metrics['natural_prior'].get('ess', float('nan')):.0f} "
         f"of {metrics['natural_prior'].get('n')})",
         "",
         _fidelity_table(result.tables["fidelity_natural"]),

@@ -30,10 +30,11 @@ Prior sensitivity (`natural_prior_weights`)
     The simulator drew templates from an equalised mix (many big and long
     chirps, `gridtools.templates.TemplateLibrary.cycler`); real recordings
     are dominated by small chirps. Each test chirp is weighted by
-    ``p_natural(template) / p_equalised(template)`` (natural = uniform over
-    the eligible pool, as ``TemplateLibrary.sample(..., equalize=False)``),
-    turning the test population into one with the natural template mix,
-    and the distribution fidelity is recomputed with these weights.
+    ``p_natural / p_equalised`` of its template's excursion x duration
+    equalisation bin (natural = uniform over the eligible pool, as
+    ``TemplateLibrary.sample(..., equalize=False)``), turning the test
+    population into one with the natural mix of chirp sizes, and the
+    distribution fidelity is recomputed with these weights.
 Cluster structure (`cluster_tests`)
     Populations resampled from the test chirps by their true parameters:
     two well-separated types (small/short and big/short) and a continuum
@@ -561,16 +562,38 @@ def joint_histograms(
 
 
 def natural_prior_weights(
-    template_ids: npt.ArrayLike, scene_dirs: Sequence[str | Path]
+    template_ids: npt.ArrayLike,
+    scene_dirs: Sequence[str | Path],
+    *,
+    level: str = "bin",
 ) -> tuple[FloatArray, dict[str, Any]]:
     """Importance weights from the equalised to the natural template mix.
 
     Rebuilds the simulator's eligible template pool and sampling options
-    from the scenes' ``scene.json`` (`gridtools.sim.chirps.TemplatePool`)
-    and returns ``p_natural / p_equalised`` per template id, normalised to
-    mean 1 over the given ids. ``p_equalised`` is the cycler's draw
-    probability (`EqualizationBins.template_probabilities`), ``p_natural``
-    uniform over the pool (``equalize=False``).
+    from the scenes' ``scene.json`` (`gridtools.sim.chirps.TemplatePool`).
+    The natural mix is uniform over the pool (``TemplateLibrary.sample(...,
+    equalize=False)``).
+
+    Parameters
+    ----------
+    template_ids
+        Template of every sample.
+    scene_dirs
+        Scenes the samples come from (all must share library and options).
+    level
+        ``"bin"`` (default): ``p_natural(bin) / p_equalised(bin)`` of the
+        template's excursion x duration equalisation bin
+        (`EqualizationBins.bin_probabilities`), which is what the
+        equalisation changes; ``"template"``: ``p_natural / p_equalised``
+        per template (`EqualizationBins.template_probabilities`, which also
+        undoes the within-bin balancing of individuals; much more variable
+        weights, so a far smaller effective sample).
+
+    Returns
+    -------
+    weights, info
+        Weights normalised to mean 1, and the pool, options and effective
+        sample sizes of both levels.
 
     Raises
     ------
@@ -581,6 +604,9 @@ def natural_prior_weights(
     from gridtools.sim.chirps import TemplatePool
     from gridtools.sim.config import ChirpConfig
 
+    if level not in ("bin", "template"):
+        msg = f"level must be 'bin' or 'template', got {level!r}"
+        raise ValueError(msg)
     infos = {
         json.dumps(
             json.loads((Path(d) / "scene.json").read_text())["templates"],
@@ -593,8 +619,8 @@ def natural_prior_weights(
         raise ValueError(msg)
     templates = json.loads(next(iter(infos)))
     options = dict(templates.get("sampling_options", {}))
+    ids = np.asarray(template_ids, dtype=np.int64)
     if not options.get("equalize", True):
-        ids = np.asarray(template_ids, dtype=np.int64)
         return np.ones(ids.size), {"equalized": False}
     pool = TemplatePool.open(ChirpConfig(library=str(templates["path"])))
     if pool.view.n_templates != int(templates.get("n_eligible", pool.view.n_templates)):
@@ -604,24 +630,34 @@ def natural_prior_weights(
         )
         raise ValueError(msg)
     bins = tuple(options.get("bins", pool.bins))
+    alpha = float(options.get("alpha", 0.6))
     eq = pool.view.equalization_bins(bins, spacing=options.get("spacing", "log"))
-    p_eq = eq.template_probabilities(
-        float(options.get("alpha", 0.6)), options.get("balance", "individual")
-    )
-    p_eq_of = dict(zip(eq.template_ids.tolist(), p_eq.tolist(), strict=True))
-    n_pool = pool.view.unique_ids().size
-    ids = np.asarray(template_ids, dtype=np.int64)
-    missing = sorted({int(i) for i in ids} - set(p_eq_of))
+    position = {int(t): k for k, t in enumerate(eq.template_ids.tolist())}
+    missing = sorted({int(i) for i in ids} - set(position))
     if missing:
         msg = f"templates {missing[:5]} are not in the equalised pool"
         raise ValueError(msg)
-    weights = np.array([(1.0 / n_pool) / p_eq_of[int(i)] for i in ids])
-    weights /= weights.mean()
+    index = np.array([position[int(i)] for i in ids], dtype=np.int64)
+    p_bin_eq = eq.bin_probabilities(alpha)
+    p_bin_nat = eq.counts.ravel() / eq.counts.sum()
+    bin_of = eq.bin_of[index]
+    by_bin = p_bin_nat[bin_of] / p_bin_eq[bin_of]
+    p_template = eq.template_probabilities(alpha, options.get("balance", "individual"))
+    by_template = (1.0 / eq.template_ids.size) / p_template[index]
+
+    def ess(w: FloatArray) -> float:
+        return float(w.sum() ** 2 / (w**2).sum()) if w.size else 0.0
+
+    weights = by_bin if level == "bin" else by_template
+    weights = weights / weights.mean() if weights.size else weights
     info = {
         "library": str(templates["path"]),
         "sampling_options": options,
-        "pool_size": int(n_pool),
-        "ess": float(weights.sum() ** 2 / (weights**2).sum()),
+        "pool_size": int(eq.template_ids.size),
+        "level": level,
+        "ess": ess(weights),
+        "ess_bin": ess(by_bin),
+        "ess_template": ess(by_template),
         "n": int(ids.size),
     }
     return weights, info

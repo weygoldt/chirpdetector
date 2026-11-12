@@ -166,3 +166,21 @@ def test_detector_extraction_matches_predictions(
     assert (np.abs(matched["dt_match_s"].to_numpy(float)) <= 0.1).all()
     # every matched box is its chirp's footprint
     np.testing.assert_allclose(matched["t_start_s"], matched["box_t0_s"])
+
+
+def test_natural_prior_weights(params_scenes: Path) -> None:
+    from chirpdetector.params.evaluation import natural_prior_weights
+
+    scenes = [r.directory for r in discover_scenes([params_scenes])]
+    ids = np.concatenate(
+        [pd.read_csv(d / "chirps.csv")["template_id"].to_numpy() for d in scenes]
+    )
+    for level in ("bin", "template"):
+        weights, info = natural_prior_weights(ids, scenes, level=level)
+        assert weights.shape == ids.shape
+        assert weights.mean() == pytest.approx(1.0)
+        assert (weights > 0).all()
+        assert info["pool_size"] == 12
+        assert 0 < info["ess"] <= ids.size
+    with pytest.raises(ValueError, match="level"):
+        natural_prior_weights(ids, scenes, level="individual")
