@@ -22,6 +22,9 @@ dependencies = [
     "typer>=0.29.1",
 ]
 
+[project.scripts]
+chirpdetector = "chirpdetector.cli:app"
+
 [project.urls]
 Repository = "https://github.com/weygoldt/chirpdetector"
 
