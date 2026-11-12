@@ -256,7 +256,8 @@ def _fig_clusters(result: ParamsEvaluation, path: Path) -> Path | None:
         for which, u in (("true", pop.u_true), *pop.u_est.items()):
             density = stats.gaussian_kde(u, bw_method=0.06 / max(np.std(u), 1e-9))(grid)
             ax.plot(grid, density, color=_COLOURS[which], label=_NAMES[which])
-        ax.set_xlabel("position on the small/short -> big/short axis")
+        ends = {"height": "small/short -> big/short", "fwhm": "big/short -> big/long"}
+        ax.set_xlabel(f"position on the {ends.get(pop.axis, pop.axis)} axis")
         ax.set_ylabel("density")
         ax.legend(fontsize=8)
     fig.suptitle("Cluster structure: populations resampled by their true parameters")
@@ -440,6 +441,7 @@ def _fidelity_table(table: pd.DataFrame) -> str:
                 "W1": _err(r["w1"], p),
                 "W1 halves": _err(r["w1_halves"], p),
                 "W1 (log)": f"{r['w1_log']:.3f}",
+                "KS blur": f"{r['ks_blur']:.3f}",
                 "true q05/q50/q95": " / ".join(
                     f"{scale * r[f'true_q{q:02d}']:.3g}" for q in (5, 50, 95)
                 ),
@@ -539,7 +541,11 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         "",
         "KS and Wasserstein-1 (W1) distances between estimated and true values of the "
         "same chirps; 'halves': the same distances between the true values of two "
-        "random halves of the test chirps (sampling noise at this n).",
+        "random halves of the test chirps (sampling noise at this n); 'KS blur': the "
+        "KS distance an ideal, conditionally unbiased estimate with the calibrated "
+        "error spread would have (the truth plus its decile-wise centred, shuffled "
+        "residuals). A calibrated KS near 'KS blur' means the remaining distortion "
+        "is blur by measurement error, not a pull toward the training mix.",
         "",
         "**Test population** (templates drawn from the equalised mix)",
         "",
@@ -572,14 +578,25 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         "",
         "## Cluster structure",
         "",
-        "Valley-to-peak ratio of the density along the axis from the small/short to "
-        "the big/short type (0: separated, ~1: no valley); 'same side': fraction of "
-        "two-type chirps whose estimate falls on the same side of the midpoint as "
-        "their truth.",
+        "Valley-to-peak ratio of the density along the axis from one type to the "
+        "other (height axis: small/short -> big/short; fwhm axis: big/short -> "
+        "big/long; 0: separated, ~1: no valley), for all chirps and for in-domain "
+        "chirps only ('_ok'); 'same side': fraction of two-type chirps whose "
+        "estimate falls on the same side of the midpoint as their truth; 'ks_u': "
+        "KS distance of estimated vs true positions on the axis.",
         "",
-        _table(result.tables["clusters"])
+        _table(result.tables["clusters"].drop(columns="counts_per_tenth"))
         if len(result.tables["clusters"])
         else "(not enough chirps)",
+        "",
+        "Test chirps per tenth of each axis (within the band): "
+        + "; ".join(
+            f"{r['population']}: {r['counts_per_tenth']}"
+            for r in result.tables["clusters"].to_dict("records")
+            if str(r["population"]).endswith("two_types")
+        )
+        if len(result.tables["clusters"])
+        else "",
         "",
         "![clusters](fig_clusters.png)" if figures["clusters"] else "",
         "",

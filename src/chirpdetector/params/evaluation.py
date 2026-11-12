@@ -37,11 +37,12 @@ Prior sensitivity (`natural_prior_weights`)
     distribution fidelity is recomputed with these weights.
 Cluster structure (`cluster_tests`)
     Populations resampled from the test chirps by their true parameters:
-    two well-separated types (small/short and big/short) and a continuum
-    along the segment between them. Along the axis through the two types'
-    centres (log height, log FWHM), the density's valley-to-peak ratio
-    shows whether separated clusters stay separated and whether a
-    continuum stays free of a valley.
+    two well-separated types (small/short vs big/short, and big/short vs
+    big/long) and a continuum between big/short and big/long chirps (the
+    simulated chirps have a gap between small/short and big/short ones).
+    Along the axis through the two types' centres (log height, log FWHM),
+    the density's valley-to-peak ratio shows whether separated clusters
+    stay separated and whether a continuum stays free of a valley.
 Real-data agreement (`real_agreement`)
     The harvested long chirps of the competition recordings (template
     library v4, ``source == "competition"``): the detector and the decoder
@@ -72,7 +73,12 @@ from chirpdetector.params.bundle import (
     load_params_bundle,
 )
 from chirpdetector.params.inference import ParamsEstimator
-from chirpdetector.params.model import from_model_space, natural_sd, to_model_space
+from chirpdetector.params.model import (
+    LOG_OFFSETS,
+    from_model_space,
+    natural_sd,
+    to_model_space,
+)
 from chirpdetector.params.samples import (
     BoxSource,
     SampleSet,
@@ -108,11 +114,18 @@ SCORE_BINS = (0.0, 0.5, 0.7, 0.85, 1.0)
 JOINT_BINS = {"height_hz": (10.0, 1000.0, 30), "fwhm_s": (0.002, 0.5, 30)}
 """Log-spaced bins ``(lo, hi, n)`` of the joint height x FWHM histograms."""
 
-TWO_TYPES = {
-    "small_short": {"height_hz": (40.0, 90.0), "fwhm_s": (0.006, 0.014)},
-    "big_short": {"height_hz": (250.0, 500.0), "fwhm_s": (0.006, 0.020)},
+CLUSTER_AXES: dict[str, dict[str, Any]] = {
+    "height": {
+        "a": {"height_hz": (40.0, 90.0), "fwhm_s": (0.006, 0.014)},
+        "b": {"height_hz": (250.0, 500.0), "fwhm_s": (0.006, 0.020)},
+    },
+    "fwhm": {
+        "a": {"height_hz": (250.0, 500.0), "fwhm_s": (0.006, 0.020)},
+        "b": {"height_hz": (250.0, 500.0), "fwhm_s": (0.060, 0.200)},
+    },
 }
-"""True-parameter boxes of the two chirp types of the cluster test."""
+"""Axes of the cluster tests: true-parameter boxes of the type at each end
+(``height``: small/short -> big/short; ``fwhm``: big/short -> big/long)."""
 
 UNITS = {"height_hz": "Hz", "fwhm_s": "s", "width10_s": "s", "undershoot_hz": "Hz"}
 
@@ -156,8 +169,6 @@ def predict_samples(
 
 def _to_log(values: npt.ArrayLike, parameter: str) -> FloatArray:
     """One parameter in model space (`chirpdetector.params.model.LOG_OFFSETS`)."""
-    from chirpdetector.params.model import LOG_OFFSETS
-
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.log(np.asarray(values, dtype=np.float64) + LOG_OFFSETS[parameter])
 
@@ -429,6 +440,27 @@ def _halves(
     return float(np.median(ks)), float(np.median(w1))
 
 
+def _unbiased_blur(
+    true_log: FloatArray, est_log: FloatArray, rng: np.random.Generator
+) -> FloatArray:
+    """The truth plus unbiased noise of the estimate's error size.
+
+    Residuals (model space) are centred on their median within each decile
+    of the true value and shuffled within it, so the result has the
+    estimate's error spread but no systematic error: the distribution an
+    ideal conditionally unbiased estimate with these errors would give.
+    """
+    residual = est_log - true_log
+    out = true_log.copy()
+    order = np.argsort(true_log, kind="stable")
+    for index in np.array_split(order, 10):
+        if index.size == 0:
+            continue
+        r = residual[index] - np.median(residual[index])
+        out[index] = true_log[index] + rng.permutation(r)
+    return out
+
+
 def distribution_fidelity(
     pred: pd.DataFrame,
     weights: FloatArray | None = None,
@@ -450,7 +482,10 @@ def distribution_fidelity(
     -------
     DataFrame
         One row per parameter and estimate: KS, W1 (natural and log), the
-        sampling-noise reference, quantiles of true and estimated values.
+        sampling-noise reference (``*_halves``), the distances an ideal
+        unbiased estimate with the calibrated error spread would have
+        (``*_blur``, `_unbiased_blur`), quantiles of true and estimated
+        values.
     """
     rng = np.random.default_rng(seed)
     qs = (0.05, 0.25, 0.5, 0.75, 0.95)
@@ -462,6 +497,12 @@ def distribution_fidelity(
         t = t[ok]
         t_log = _to_log(t, p)
         ref_ks, ref_w1 = _halves(t, w, rng)
+        blurred = _unbiased_blur(
+            t_log, _to_log(pred[f"cal_{p}"].to_numpy(float)[ok], p), rng
+        )
+        blurred = np.maximum(np.exp(blurred) - LOG_OFFSETS[p], 0.0)
+        blur_ks = weighted_ks(blurred, t, w, w)
+        blur_w1 = float(stats.wasserstein_distance(blurred, t, w, w))
         for estimate in ESTIMATES:
             e = pred[f"{estimate}_{p}"].to_numpy(float)[ok]
             e_log = _to_log(e, p)
@@ -477,6 +518,8 @@ def distribution_fidelity(
                 "w1_log": float(stats.wasserstein_distance(e_log, t_log, w, w)),
                 "ks_halves": ref_ks,
                 "w1_halves": ref_w1,
+                "ks_blur": blur_ks,
+                "w1_blur": blur_w1,
             }
             for q, tv, ev in zip(
                 qs,
@@ -668,9 +711,10 @@ def natural_prior_weights(
 
 @dataclass
 class ClusterPopulation:
-    """A resampled population and its projection on the type axis."""
+    """A resampled population and its projection on its type axis."""
 
     name: str
+    axis: str
     rows: npt.NDArray[np.int64]
     u_true: FloatArray
     u_est: dict[str, FloatArray] = field(default_factory=dict)
@@ -703,79 +747,87 @@ def _valley_ratio(u: FloatArray, bandwidth: float = 0.06) -> float:
 
 
 def cluster_tests(
-    pred: pd.DataFrame, *, seed: int = 0, n_per_type: int | None = None
+    pred: pd.DataFrame, *, seed: int = 0, band_log: float = 0.35, min_per_tenth: int = 5
 ) -> tuple[pd.DataFrame, list[ClusterPopulation]]:
-    """Two separated types and a continuum, resampled by true values.
+    """Separated types and continua, resampled by their true parameters.
 
-    The type axis runs from the median (log height, log FWHM) of the
-    ``small_short`` chirps (u = 0) to that of the ``big_short`` chirps
-    (u = 1) (`TWO_TYPES`). ``two_types`` takes equally many chirps of both
-    types; ``continuum`` takes chirps whose true position projects onto
-    u in [0, 1] within 0.35 (log units) of the axis, equally many per tenth
-    of u. Each population's true and estimated u are compared by their
-    valley-to-peak ratio, the fraction of chirps on the right side of
-    u = 0.5 (two types) and the KS distance of u.
+    For each axis of `CLUSTER_AXES`, u runs from the median (log height,
+    log FWHM) of the chirps in box ``a`` (u = 0) to that of box ``b``
+    (u = 1). ``<axis>_two_types`` takes equally many chirps of both
+    boxes; ``<axis>_continuum`` takes chirps that project onto u in [0, 1]
+    within ``band_log`` (log units) of the axis, equally many per tenth of
+    u, if every tenth holds at least ``min_per_tenth`` (the test chirps
+    have a gap between small/short and big/short chirps, so there is no
+    continuum on the height axis). A population's true and estimated u are
+    compared by the density's valley-to-peak ratio (`_valley_ratio`; also
+    for in-domain chirps only), the fraction of two-type chirps on the
+    right side of u = 0.5, and the KS distance of u.
 
     Returns
     -------
     table, populations
+        One row per population; ``counts_per_tenth`` shows where the truth
+        itself has a gap.
     """
     rng = np.random.default_rng(seed)
     true_xy = _log_xy(pred, "true")
-    masks = {k: _in_box(pred, box) for k, box in TWO_TYPES.items()}
-    if min(m.sum() for m in masks.values()) < 10:
-        log.warning("too few chirps of the two types for the cluster test")
-        return pd.DataFrame(), []
-    centre_a = np.median(true_xy[masks["small_short"]], axis=0)
-    centre_b = np.median(true_xy[masks["big_short"]], axis=0)
-    axis = centre_b - centre_a
-
-    def project(xy: FloatArray) -> FloatArray:
-        return (xy - centre_a) @ axis / (axis @ axis)
-
-    u_all = project(true_xy)
-    perp = np.abs(
-        (true_xy - centre_a) @ np.array([-axis[1], axis[0]]) / np.linalg.norm(axis)
-    )
-    n = n_per_type or int(min(m.sum() for m in masks.values()))
-    two = np.concatenate(
-        [
-            rng.choice(np.flatnonzero(m), n, replace=bool(m.sum() < n))
-            for m in masks.values()
-        ]
-    )
-    band = (u_all >= 0) & (u_all <= 1) & (perp <= 0.35)
-    tenth = np.minimum((u_all * 10).astype(int), 9)
-    per_bin = [np.flatnonzero(band & (tenth == k)) for k in range(10)]
-    m = min(len(b) for b in per_bin)
-    populations = []
-    rows = []
-    if m >= 5:
-        continuum = np.concatenate([rng.choice(b, m, replace=False) for b in per_bin])
-    else:
-        log.warning(
-            "too few intermediate chirps for the continuum test (%d per tenth)", m
-        )
-        continuum = np.zeros(0, dtype=np.int64)
-    for name, index in (("two_types", two), ("continuum", continuum)):
-        if index.size == 0:
+    ok = pred["params_ok"].to_numpy(bool) if "params_ok" in pred.columns else None
+    rows: list[dict[str, Any]] = []
+    populations: list[ClusterPopulation] = []
+    for axis_name, axis_def in CLUSTER_AXES.items():
+        mask_a, mask_b = _in_box(pred, axis_def["a"]), _in_box(pred, axis_def["b"])
+        if min(mask_a.sum(), mask_b.sum()) < 10:
+            log.warning("too few chirps for the %s cluster test", axis_name)
             continue
-        population = ClusterPopulation(name=name, rows=index, u_true=u_all[index])
-        row: dict[str, Any] = {
-            "population": name,
-            "n": int(index.size),
-            "valley_true": _valley_ratio(population.u_true),
-        }
-        for estimate in ESTIMATES:
-            u = project(_log_xy(pred.iloc[index], estimate))
-            population.u_est[estimate] = u
-            row[f"valley_{estimate}"] = _valley_ratio(u)
-            row[f"ks_u_{estimate}"] = weighted_ks(u, population.u_true)
-            if name == "two_types":
-                side_true = population.u_true > 0.5
-                row[f"same_side_{estimate}"] = float(np.mean((u > 0.5) == side_true))
-        populations.append(population)
-        rows.append(row)
+        centre_a = np.median(true_xy[mask_a], axis=0)
+        centre_b = np.median(true_xy[mask_b], axis=0)
+        axis = centre_b - centre_a
+
+        def project(
+            xy: FloatArray, a: FloatArray = centre_a, d: FloatArray = axis
+        ) -> FloatArray:
+            return (xy - a) @ d / (d @ d)
+
+        u_all = project(true_xy)
+        normal = np.array([-axis[1], axis[0]]) / np.linalg.norm(axis)
+        perp = np.abs((true_xy - centre_a) @ normal)
+        band = (u_all >= 0) & (u_all <= 1) & (perp <= band_log)
+        tenth = np.clip((u_all * 10).astype(int), 0, 9)
+        per_tenth = [np.flatnonzero(band & (tenth == k)) for k in range(10)]
+        counts = [int(b.size) for b in per_tenth]
+        n = int(min(mask_a.sum(), mask_b.sum()))
+        two = np.concatenate(
+            [rng.choice(np.flatnonzero(m), n, replace=False) for m in (mask_a, mask_b)]
+        )
+        selections = [(f"{axis_name}_two_types", two)]
+        m = min(counts)
+        if m >= min_per_tenth:
+            continuum = np.concatenate(
+                [rng.choice(b, m, replace=False) for b in per_tenth]
+            )
+            selections.append((f"{axis_name}_continuum", continuum))
+        for name, index in selections:
+            population = ClusterPopulation(
+                name=name, axis=axis_name, rows=index, u_true=u_all[index]
+            )
+            row: dict[str, Any] = {
+                "population": name,
+                "n": int(index.size),
+                "valley_true": _valley_ratio(population.u_true),
+            }
+            for estimate in ESTIMATES:
+                u = project(_log_xy(pred.iloc[index], estimate))
+                population.u_est[estimate] = u
+                row[f"valley_{estimate}"] = _valley_ratio(u)
+                if ok is not None:
+                    row[f"valley_{estimate}_ok"] = _valley_ratio(u[ok[index]])
+                row[f"ks_u_{estimate}"] = weighted_ks(u, population.u_true)
+                if name.endswith("two_types"):
+                    side = population.u_true > 0.5
+                    row[f"same_side_{estimate}"] = float(np.mean((u > 0.5) == side))
+            row["counts_per_tenth"] = counts
+            populations.append(population)
+            rows.append(row)
     return pd.DataFrame(rows), populations
 
 
