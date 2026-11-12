@@ -127,12 +127,12 @@ def test_short_windows_localise_a_brief_frequency_excursion(fs: float) -> None:
 
 
 def _multi_electrode_recording(
-    duration_s: float, fs: float, seed: int = 0
+    duration_s: float, fs: float, seed: int = 0, n_electrodes: int = 3
 ) -> NDArray[np.float32]:
     rng = np.random.default_rng(seed)
-    gains = np.array([1.0, 0.4, 0.1], np.float32)
+    gains = np.geomspace(1.0, 0.1, n_electrodes).astype(np.float32)
     fish = tone(720.0, duration_s, fs) + 0.5 * tone(941.3, duration_s, fs)
-    noise = 0.05 * rng.standard_normal((fish.size, 3)).astype(np.float32)
+    noise = 0.05 * rng.standard_normal((fish.size, n_electrodes)).astype(np.float32)
     return (fish[:, None] * gains + noise).astype(np.float32)
 
 
@@ -163,14 +163,23 @@ def test_max_aggregation_is_the_max_of_electrode_powers() -> None:
 
 
 T0_S = 3600.0
-RECORDINGS = {fs: _multi_electrode_recording(1.567, fs, seed=1) for fs in RATES}
+# 9 and 15 electrodes: torch.sum over electrodes reorders its reduction with
+# the block width there (3 electrodes did not show it).
+ELECTRODES = (3, 9, 15)
+RECORDINGS = {
+    (fs, n): _multi_electrode_recording(1.037, fs, seed=1, n_electrodes=n)
+    for fs in RATES
+    for n in ELECTRODES
+}
 WHOLES = {
-    fs: compute_spectrogram(x, fs, CFG, t0_s=T0_S) for fs, x in RECORDINGS.items()
+    key: compute_spectrogram(x, key[0], CFG, t0_s=T0_S) for key, x in RECORDINGS.items()
 }
 
 
-def _assert_span_matches_whole(fs: float, start: int, stop: int) -> None:
-    recording, whole = RECORDINGS[fs], WHOLES[fs]
+def _assert_span_matches_whole(
+    fs: float, start: int, stop: int, n_electrodes: int = 3
+) -> None:
+    recording, whole = RECORDINGS[fs, n_electrodes], WHOLES[fs, n_electrodes]
     plan = plan_span(start, stop, recording.shape[0], fs, CFG)
     assert plan.samplerate_hz == fs
     spec = compute_spectrogram_span(recording[plan.read_slice], plan, CFG, t0_s=T0_S)
@@ -180,9 +189,8 @@ def _assert_span_matches_whole(fs: float, start: int, stop: int) -> None:
 def _assert_frames_equal(
     spec: Spectrogram, whole: Spectrogram, frame_start: int, frame_stop: int
 ) -> None:
-    expected = whole.power[:, :, frame_start:frame_stop]
-    scale = float(whole.power.max())
-    torch.testing.assert_close(spec.power, expected, rtol=1e-6, atol=1e-6 * scale)
+    # Bit-identical on CPU, not merely close.
+    assert torch.equal(spec.power, whole.power[:, :, frame_start:frame_stop])
     np.testing.assert_array_equal(spec.times_s, whole.times_s[frame_start:frame_stop])
     np.testing.assert_array_equal(spec.complete, whole.complete[frame_start:frame_stop])
     assert spec.frame_start == frame_start
@@ -192,36 +200,41 @@ def _assert_frames_equal(
 @settings(max_examples=45, deadline=None)
 @given(
     fs=st.sampled_from(RATES),
+    n_electrodes=st.sampled_from(ELECTRODES),
     start_frac=st.floats(0.0, 1.0),
     length_frac=st.floats(0.0, 1.0),
 )
 def test_span_equals_whole_recording(
-    fs: float, start_frac: float, length_frac: float
+    fs: float, n_electrodes: int, start_frac: float, length_frac: float
 ) -> None:
-    n_total = RECORDINGS[fs].shape[0]
+    n_total = RECORDINGS[fs, n_electrodes].shape[0]
     hop = CFG.layout(fs).hop_samples
     start = round(start_frac * (n_total - hop))
     stop = min(n_total, start + hop + round(length_frac * n_total))
-    _assert_span_matches_whole(fs, start, stop)
+    _assert_span_matches_whole(fs, start, stop, n_electrodes)
 
 
+@pytest.mark.parametrize("n_electrodes", ELECTRODES)
 @pytest.mark.parametrize("fs", RATES)
-def test_span_at_both_edges_equals_whole_recording(fs: float) -> None:
-    n_total = RECORDINGS[fs].shape[0]
+def test_span_at_both_edges_equals_whole_recording(
+    fs: float, n_electrodes: int
+) -> None:
+    n_total = RECORDINGS[fs, n_electrodes].shape[0]
     hop = CFG.layout(fs).hop_samples
-    _assert_span_matches_whole(fs, 0, hop + 50)
-    _assert_span_matches_whole(fs, n_total - hop - 50, n_total)
+    _assert_span_matches_whole(fs, 0, hop + 50, n_electrodes)
+    _assert_span_matches_whole(fs, n_total - hop - 50, n_total, n_electrodes)
 
 
+@pytest.mark.parametrize("n_electrodes", ELECTRODES)
 @pytest.mark.parametrize("fs", RATES)
 def test_result_does_not_depend_on_block_size(
-    fs: float, monkeypatch: pytest.MonkeyPatch
+    fs: float, n_electrodes: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    recording = RECORDINGS[fs]
+    recording = RECORDINGS[fs, n_electrodes]
     bytes_per_frame = recording.shape[1] * (CFG.layout(fs).n_fft // 2 + 1) * 8
     monkeypatch.setattr(compute_module, "_BLOCK_BYTES", 7 * bytes_per_frame)
     blocked = compute_spectrogram(recording, fs, CFG, t0_s=T0_S)
-    torch.testing.assert_close(blocked.power, WHOLES[fs].power, rtol=1e-6, atol=0.0)
+    assert torch.equal(blocked.power, WHOLES[fs, n_electrodes].power)
 
 
 @pytest.mark.parametrize("fs", RATES_WITH_ODD_FFT)
@@ -237,7 +250,7 @@ def test_click_in_the_last_samples_is_not_lost(fs: float) -> None:
 
 def test_torch_and_float64_inputs_match_float32_numpy() -> None:
     fs = 20_000.0
-    x = RECORDINGS[fs][:5_000]
+    x = RECORDINGS[fs, 3][:5_000]
     ref = compute_spectrogram(x, fs, CFG).power
     from_torch = compute_spectrogram(torch.from_numpy(x.copy()), fs, CFG).power
     from_f64 = compute_spectrogram(x.astype(np.float64), fs, CFG).power
@@ -277,7 +290,7 @@ def test_band_above_nyquist_is_rejected_per_call() -> None:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 @pytest.mark.parametrize("fs", [20_000.0, 48_000.0])
 def test_cuda_matches_cpu_and_spans_match_whole(fs: float) -> None:
-    x = RECORDINGS[fs][: round(0.4 * fs), :2]
+    x = RECORDINGS[fs, 9][: round(0.4 * fs)]
     cpu = compute_spectrogram(x, fs, CFG).power
     gpu_spec = compute_spectrogram(x, fs, CFG, device="cuda")
     assert gpu_spec.power.device.type == "cuda"

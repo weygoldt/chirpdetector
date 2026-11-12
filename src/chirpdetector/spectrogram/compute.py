@@ -20,6 +20,20 @@ processing gain), which is the physical trade-off.
 
 Electrodes are combined in linear power (sum or max) before any dB
 conversion.
+
+Reproducibility across chunks
+-----------------------------
+Frames are computed in memory-bounded blocks, and a span of a recording
+(`compute_spectrogram_span`) is just another blocking of the same frames.
+On CPU the result is bit-identical to computing the whole recording at
+once (verified with MKL for 1-15 electrodes): each frame's FFT does not
+depend on how many frames share the batch, and electrodes are summed one
+after the other in a fixed order. ``torch.sum`` over the electrode axis is
+avoided on purpose: its reduction order depends on the block width, which
+made 9- and 15-electrode spans differ from the whole by ~3e-7 (relative).
+On CUDA, cuFFT may pick different kernels for different batch sizes, so
+spans agree with the whole to within 1e-6 relative (measured), not
+necessarily bit for bit.
 """
 
 from __future__ import annotations
@@ -43,8 +57,8 @@ from chirpdetector.spectrogram.framing import (
 log = logging.getLogger(__name__)
 
 # Upper bound on the complex STFT buffer of one block of frames. Frames are
-# processed in blocks to bound memory on long inputs; per-frame results do
-# not depend on the blocking.
+# processed in blocks to bound memory on long inputs; on CPU per-frame
+# results do not depend on the blocking (see "Reproducibility" above).
 _BLOCK_BYTES = 128 * 2**20
 
 _WINDOW_FUNCTIONS: dict[str, Callable[..., torch.Tensor]] = {
@@ -194,8 +208,10 @@ def compute_spectrogram_span(
     Returns
     -------
     Spectrogram
-        Frames ``plan.frame_start .. plan.frame_stop - 1``, equal to the same
-        frames of `compute_spectrogram` on the whole recording.
+        Frames ``plan.frame_start .. plan.frame_stop - 1``: on CPU
+        bit-identical to the same frames of `compute_spectrogram` on the
+        whole recording, on CUDA equal within 1e-6 relative (see the module
+        docstring).
     """
     x = _as_electrode_major(samples, device)
     if x.shape[1] != plan.n_read:
@@ -278,6 +294,22 @@ def _power_scale(window: torch.Tensor, layout: StftLayout) -> torch.Tensor:
     return one_sided / window_sum**2
 
 
+def _combine(power: torch.Tensor, aggregation: str) -> torch.Tensor:
+    """Combine ``(n_electrodes, ...)`` power over electrodes.
+
+    The sum accumulates electrode 0, 1, 2, ... in this order, element by
+    element, so every value is the same whatever the shape of the block
+    (``torch.sum`` over dim 0 is not: its reduction order depends on the
+    trailing size). The max is exact in any order.
+    """
+    if aggregation == "max":
+        return power.amax(dim=0)
+    total = power[0].clone()
+    for electrode in range(1, power.shape[0]):
+        total += power[electrode]
+    return total
+
+
 def _framed_power(
     x: torch.Tensor, n_frames: int, layout: StftLayout, config: SpectrogramConfig
 ) -> torch.Tensor:
@@ -327,9 +359,7 @@ def _framed_power(
                     return_complex=True,
                 )[:, k0:k1, :]
                 power = spec.real.square() + spec.imag.square()
-                if config.aggregation == "sum":
-                    combined = power.sum(dim=0)
-                else:
-                    combined = power.amax(dim=0)
-                out[channel, :, j0:j1] = combined * scales[channel]
+                out[channel, :, j0:j1] = (
+                    _combine(power, config.aggregation) * scales[channel]
+                )
     return out

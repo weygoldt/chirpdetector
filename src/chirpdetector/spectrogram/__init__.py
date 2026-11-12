@@ -11,7 +11,7 @@ Typical use::
     geometry = ImageGeometry.from_spectrogram(spec)
     x, y = timefreq_to_pixel(t_s, f_hz, geometry)
 
-Long recordings, chunk by chunk (frames identical to the whole)::
+Long recordings, chunk by chunk (frames bit-identical to the whole on CPU)::
 
     plan = plan_span(start, stop, n_samples_total, fs, config)
     spec = compute_spectrogram_span(recording[plan.read_slice], plan, config)
