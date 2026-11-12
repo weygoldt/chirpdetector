@@ -103,6 +103,84 @@ provenance and attached metrics. Metrics are attached with
 by the bundle's own weights (`chirpdetector.prediction` records their
 hash).
 
+## Chirp parameters
+
+`chirpdetector.params` is a second-stage decoder that estimates, for every
+detected chirp, its **height** (largest frequency excursion above the
+emitter's baseline, Hz), its **duration** as full width at half height
+(`fwhm_s`) and width at 10 % of the height (`width10_s`), and its
+**undershoot** (deepest drop below the baseline after the peak, Hz), each with
+a calibrated standard deviation.
+
+**Ground truth** (`chirpdetector.params.truth`) is the simulator's
+noise-free instantaneous frequency of the emitter, one value per EOD period:
+cycle boundaries are the 2π crossings of the emitter's phase
+(`SceneModel.phase(..., chirps="all")`), and each period gets `1/T_k` minus
+the period mean of the chirp-free baseline (with drift). Height is the
+largest of these excursions; the widths are the times between the crossings
+of 50 % and 10 % of the height that bracket the peak (interpolated between
+period midpoints); undershoot is the deepest excursion below zero after the
+peak. Nothing is read from a spectrogram.
+
+**Input** (`chirpdetector.params.crops.decoder_inputs`): the detector's own
+3-window spectrogram, normalised like a detector tile on a 3.2 s canvas
+centred on the box, resampled to 96 x 96 over the box plus 15 % margins,
+plus the log box duration and height. Training, evaluation and inference
+make it with this one function.
+
+**Training** (`chirpdetector train params`) runs the detector bundle over the
+simulated scenes, matches its boxes one-to-one to the true chirps (centre
+within 100 ms, overlapping frequency ranges) and trains on those *predicted*
+boxes: a params bundle is only valid with the detector it was trained with,
+whose weight hash it records (`predict_span` refuses another detector).
+Splits follow the detector datasets (seeds 0-1599 train, 1600-1799 val,
+1800-1999 test); by default only scenes on real background segments are used
+(`scene_background = "hybrid"`).
+
+```sh
+scripts/guarded --name params --mem 12G --vram 0.1 -- \
+    uv run chirpdetector train params params.toml \
+        --scenes /mnt/data1/chirp_v2/scenes/train_v3 \
+        --detector /mnt/data1/chirp_v2/runs/<detector run>/final/bundle \
+        --run-dir /mnt/data1/chirp_v2/params/runs/p1
+uv run chirpdetector evaluate params /mnt/data1/chirp_v2/params/runs/p1/bundle \
+    --scenes /mnt/data1/chirp_v2/scenes/train_v3
+```
+
+**Calibration** (`chirpdetector.params.calibration`). A regressor shrinks
+toward the middle of its training population (small chirps overestimated,
+large ones underestimated), and how much depends on that population. The
+bundle stores, per parameter, the monotone bias curve
+`h(y) = median(estimate | true = y)` fitted on the validation scenes at the
+detector's threshold, and reports `h⁻¹(estimate)`: median-unbiased at every
+true value, so its meaning does not depend on the mix of chirps in a
+recording. Standard deviations are propagated through `h⁻¹` and rescaled so
+that ±1 sd covers 68 % of the validation chirps (`k95` sd cover 95 %).
+
+**Inference.** `predict_span(..., params=BUNDLE)` (and `chirpdetector
+showcase --params BUNDLE`) adds `height_hz, height_sd_hz, fwhm_s, fwhm_sd_s,
+width10_s, width10_sd_s, undershoot_hz, undershoot_sd_hz`, plus `params_ok`
+and `params_flag` (`edge`: the crop crosses the recording's edge; `band`: it
+reaches past the front end's band; `size`: a box larger or smaller than any
+in training; `uncertain`: a sd above the 99.5th percentile of the validation
+chirps).
+
+**Evaluation** (`chirpdetector evaluate params`, report in `BUNDLE/eval/`):
+errors by family, SNR, ΔF, overlap and decile of the true value, before and
+after calibration (shrinkage slopes); coverage of the sds; whether the
+*distribution* of estimates over a population matches the true one
+(KS/Wasserstein distances, quantiles, joint height x FWHM histograms), also
+after re-weighting the test chirps to the natural template mix of the
+library (training scenes over-sample big and long chirps); whether separated
+chirp types stay separated and a continuum stays a continuum; and agreement
+with the independently extracted frequency traces of 533 harvested real
+chirps.
+
+**Caveats.** Accuracy is measured on simulations (real chirp templates on
+simulated and real background); on real recordings only the agreement on
+big, long harvested chirps is checked, not small chirps. The parameters are
+only valid for boxes of the detector recorded in the bundle.
+
 ## Development
 
 chirpdetector depends on [gridtools](https://github.com/weygoldt/gridtools),
