@@ -17,6 +17,7 @@ classifiers = [
 dependencies = [
     "gridtools",
     "numpy>=2.5",
+    "torch>=2.15",
 ]
 
 [project.urls]
