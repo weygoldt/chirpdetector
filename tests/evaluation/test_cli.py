@@ -18,6 +18,11 @@ runner = CliRunner()
 def test_help_lists_the_options() -> None:
     result = runner.invoke(app, ["evaluate", "--help"])
     assert result.exit_code == 0
+    assert "detections" in result.output
+    assert "params" in result.output
+    # `evaluate PREDICTIONS ...` is `evaluate detections PREDICTIONS ...`
+    result = runner.invoke(app, ["evaluate", "detections", "--help"])
+    assert result.exit_code == 0
     for option in (
         "--labels",
         "--out",
