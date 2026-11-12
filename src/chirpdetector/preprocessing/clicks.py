@@ -15,7 +15,10 @@ guard (below), field names that carry units (``max_duration`` became
 ``max_duration_s`` and so on), a configuration that validates itself and
 round-trips through JSON, and block scheduling expressed as spans of a
 recording (`plan_clean`, `clean_span`, `read_clean`) to match
-`chirpdetector.spectrogram`.
+`chirpdetector.spectrogram`. Everything is in seconds or Hz, so recordings of
+any sampling rate are cleaned alike; audian's search band, a fraction of the
+sampling rate (0.2 and 0.05), is ``high_band_hz`` 4000 and
+``high_band_edge_hz`` 1000 here, the same at 20 kHz.
 
 Why
 ---
@@ -28,8 +31,8 @@ How
 ---
 Each channel is split by its spectrum over a block:
 
-- Clicks are searched in the top of the spectrum, above ``high_band`` of the
-  sampling rate (4 kHz at 20 kHz), where a click reaches and a fish's
+- Clicks are searched in the top of the spectrum, above ``high_band_hz``
+  (4 kHz, whatever the sampling rate), where a click reaches and a fish's
   narrowband EOD does not. Loud events longer than ``max_duration_s`` are
   signals and stay.
 - Cutting the clicks out is not enough: a hole in a loud EOD is itself a
@@ -142,10 +145,12 @@ class ClickRemoval:
         noise never does.
     extent_threshold
         A click lasts for as long as it stays above this many.
-    high_band
-        Clicks are searched above this fraction of the sampling rate ...
-    high_band_edge
-        ... reached over this further fraction, with a raised-sine edge.
+    high_band_hz
+        Clicks are searched above this frequency ...
+    high_band_edge_hz
+        ... reached over this further band, with a raised-sine edge. The
+        sampling rate's Nyquist frequency must be at least
+        ``high_band_hz + high_band_edge_hz`` (see `min_samplerate_hz`).
     max_duration_s
         Events longer than this are signals, not clicks.
     guard_s
@@ -196,8 +201,8 @@ class ClickRemoval:
 
     threshold: float = 12.0
     extent_threshold: float = 8.0
-    high_band: float = 0.2
-    high_band_edge: float = 0.05
+    high_band_hz: float = 4000.0
+    high_band_edge_hz: float = 1000.0
     max_duration_s: float = 0.5
     guard_s: float = 0.002
     resolution_s: float = 0.001
@@ -229,6 +234,11 @@ class ClickRemoval:
         """
         return math.floor(MAX_CHIRP_ELECTRODES / self.coincidence + 1e-9) + 1
 
+    @property
+    def min_samplerate_hz(self) -> float:
+        """Lowest sampling rate whose Nyquist frequency holds the search band."""
+        return 2.0 * (self.high_band_hz + self.high_band_edge_hz)
+
     def block_samples(self, samplerate_hz: float) -> int:
         """Length of a block in samples (at least 64)."""
         return max(_MIN_SAMPLES, round(self.block_s * samplerate_hz))
@@ -248,12 +258,29 @@ class ClickRemoval:
         Missing keys take their defaults; unknown keys raise, so that a
         bundle written by a newer version is not silently misread.
         """
+        renamed = sorted(set(data) & set(_RENAMED))
+        if renamed:
+            msg = "; ".join(f"{key}: {_RENAMED[key]}" for key in renamed)
+            raise ValueError(f"outdated ClickRemoval keys: {msg}")
         known = {f.name for f in fields(cls)}
         unknown = set(data) - known
         if unknown:
             msg = f"unknown ClickRemoval keys: {sorted(unknown)}"
             raise ValueError(msg)
         return cls(**data)
+
+
+#: Keys of older configurations and what replaced them.
+_RENAMED = {
+    "high_band": (
+        "a fraction of the sampling rate, replaced by high_band_hz "
+        "(0.2 at 20 kHz is high_band_hz=4000)"
+    ),
+    "high_band_edge": (
+        "a fraction of the sampling rate, replaced by high_band_edge_hz "
+        "(0.05 at 20 kHz is high_band_edge_hz=1000)"
+    ),
+}
 
 
 def _is_real(value: object) -> TypeGuard[int | float | np.integer | np.floating]:
@@ -283,8 +310,8 @@ def _validate(cfg: ClickRemoval) -> None:
     positive = (
         "threshold",
         "extent_threshold",
-        "high_band",
-        "high_band_edge",
+        "high_band_hz",
+        "high_band_edge_hz",
         "max_duration_s",
         "resolution_s",
         "line_width_hz",
@@ -304,12 +331,6 @@ def _validate(cfg: ClickRemoval) -> None:
         msg = (
             f"extent_threshold ({cfg.extent_threshold}) must not exceed "
             f"threshold ({cfg.threshold})"
-        )
-        raise ValueError(msg)
-    if cfg.high_band + cfg.high_band_edge > 0.5:
-        msg = (
-            "high_band + high_band_edge must be at most 0.5 (Nyquist), got "
-            f"{cfg.high_band} + {cfg.high_band_edge}"
         )
         raise ValueError(msg)
     if not 0 < cfg.floor_quantile <= 1:
@@ -559,6 +580,23 @@ class _Search:
     size: int
 
 
+def _high_band_gain(
+    freqs_hz: NDArray[np.floating[Any]], samplerate_hz: float, cfg: ClickRemoval
+) -> NDArray[np.float64]:
+    """Gain of the click search band: 0 below ``high_band_hz``, 1 above
+    ``high_band_hz + high_band_edge_hz``, a raised sine between them.
+
+    A smooth edge, because a sharp one would ring around the clicks.
+    Computed in fractions of the sampling rate, as audian does, so that at
+    20 kHz (4000 / 20000 is exactly the double 0.2) the gain, and with it
+    every result, is bit-identical to audian's.
+    """
+    band = cfg.high_band_hz / samplerate_hz
+    edge = cfg.high_band_edge_hz / samplerate_hz
+    position = np.clip((freqs_hz / samplerate_hz - band) / edge, 0, 1)
+    return np.asarray(np.sin(0.5 * np.pi * position) ** 2, dtype=np.float64)
+
+
 def _search(
     x: NDArray[np.floating[Any]], samplerate_hz: float, cfg: ClickRemoval
 ) -> _Search | None:
@@ -576,9 +614,7 @@ def _search(
     df_hz = rate / n_fft
     narrow = power > spectral_floor(power, df_hz, cfg) * 10 ** (cfg.line_margin_db / 10)
     freqs = np.arange(len(power)) * df_hz
-    # a smooth edge: a sharp one would ring around the clicks
-    position = np.clip((freqs / rate - cfg.high_band) / cfg.high_band_edge, 0, 1)
-    gain = np.sin(0.5 * np.pi * position) ** 2
+    gain = _high_band_gain(freqs, rate, cfg)
     high = np.asarray(scipy.fft.irfft(spectrum * np.where(narrow, 0.0, gain), n=n_fft))
     # round-off of the transform is not noise: digital silence stays silent
     hot, strong, size = _hot_bins(np.where(x64 == 0, 0.0, high[:n]), rate, cfg)
@@ -629,6 +665,7 @@ def _clean_channel(
         everywhere when nothing was repaired.
     """
     cfg = ClickRemoval() if config is None else config
+    _check_samplerate(samplerate_hz, cfg)
     search = _search(x, samplerate_hz, cfg)
     if search is None:
         return np.asarray(x, dtype=np.float64), np.zeros(len(x), dtype=bool)
@@ -823,13 +860,23 @@ def _clean_range(
     return out, mask
 
 
-def can_remove_clicks(n_electrodes: int, config: ClickRemoval | None = None) -> bool:
-    """Whether a recording with ``n_electrodes`` can be cleaned safely.
+def can_remove_clicks(
+    n_electrodes: int,
+    config: ClickRemoval | None = None,
+    *,
+    samplerate_hz: float | None = None,
+) -> bool:
+    """Whether a recording can be cleaned safely.
 
-    Pipelines should skip click removal (with a warning) when this is False
-    rather than call `remove_clicks`, which raises `TooFewElectrodesError`.
+    It needs at least ``config.min_electrodes`` electrodes and, when
+    ``samplerate_hz`` is given, a sampling rate of at least
+    ``config.min_samplerate_hz``. Pipelines should skip click removal (with
+    a warning) when this is False, rather than call `remove_clicks`, which
+    raises `TooFewElectrodesError` or `ValueError`.
     """
     cfg = ClickRemoval() if config is None else config
+    if samplerate_hz is not None and not samplerate_hz >= cfg.min_samplerate_hz:
+        return False
     return int(n_electrodes) >= cfg.min_electrodes
 
 
@@ -855,6 +902,20 @@ def _check_electrodes(n_electrodes: int, cfg: ClickRemoval) -> None:
     raise TooFewElectrodesError(msg)
 
 
+def _check_samplerate(samplerate_hz: float, cfg: ClickRemoval) -> None:
+    if not (math.isfinite(samplerate_hz) and samplerate_hz > 0):
+        msg = f"samplerate_hz must be positive, got {samplerate_hz!r}"
+        raise ValueError(msg)
+    if samplerate_hz < cfg.min_samplerate_hz:
+        msg = (
+            f"clicks are searched up to {cfg.high_band_hz + cfg.high_band_edge_hz:g} "
+            f"Hz (high_band_hz + high_band_edge_hz), above the Nyquist frequency "
+            f"of a {samplerate_hz:g} Hz recording: click removal needs at least "
+            f"{cfg.min_samplerate_hz:g} Hz"
+        )
+        raise ValueError(msg)
+
+
 def _check_samples(samples: NDArray[Any], samplerate_hz: float) -> None:
     if samples.ndim != 2:
         msg = f"samples must be 2-D (n_samples, n_electrodes), got {samples.shape}"
@@ -862,9 +923,6 @@ def _check_samples(samples: NDArray[Any], samplerate_hz: float) -> None:
     if not np.issubdtype(samples.dtype, np.floating):
         msg = f"samples must be floating point, got {samples.dtype}"
         raise TypeError(msg)
-    if not (math.isfinite(samplerate_hz) and samplerate_hz > 0):
-        msg = f"samplerate_hz must be positive, got {samplerate_hz!r}"
-        raise ValueError(msg)
 
 
 def remove_clicks[T: np.floating[Any]](
@@ -909,9 +967,13 @@ def remove_clicks[T: np.floating[Any]](
     TooFewElectrodesError
         If ``samples`` has fewer than ``config.min_electrodes`` electrodes
         (always for single-channel data); see `can_remove_clicks`.
+    ValueError
+        If ``samplerate_hz`` is below ``config.min_samplerate_hz``: the
+        search band would reach past the Nyquist frequency.
     """
     _check_samples(samples, samplerate_hz)
     cfg = ClickRemoval() if config is None else config
+    _check_samplerate(samplerate_hz, cfg)
     _check_electrodes(samples.shape[1], cfg)
     if start_sample < 0:
         msg = f"start_sample must be >= 0, got {start_sample}"
@@ -958,9 +1020,12 @@ def clean_span[T: np.floating[Any]](
     ------
     TooFewElectrodesError
         If there are fewer than ``config.min_electrodes`` electrodes.
+    ValueError
+        If ``samplerate_hz`` is below ``config.min_samplerate_hz``.
     """
     _check_samples(samples, samplerate_hz)
     cfg = ClickRemoval() if config is None else config
+    _check_samplerate(samplerate_hz, cfg)
     _check_electrodes(samples.shape[1], cfg)
     if samples.shape[0] != plan.n_read:
         msg = (
@@ -1019,6 +1084,8 @@ def read_clean(
         If the recording has fewer than ``config.min_electrodes``
         electrodes (always for single-channel data); see
         `can_remove_clicks`.
+    ValueError
+        If its sampling rate is below ``config.min_samplerate_hz``.
     """
     rate = float(recording.samplerate_hz)
     plan = plan_clean(start_sample, stop_sample, recording.n_samples, rate, config)

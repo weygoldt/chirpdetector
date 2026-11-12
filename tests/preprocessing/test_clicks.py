@@ -28,7 +28,7 @@ from gridtools.io import open_recording
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from numpy.typing import NDArray
-from scipy.signal import butter, sosfiltfilt
+from scipy.signal import butter, resample_poly, sosfiltfilt
 
 from chirpdetector.preprocessing import (
     MAX_CHIRP_ELECTRODES,
@@ -43,6 +43,7 @@ from chirpdetector.preprocessing import (
     remove_clicks,
 )
 from chirpdetector.preprocessing.clicks import _clean_channel as clean_channel
+from chirpdetector.preprocessing.clicks import _high_band_gain
 from chirpdetector.spectrogram import (
     SpectrogramConfig,
     compute_spectrogram,
@@ -59,7 +60,8 @@ class TestConfig:
     def test_detection_defaults_are_wavetrackers(self) -> None:
         cfg = ClickRemoval()
         assert (cfg.threshold, cfg.extent_threshold) == (12.0, 8.0)
-        assert (cfg.high_band, cfg.high_band_edge) == (0.2, 0.05)
+        # audian's 0.2 and 0.05 of the sampling rate, at 20 kHz
+        assert (cfg.high_band_hz, cfg.high_band_edge_hz) == (4000.0, 1000.0)
         assert (cfg.max_duration_s, cfg.guard_s, cfg.resolution_s) == (
             0.5,
             0.002,
@@ -76,7 +78,7 @@ class TestConfig:
         "cfg",
         [
             ClickRemoval(),
-            ClickRemoval(threshold=48.0, extent_threshold=32.0, high_band=0.4),
+            ClickRemoval(threshold=48.0, extent_threshold=32.0, high_band_hz=8000.0),
         ],
     )
     def test_json_round_trip(self, cfg: ClickRemoval) -> None:
@@ -91,6 +93,19 @@ class TestConfig:
         with pytest.raises(ValueError, match="unknown ClickRemoval keys"):
             ClickRemoval.from_dict({"treshold": 20})
 
+    @pytest.mark.parametrize(
+        ("key", "hint"),
+        [
+            ("high_band", "high_band_hz=4000"),
+            ("high_band_edge", "high_band_edge_hz=1000"),
+        ],
+    )
+    def test_outdated_keys_say_what_replaced_them(self, key: str, hint: str) -> None:
+        """Bundles written before the band was in Hz are refused, with the
+        value that reproduces them at 20 kHz."""
+        with pytest.raises(ValueError, match=f"outdated ClickRemoval keys.*{hint}"):
+            ClickRemoval.from_dict({key: 0.2})
+
     def test_numpy_scalars_are_plain_numbers(self) -> None:
         cfg = ClickRemoval(threshold=np.float32(12.0), sample_stride=np.int64(16))  # pyright: ignore[reportArgumentType]
         assert cfg == ClickRemoval()
@@ -103,8 +118,8 @@ class TestConfig:
         [
             ({"threshold": 0.0}, "threshold must be positive"),
             ({"extent_threshold": 13.0}, "must not exceed"),
-            ({"high_band": 0.48}, "Nyquist"),
-            ({"high_band_edge": 0.0}, "high_band_edge must be positive"),
+            ({"high_band_hz": 0.0}, "high_band_hz must be positive"),
+            ({"high_band_edge_hz": 0.0}, "high_band_edge_hz must be positive"),
             ({"margin_s": 0.4}, "at least max_duration_s"),
             ({"sample_stride": 0}, "sample_stride"),
             ({"floor_quantile": 0.0}, "floor_quantile"),
@@ -476,6 +491,72 @@ class TestCoincidenceGuard:
             masks.append(mask)
         assert np.array_equal(np.concatenate(pieces), whole)
         assert np.array_equal(np.concatenate(masks), whole_mask)
+
+
+# ------------------------------------------------------------ sample rate
+
+
+class TestSampleRate:
+    """Everything in seconds or Hz: any sampling rate is cleaned alike."""
+
+    def test_the_band_at_20khz_is_audians_bit_for_bit(self) -> None:
+        """At 20 kHz the gain of the search band equals audian's, written in
+        fractions of the sampling rate (0.2, 0.05), to the last bit, and so
+        does every result built on it."""
+        freqs = np.fft.rfftfreq(70_000, 1.0 / RATE)
+        audian = np.sin(0.5 * np.pi * np.clip((freqs / RATE - 0.2) / 0.05, 0, 1)) ** 2
+        assert np.array_equal(_high_band_gain(freqs, RATE, ClickRemoval()), audian)
+
+    def test_the_band_stays_put_at_other_rates(self) -> None:
+        cfg = ClickRemoval()
+        for rate in (20_000.0, 44_100.0, 48_000.0):
+            freqs = np.fft.rfftfreq(round(3 * rate), 1.0 / rate)
+            gain = _high_band_gain(freqs, rate, cfg)
+            assert gain[freqs <= 4000.0].max() == 0.0
+            assert gain[freqs >= 5000.0].min() == 1.0
+
+    @pytest.mark.parametrize("loudness", [30.0, 300.0])
+    def test_the_same_clicks_are_found_at_20_and_48_khz(
+        self, make_chirp_scene: Callable[..., Any], loudness: float
+    ) -> None:
+        """The 9-electrode scene, resampled to 48 kHz: the same click
+        events at the same times (within 1 ms; a repair under a loud
+        chirp may end a few ms later), every click on every electrode,
+        and nothing repaired without clicks, loud chirps included."""
+        scene = make_chirp_scene(loudness, n_electrodes=9)
+        fast = 48_000.0
+        signal = resample_poly(scene.signal.astype(np.float64), 12, 5, axis=0)
+        truth = resample_poly(scene.truth.astype(np.float64), 12, 5, axis=0)
+        _, slow_mask = remove_clicks(scene.signal, RATE)
+        _, fast_mask = remove_clicks(signal, fast)
+        slow = click_spans(slow_mask) / RATE
+        quick = click_spans(fast_mask) / fast
+        assert slow.shape == quick.shape
+        assert np.abs(slow[:, 0] - quick[:, 0]).max() < 0.001
+        for at, electrodes in scene.clicks:
+            assert fast_mask[round(at * fast / RATE), list(electrodes)].all()
+        _, mask = remove_clicks(truth, fast)
+        assert not mask.any()
+
+    def test_too_low_a_rate_is_refused(self) -> None:
+        """The band reaches 5 kHz, so the rate must be at least 10 kHz."""
+        cfg = ClickRemoval()
+        assert cfg.min_samplerate_hz == 10_000.0
+        low = 8_000.0
+        x = np.random.default_rng(0).normal(0.0, 1e-3, (int(low), 9))
+        with pytest.raises(ValueError, match="needs at least 10000 Hz"):
+            remove_clicks(x, low)
+        plan = plan_clean(0, len(x), len(x), low)
+        with pytest.raises(ValueError, match="needs at least 10000 Hz"):
+            clean_span(x, plan, low)
+        with pytest.raises(ValueError, match="needs at least 10000 Hz"):
+            clean_channel(x[:, 0], low)
+        out, mask = remove_clicks(x, 10_000.0)
+        assert not mask.any()
+        assert np.array_equal(out, x)
+        assert not can_remove_clicks(9, cfg, samplerate_hz=low)
+        assert can_remove_clicks(9, cfg, samplerate_hz=10_000.0)
+        assert not can_remove_clicks(8, cfg, samplerate_hz=48_000.0)
 
 
 # -------------------------------------------------------------- electrodes
