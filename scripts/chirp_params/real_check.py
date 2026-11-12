@@ -4,10 +4,10 @@ Reference: the per-period parameters of each chirp's extracted frequency
 trace (template library v4, ``source == "competition"``), an independent
 estimate from the raw recording, not ground truth. Inputs are cut around
 the v1 detector's box for that chirp (as a production decoder would see
-them) with the trace's baseline for rectification; the trained decoders
+them), optionally mapped to the footprint-box convention (``--box v1cal``) with the trace's baseline for rectification; the trained decoders
 (``RUNS/<name>/model.pt``) predict on them.
 
-Usage: real_check.py RUNS OUT
+Usage: real_check.py RUNS OUT [--box v1|v1cal]
 """
 
 from __future__ import annotations
@@ -31,6 +31,11 @@ ROOT = Path("/mnt/data2/2019_tube_competition")
 RCFG = RectifiedConfig()
 DCFG = SpectrogramConfig()
 PARAMS = ("height_hz", "fwhm_s", "width10_s", "undershoot_hz")
+# v1 boxes -> footprint-box convention (population medians, no per-chirp truth):
+# v1 starts 44 ms and ends 3 ms outside the support, footprint boxes ~80 ms on
+# both sides; v1 tops sit 45 Hz above baseline + excursion, footprints 11 Hz.
+BOX_SHIFTS = {"v1": (0.0, 0.0, 0.0, 0.0), "v1cal": (0.036, 0.078, 0.0, 34.0)}
+BOX_SHIFT = BOX_SHIFTS["v1"]
 
 
 def reference_params(trace: np.ndarray, baseline: float, fs: float) -> dict:
@@ -56,7 +61,12 @@ def extract(device: torch.device) -> tuple[dict[str, np.ndarray], pd.DataFrame]:
             info = {"template_id": int(t.template_id), "recording": rec_name, "baseline_hz": float(t.baseline_hz)}
             info.update(reference_params(np.asarray(traces[int(t.template_id)]), float(t.baseline_hz), fs_lib))
             info.update({"lib_excursion_hz": t.excursion_hz, "lib_duration_50_s": t.duration_50_s, "lib_duration_10_s": t.duration_10_s, "lib_undershoot_hz": t.undershoot_hz, "band_snr_db": t.band_snr_db})
-            box = (float(t.box_t_start_s), float(t.box_t_end_s), float(t.box_f_low_hz), float(t.box_f_high_hz))
+            box = (
+                float(t.box_t_start_s) - BOX_SHIFT[0],
+                float(t.box_t_end_s) + BOX_SHIFT[1],
+                float(t.box_f_low_hz) - BOX_SHIFT[2],
+                float(t.box_f_high_hz) - BOX_SHIFT[3],
+            )
             info.update({"in_t0_s": box[0], "in_t1_s": box[1], "in_f0_hz": box[2], "in_f1_hz": box[3]})
             span = crop_span(box[0], box[1], RCFG)
             info["span_t0_s"], info["span_t1_s"] = span
@@ -111,7 +121,10 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", type=Path)
     ap.add_argument("out", type=Path)
+    ap.add_argument("--box", choices=list(BOX_SHIFTS), default="v1")
     args = ap.parse_args()
+    global BOX_SHIFT
+    BOX_SHIFT = BOX_SHIFTS[args.box]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
         torch.cuda.set_per_process_memory_fraction(float(os.environ.get("CHIRP_MAX_VRAM_FRACTION", "0.1")))
