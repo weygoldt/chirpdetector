@@ -618,3 +618,27 @@ def test_a_resumed_fit_continues_exactly_where_it_stopped(
     b = torch.load(tmp_path / "resumed/final/dualhead/last.pt", weights_only=True)
     for name, value in a["state_dict"].items():
         torch.testing.assert_close(b["state_dict"][name], value, msg=name)
+
+
+def test_validation_of_a_model_without_detections_scores_zero(
+    dualhead_dataset: Dataset,
+) -> None:
+    model, _ = engine.build_model(DualHeadModelConfig(**TINY), emitter_unit=63 / 64)
+    with torch.no_grad():
+        for head in cast("Any", model.model.decoder.class_embed):
+            head.bias.fill_(-20.0)  # every score ~0: nothing above the floor
+    metrics = engine.validate(
+        model,
+        dualhead_dataset,
+        list(dualhead_dataset.manifest.image_ids("val")),
+        shape=(64, 128),
+        device=torch.device("cpu"),
+        batch_size=4,
+        workers=0,
+        amp=False,
+        max_det=20,
+        score_threshold=0.5,
+    )
+    assert np.isnan(metrics["precision"])
+    assert metrics["recall"] == 0
+    assert metrics["fitness"] == 0

@@ -902,6 +902,14 @@ def emitter_metrics(
     }
 
 
+def _number(value: Any) -> float:
+    """``value`` as a float; NaN for None or anything not a number."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return math.nan
+
+
 def validate(
     model: DualHeadRTDetr,
     dataset: Dataset,
@@ -942,11 +950,15 @@ def validate(
         ),
     )
     detection = result.metrics()["detection"].get("all", {})
+    # undefined rates (e.g. precision without detections) are null in metrics
     out = {
-        "precision": float(detection.get("precision", math.nan)),
-        "recall": float(detection.get("recall", math.nan)),
-        "f1": float(detection.get("f1", math.nan)),
-        "ap": float(detection.get("average_precision", math.nan)),
+        name: _number(detection.get(key))
+        for name, key in (
+            ("precision", "precision"),
+            ("recall", "recall"),
+            ("f1", "f1"),
+            ("ap", "average_precision"),
+        )
     }
     items = result.items
     if "true_emitter_hz" not in items.columns:
@@ -1085,11 +1097,23 @@ class StopSignals:
         self._previous.clear()
 
     def _handle(self, signum: int, _frame: object) -> None:
-        if self.received is None:
-            log.warning(
-                "%s received: stopping after this step", signal.Signals(signum).name
-            )
+        first = self.received is None
         self.received = signal.Signals(signum).name
+        if not first:
+            return
+        log.warning("%s received: stopping after this step", self.received)
+        # The job's loader workers get the signal too and may die (e.g. while
+        # starting, before `worker_init`). torch's SIGCHLD handler would raise
+        # about that at any point; from now on worker deaths surface only in
+        # the loader call, which the fit treats as the stop. (If the reset
+        # races with a pending SIGCHLD, the fit treats that error as the stop.)
+        if signal.SIGCHLD not in self._previous:
+            try:
+                self._previous[signal.SIGCHLD] = signal.signal(
+                    signal.SIGCHLD, signal.SIG_DFL
+                )
+            except OSError:
+                log.debug("SIGCHLD handler not reset", exc_info=True)
 
     def check(self) -> None:
         """Raise `Stop` if a stop signal arrived."""
@@ -1361,8 +1385,12 @@ def fit(request: FitRequest) -> FitOutput:
                     score_threshold=cfg.score_threshold,
                     should_stop=stop.check,
                 )
-            except Stop as signal_name:
-                stopped = {"signal": str(signal_name), "epoch": epoch, "step": step}
+            except Exception as error:
+                if not (isinstance(error, Stop) or stop.received):
+                    raise
+                # a stop, or a loader whose workers the stop signal ended
+                signal_name = stop.received or str(error)
+                stopped = {"signal": signal_name, "epoch": epoch, "step": step}
                 log.warning(
                     "%s: stopped by %s in epoch %d; shipping the best checkpoint "
                     "(epoch %s)",
