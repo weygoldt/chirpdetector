@@ -16,8 +16,10 @@ spectrogram computed with the bundle's front end, the columns
 ``params_ok``, ``params_flag``
     Whether the box is inside the decoder's validated domain, and if not,
     why (comma-separated): ``edge`` (the crop window crosses the start or
-    end of the recording, or of the spectrogram given), ``band`` (the crop
-    window reaches past the front end's frequency band), ``size`` (box
+    end of the recording, or of the spectrogram given), ``band`` (the box
+    reaches the edge of the front end's frequency band, within one bin: the
+    chirp may continue beyond it; a crop whose *margin* alone crosses the
+    band is common in training and not flagged), ``size`` (box
     duration or height outside the range seen in training), ``uncertain``
     (a calibrated sigma above the bundle's threshold, the
     ``calibration.flag_quantile`` quantile of the validation sigmas).
@@ -188,7 +190,7 @@ class ParamsEstimator:
         domain = self.bundle.domain
         reasons: list[list[str]] = [[] for _ in range(n)]
         edge = inputs.outside_time > 0
-        band = inputs.outside_freq > 0
+        band = self.at_band_edge(inputs.boxes)
         size = np.zeros(n, dtype=bool)
         for k, name in enumerate(SCALAR_NAMES):
             lo, hi = domain.get("scalar_range", {}).get(name, (-np.inf, np.inf))
@@ -205,6 +207,16 @@ class ParamsEstimator:
                 reasons[i].append(reason)
         ok = np.array([not r for r in reasons], dtype=bool)
         return ok, [",".join(r) for r in reasons]
+
+    def at_band_edge(self, boxes: npt.ArrayLike) -> npt.NDArray[np.bool_]:
+        """Boxes within one frequency bin of the front end's band edges."""
+        config = self.bundle.spectrogram
+        array = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
+        lowest = config.freq_bin_start * config.df_hz
+        highest = (config.freq_bin_stop - 1) * config.df_hz
+        return (array[:, 2] <= lowest + config.df_hz) | (
+            array[:, 3] >= highest - config.df_hz
+        )
 
     def estimate_inputs(self, inputs: DecoderInputs) -> pd.DataFrame:
         """`PARAM_COLUMNS` for decoder inputs (one row per crop)."""

@@ -117,6 +117,11 @@ def test_estimator_gives_calibrated_columns(footprint_run: Path) -> None:
     assert (out["undershoot_hz"].to_numpy(float) >= 0).all()
     assert (out["height_sd_hz"].to_numpy(float) > 0).all()
     assert out["params_ok"].dtype == bool
+    # band flag: only boxes that reach the band's edge, not crop margins
+    edge = estimator.at_band_edge(
+        [[1.0, 1.1, 600.0, 700.0], [1.0, 1.1, 1300.0, 1450.0], [1.0, 1.1, 1400, 1500.0]]
+    )
+    np.testing.assert_array_equal(edge, [False, False, True])
     assert set(",".join(out["params_flag"]).split(",")) <= {
         "",
         "edge",
@@ -149,6 +154,19 @@ def test_predict_span_adds_parameter_columns(
     assert list(out.columns[len(plain.columns) :]) == list(PARAM_COLUMNS)
     assert len(out) > 0
     assert np.isfinite(out["height_hz"]).all()
+    # no detections: the columns are there, the table is empty
+    none = predict_span(
+        stub_detector,
+        recording,
+        1.0,
+        7.0,
+        name="s",
+        device="cpu",
+        params=params.path,
+        score_threshold=0.99,
+    )
+    assert len(none) == 0
+    assert set(PARAM_COLUMNS) <= set(none.columns)
 
 
 def test_predict_span_refuses_another_detectors_decoder(

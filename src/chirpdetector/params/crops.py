@@ -50,9 +50,9 @@ Domain flags
 `DecoderInputs` reports the fraction of the crop's columns outside the
 canvas (``outside_time``: the crop window crosses the recording's start or
 end, or a box longer than the canvas) and of its rows outside the band
-(``outside_freq``: a box at 500 or 1500 Hz), and whether the canvas had to
-be shifted (``canvas_shifted``). Such crops are outside the conditions the
-decoder was validated in; `chirpdetector.params.inference` flags them.
+(``outside_freq``: the margin or the box reaches past 500 or 1500 Hz), and
+whether the canvas had to be shifted (``canvas_shifted``);
+`chirpdetector.params.inference` turns them into domain flags.
 """
 
 from __future__ import annotations
@@ -173,6 +173,8 @@ class DecoderInputs:
         outside the frequency band.
     canvas_shifted
         The canvas could not be centred on the box (spectrogram edge).
+    boxes
+        ``(n, 4)`` the boxes, ``t_start, t_end, f_low, f_high``.
     """
 
     crops: npt.NDArray[np.uint8]
@@ -180,6 +182,7 @@ class DecoderInputs:
     outside_time: FloatArray
     outside_freq: FloatArray
     canvas_shifted: npt.NDArray[np.bool_]
+    boxes: FloatArray
 
     def __len__(self) -> int:
         return int(self.crops.shape[0])
@@ -330,4 +333,5 @@ def decoder_inputs(
         outside_time=outside_t,
         outside_freq=outside_f,
         canvas_shifted=shifted,
+        boxes=array,
     )

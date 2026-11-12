@@ -722,6 +722,9 @@ class SampleSet:
             outside_time=rows["outside_time"].to_numpy(dtype=np.float64),
             outside_freq=rows["outside_freq"].to_numpy(dtype=np.float64),
             canvas_shifted=rows["canvas_shifted"].to_numpy(dtype=bool),
+            boxes=rows[["t_start_s", "t_end_s", "f_low_hz", "f_high_hz"]].to_numpy(
+                dtype=np.float64
+            ),
         )
 
 

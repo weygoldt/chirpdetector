@@ -160,8 +160,8 @@ that ±1 sd covers 68 % of the validation chirps (`k95` sd cover 95 %).
 **Inference.** `predict_span(..., params=BUNDLE)` (and `chirpdetector
 showcase --params BUNDLE`) adds `height_hz, height_sd_hz, fwhm_s, fwhm_sd_s,
 width10_s, width10_sd_s, undershoot_hz, undershoot_sd_hz`, plus `params_ok`
-and `params_flag` (`edge`: the crop crosses the recording's edge; `band`: it
-reaches past the front end's band; `size`: a box larger or smaller than any
+and `params_flag` (`edge`: the crop crosses the recording's edge; `band`: the
+box reaches the edge of the front end's band; `size`: a box larger or smaller than any
 in training; `uncertain`: a sd above the 99.5th percentile of the validation
 chirps).
 

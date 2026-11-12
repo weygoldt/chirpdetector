@@ -236,6 +236,12 @@ def _fig_clusters(result: ParamsEvaluation, path: Path) -> Path | None:
     fig, axes = _figure(len(pops), 3, (13, 3.8 * len(pops)))
     for r, pop in enumerate(pops):
         sub = pred.iloc[pop.rows]
+        both_f = 1e3 * np.concatenate([sub["true_fwhm_s"], sub["cal_fwhm_s"]])
+        both_h = np.concatenate([sub["true_height_hz"], sub["cal_height_hz"]])
+        limits = (
+            (np.nanmin(both_f) * 0.9, np.nanmax(both_f) * 1.1),
+            (np.nanmin(both_h) * 0.9, np.nanmax(both_h) * 1.1),
+        )
         for c, which in enumerate(("true", "cal")):
             ax = axes[r, c]
             ax.scatter(
@@ -248,6 +254,8 @@ def _fig_clusters(result: ParamsEvaluation, path: Path) -> Path | None:
             )
             ax.set_xscale("log")
             ax.set_yscale("log")
+            ax.set_xlim(*limits[0])
+            ax.set_ylim(*limits[1])
             ax.set_xlabel("FWHM (ms)")
             ax.set_ylabel("height (Hz)")
             ax.set_title(f"{pop.name}: {_NAMES[which]}", fontsize=9)
