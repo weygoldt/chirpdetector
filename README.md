@@ -96,6 +96,9 @@ baseline EOD frequency; `chirpdetector.evaluation.assign_by_frequency`
 then picks the nearest live track. Predictions (`predict_images`,
 `predict_span`) carry an `emitter_hz` column. See
 `chirpdetector.models.dualhead` for the design and the `[model]` keys.
+A dual-head fit that is stopped (`systemctl stop` on its guarded scope,
+Ctrl-C) ships its best validated epoch as the bundle; `[model] resume =
+"RUN/final/dualhead/state.pt"` continues it in a new run directory.
 
 **GPU memory.** The GPU is shared. Run training (and any GPU job) through
 the workspace's `scripts/guarded`: it caps RAM in a systemd scope and sets
