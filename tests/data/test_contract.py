@@ -107,6 +107,7 @@ def test_ground_truth_scores_perfect_predictions(synthetic_dir: Path) -> None:
     dataset = load_dataset(synthetic_dir)
     truth = dataset_ground_truth(dataset)
     assert set(truth.labels["label"]) == {"chirp", "ignore"}
+    assert "snr_db" in truth.labels.columns  # box extras, for strata
     kinds = np.asarray(strings(dataset.boxes["kind"]))
     chirps = select(dataset.boxes, kinds == "chirp")
     predictions = chirps.rename(columns={"image_id": "recording"})[

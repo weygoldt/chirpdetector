@@ -1455,13 +1455,16 @@ def dataset_ground_truth(
     Every image is one recording (named by its id) with one exhaustively
     labelled region, its extent; its dataset is the source's kind. Chirps
     become ``chirp`` labels (with ``emitter_id`` and an ``emitter_hz``
-    column), ignore regions ``ignore`` labels. Images may overlap in time,
-    so they are not merged into their source recording here.
+    column), ignore regions ``ignore`` labels (with a ``reason`` column).
+    Further box columns (SNR, ΔF, overlap flags, family, ...) are kept, for
+    stratified evaluation. Images may overlap in time, so they are not
+    merged into their source recording here.
 
     """
     from chirpdetector.evaluation import GroundTruth
 
     ids = list(dataset.manifest.image_ids() if image_ids is None else image_ids)
+    extra = [c for c in dataset.boxes.columns if c not in BOX_COLUMNS]
     regions, labels = [], []
     for image_id in ids:
         record = dataset.manifest.image(image_id)
@@ -1489,6 +1492,8 @@ def dataset_ground_truth(
                         "label": box_kind,
                         "emitter_id": row["emitter_id"],
                         "emitter_hz": row["emitter_hz"],
+                        "reason": row["reason"],
+                        **{c: row[c] for c in extra},
                     }
                 )
     region_df = pd.DataFrame(
@@ -1514,6 +1519,8 @@ def dataset_ground_truth(
         "label",
         "emitter_id",
         "emitter_hz",
+        "reason",
+        *extra,
     ]
     label_df = pd.DataFrame(labels, columns=label_columns)
     label_df["emitter_id"] = pd.array(
