@@ -23,6 +23,7 @@ import pandas as pd
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import NullFormatter
 
 from chirpdetector.params.crops import RectifiedConfig
 from chirpdetector.params.estimators import box_estimate, fit_box_offsets, ridge_estimate
@@ -221,6 +222,8 @@ def figures(test: pd.DataFrame, est: dict[str, pd.DataFrame], bd: pd.DataFrame, 
             else:
                 ax.set_xscale("log")
                 ax.set_yscale("log")
+            ax.xaxis.set_minor_formatter(NullFormatter())
+            ax.yaxis.set_minor_formatter(NullFormatter())
             ax.plot(lim, lim, "k-", lw=0.6)
             ax.set_xlim(lim)
             ax.set_ylim(lim)
