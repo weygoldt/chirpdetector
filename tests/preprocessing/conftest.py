@@ -130,10 +130,12 @@ def chirp_scene(
     loudness: float,
     harmonics: Harmonics = MEASURED_HARMONICS,
     seed: int = 7,
+    n_electrodes: int = 4,
 ) -> ChirpScene:
     """8 s, fish at 900 and 700 Hz, each chirping small, big, small, big.
 
-    Fish 0 is loudest on electrode 0, ``loudness`` times the robust sd of
+    On ``n_electrodes`` (at least 4; those beyond the fourth pick up both
+    fish at 2% of their peak). Fish 0 is loudest on electrode 0, ``loudness`` times the robust sd of
     the high band (above 0.2 fs) of the pink noise (sd 1); fish 1 is 4x
     weaker, loudest on electrode 3. Small chirps: +60 Hz, 10 ms FWHM;
     big: +300 Hz, 30 ms. Clicks (0.5 ms decay, 300-3000x the noise sd) sit
@@ -143,11 +145,14 @@ def chirp_scene(
     rng = np.random.default_rng(seed)
     n = int(8 * RATE)
     t = np.arange(n) / RATE
-    noise_ = colored_noise(rng, n, 4, RATE, ColoredNoiseParams(sd=1.0)).astype(float)
+    noise_ = colored_noise(
+        rng, n, n_electrodes, RATE, ColoredNoiseParams(sd=1.0)
+    ).astype(float)
     high_sigma = 0.29  # measured on this noise: robust sd above 4 kHz
+    far = [0.02] * (n_electrodes - 4)
     gains = (
-        np.array([1.0, 0.3, 0.1, 0.05]) * loudness * high_sigma,
-        np.array([0.05, 0.1, 0.3, 1.0]) * loudness * high_sigma / 4,
+        np.array([1.0, 0.3, 0.1, 0.05, *far]) * loudness * high_sigma,
+        np.array([0.05, 0.1, 0.3, 1.0, *far]) * loudness * high_sigma / 4,
     )
     truth = noise_.copy()
     boxes: list[tuple[float, float, float, float]] = []
@@ -191,12 +196,16 @@ def chirp_scene(
 @pytest.fixture(scope="session")
 def make_chirp_scene() -> Callable[..., ChirpScene]:
     """Factory of `ChirpScene` (cached per loudness)."""
-    cache: dict[tuple[float, int], ChirpScene] = {}
+    cache: dict[tuple[float, int, int], ChirpScene] = {}
 
-    def make(loudness: float, harmonics: Harmonics = MEASURED_HARMONICS) -> ChirpScene:
-        key = (loudness, id(harmonics))
+    def make(
+        loudness: float,
+        harmonics: Harmonics = MEASURED_HARMONICS,
+        n_electrodes: int = 4,
+    ) -> ChirpScene:
+        key = (loudness, id(harmonics), n_electrodes)
         if key not in cache:
-            cache[key] = chirp_scene(loudness, harmonics)
+            cache[key] = chirp_scene(loudness, harmonics, n_electrodes=n_electrodes)
         return cache[key]
 
     return make

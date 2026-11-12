@@ -343,6 +343,96 @@ class TestChirps:
         assert not strict.any()
 
 
+class TestCoincidenceGuard:
+    """``coincidence``: clicks on few electrodes must reach a higher bar."""
+
+    def test_off_by_default(self) -> None:
+        assert ClickRemoval().coincidence == 0.0
+        assert ClickRemoval().isolated_threshold == 48.0
+
+    @pytest.mark.parametrize(
+        ("kwargs", "match"),
+        [
+            ({"coincidence": 1.5}, "coincidence"),
+            ({"coincidence": -0.1}, "coincidence"),
+            ({"coincidence": 0.5, "isolated_threshold": 10.0}, "isolated_threshold"),
+        ],
+    )
+    def test_invalid_settings_raise(self, kwargs: dict[str, Any], match: str) -> None:
+        with pytest.raises(ValueError, match=match):
+            ClickRemoval(**kwargs)
+
+    def test_a_weak_click_counts_on_many_electrodes_only(
+        self, sig: SimpleNamespace
+    ) -> None:
+        """The 0.05 click of audian's tests reaches 22.8 robust sd: below
+        the isolated threshold of 48 on one of four electrodes, a click on
+        three of them (half or more)."""
+        n = sig.N
+        rng = np.random.default_rng(1)
+        x = rng.normal(0.0, sig.NOISE, (n, 4))
+        single, multi, loud = int(1.5 * RATE), int(3.0 * RATE), int(4.5 * RATE)
+        x[:, 0] += sig.click(n, single, amplitude=0.05)
+        x[:, :3] += sig.click(n, multi, amplitude=0.05)[:, None]
+        x[:, 2] += sig.click(n, loud, amplitude=1.0)
+        _, plain = remove_clicks(x, RATE)
+        _, guarded = remove_clicks(x, RATE, ClickRemoval(coincidence=0.5))
+        assert plain[single, 0]
+        assert not guarded[single].any()
+        assert guarded[multi, :3].all()
+        assert guarded[loud, 2]
+        assert not (guarded & ~plain).any()
+
+    def test_loud_chirps_are_left_and_clicks_still_found(
+        self, make_chirp_scene: Callable[..., Any]
+    ) -> None:
+        """Nine electrodes, the fish at 300x the high-band noise with real
+        harmonics: its big chirps reach the click band on two electrodes
+        (8260 samples repaired without the guard, none with it), and every
+        click, single or on several electrodes, is still repaired."""
+        scene = make_chirp_scene(300.0, n_electrodes=9)
+        cfg = ClickRemoval(coincidence=0.5)
+        _, plain = remove_clicks(scene.truth, RATE)
+        out, mask = remove_clicks(scene.truth, RATE, cfg)
+        assert plain.any()
+        assert not mask.any()
+        assert np.array_equal(out, scene.truth)
+        _, mask = remove_clicks(scene.signal, RATE, cfg)
+        for at, electrodes in scene.clicks:
+            assert mask[at, list(electrodes)].all()
+
+    @settings(max_examples=8, deadline=None)
+    @given(cuts=st.lists(st.integers(1, 239_999), max_size=4, unique=True))
+    def test_spans_give_the_same_samples_as_the_whole(
+        self,
+        three_channels: NDArray[np.float64],
+        cuts: list[int],
+    ) -> None:
+        cfg = ClickRemoval(coincidence=0.5)
+        whole, whole_mask = _guarded_whole(three_channels, cfg)
+        edges = [0, *sorted(cuts), len(three_channels)]
+        pieces, masks = [], []
+        for a, b in itertools.pairwise(edges):
+            plan = plan_clean(a, b, len(three_channels), RATE, cfg)
+            out, mask = clean_span(three_channels[plan.read_slice], plan, RATE, cfg)
+            pieces.append(out)
+            masks.append(mask)
+        assert np.array_equal(np.concatenate(pieces), whole)
+        assert np.array_equal(np.concatenate(masks), whole_mask)
+
+
+_GUARDED: dict[int, tuple[NDArray[np.float64], NDArray[np.bool_]]] = {}
+
+
+def _guarded_whole(
+    x: NDArray[np.float64], cfg: ClickRemoval
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """`remove_clicks` of ``x``, computed once per array."""
+    if id(x) not in _GUARDED:
+        _GUARDED[id(x)] = remove_clicks(x, RATE, cfg)
+    return _GUARDED[id(x)]
+
+
 # ------------------------------------------------------------------ spans
 
 

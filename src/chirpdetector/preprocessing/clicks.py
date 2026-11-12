@@ -133,6 +133,18 @@ class ClickRemoval:
         Data on each side of a block it is computed from; at least
         ``max_duration_s``, so that a long event touching a block is seen
         whole enough to be told from a click.
+    coincidence
+        Guard for chirps, not in audian: the fraction of the electrodes a
+        click must reach (at ``threshold``, within one event) to be
+        repaired on all of them. An event on fewer electrodes is repaired
+        only where it reaches ``isolated_threshold``. The harmonics of a
+        loud chirp reach the high band only on the electrodes next to the
+        fish, static from the amplifier or the water reaches most of them.
+        0 (the default) repairs every channel on its own, as audian does.
+    isolated_threshold
+        What a click on fewer than ``coincidence`` of the electrodes must
+        reach, in robust standard deviations of the high band; at least
+        ``threshold`` when the guard is on, unused when it is off.
     """
 
     threshold: float = 12.0
@@ -152,6 +164,8 @@ class ClickRemoval:
     sample_stride: int = 16
     block_s: float = 2.0
     margin_s: float = 0.5
+    coincidence: float = 0.0
+    isolated_threshold: float = 48.0
 
     def __post_init__(self) -> None:
         _canonicalize(self)
@@ -247,6 +261,15 @@ def _validate(cfg: ClickRemoval) -> None:
     if not isinstance(stride, int) or isinstance(stride, bool) or stride < 1:
         msg = f"sample_stride must be a positive integer, got {stride!r}"
         raise ValueError(msg)
+    if not 0 <= cfg.coincidence <= 1:
+        msg = f"coincidence must lie in [0, 1], got {cfg.coincidence!r}"
+        raise ValueError(msg)
+    if cfg.coincidence > 0 and cfg.isolated_threshold < cfg.threshold:
+        msg = (
+            f"isolated_threshold ({cfg.isolated_threshold}) must be at least "
+            f"threshold ({cfg.threshold}) when the coincidence guard is on"
+        )
+        raise ValueError(msg)
     if cfg.margin_s < cfg.max_duration_s:
         msg = (
             f"margin_s ({cfg.margin_s}) must be at least max_duration_s "
@@ -321,22 +344,29 @@ def _runs_holding(runs: BoolArray, seeds: BoolArray) -> BoolArray:
     return runs & (held[labels] > 0)
 
 
-def find_clicks(
+def _hot_bins(
     high: NDArray[np.float64], samplerate_hz: float, config: ClickRemoval
-) -> BoolArray:
-    """Mask of the clicks in ``high``, one channel's high band (samples,)."""
+) -> tuple[BoolArray, BoolArray, int]:
+    """Where one channel's high band holds clicks, per bin of the search.
+
+    Returns
+    -------
+    tuple
+        ``(hot, strong, size)``: the runs of bins (``resolution_s`` each,
+        ``size`` samples) that reach ``threshold`` and last while above
+        ``extent_threshold``; those of them that reach
+        ``isolated_threshold``; and the bin size.
+    """
     n = len(high)
     size = max(1, round(config.resolution_s * samplerate_hz))
     n_bins = n // size
-    if n_bins == 0:
-        return np.zeros(n, dtype=bool)
     magnitude = np.abs(high)
     # median over what is not digital silence: half a silent block has
     # noise too
     sample = magnitude[:: config.sample_stride]
     sample = sample[sample > 0]
-    if len(sample) == 0:
-        return np.zeros(n, dtype=bool)
+    if n_bins == 0 or len(sample) == 0:
+        return np.zeros(n_bins, dtype=bool), np.zeros(n_bins, dtype=bool), size
     sigma = np.median(sample) / 0.6745
     # the largest value per bin: fast, and bridges zero crossings
     envelope = magnitude[: n_bins * size].reshape(n_bins, size).max(axis=-1)
@@ -352,12 +382,53 @@ def find_clicks(
     if edge:
         hot[:edge] = False
         hot[-edge:] = False
+    strong = _runs_holding(
+        hot, trigger & (envelope > config.isolated_threshold * sigma)
+    )
+    return hot, strong, size
+
+
+def _bins_to_mask(hot: BoolArray, n: int, size: int, config: ClickRemoval) -> BoolArray:
+    """Samples of the runs ``hot``, widened by ``guard_s`` on both sides."""
     guard = round(config.guard_s / config.resolution_s)
+    wide = hot
     if guard and hot.any():
-        hot = maximum_filter1d(hot, 2 * guard + 1, mode="constant", cval=False)
+        wide = maximum_filter1d(hot, 2 * guard + 1, mode="constant", cval=False)
     mask = np.zeros(n, dtype=bool)
-    mask[: n_bins * size] = np.repeat(hot, size)
+    mask[: len(hot) * size] = np.repeat(wide, size)
     return mask
+
+
+def find_clicks(
+    high: NDArray[np.float64], samplerate_hz: float, config: ClickRemoval
+) -> BoolArray:
+    """Mask of the clicks in ``high``, one channel's high band (samples,)."""
+    hot, _, size = _hot_bins(high, samplerate_hz, config)
+    return _bins_to_mask(hot, len(high), size, config)
+
+
+def _coincident(
+    hot: BoolArray, strong: BoolArray, fraction: float, guard_bins: int
+) -> BoolArray:
+    """The runs of ``hot`` (electrodes, bins) to repair under the guard.
+
+    An event is a run of bins where any electrode is hot, joined across
+    gaps up to the guard. Its runs are repaired on every electrode when it
+    reaches at least ``fraction`` of them; otherwise only the runs that
+    are ``strong`` (reach ``isolated_threshold``) are.
+    """
+    n_electrodes = hot.shape[0]
+    need = max(1, math.ceil(fraction * n_electrodes - 1e-9))
+    union = hot.any(axis=0)
+    if guard_bins:
+        union = maximum_filter1d(union, 2 * guard_bins + 1, mode="constant", cval=False)
+    starts = union & ~np.concatenate([[False], union[:-1]])
+    label: NDArray[np.int64] = np.where(union, np.cumsum(starts, dtype=np.int64), 0)
+    hits = np.zeros((n_electrodes, int(label.max(initial=0)) + 1), dtype=bool)
+    for c in range(n_electrodes):
+        hits[c, label[hot[c]]] = True
+    wide = np.concatenate([[False], hits[:, 1:].sum(axis=0) >= need])
+    return (hot & wide[label][None, :]) | strong
 
 
 def _cumsum0(x: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -411,6 +482,60 @@ def _repair(
     return out
 
 
+@dataclass(frozen=True, slots=True)
+class _Search:
+    """One channel's block, split by its spectrum, and its click runs."""
+
+    x: NDArray[np.float64]
+    spectrum: NDArray[np.complexfloating[Any]]
+    narrow: BoolArray
+    n_fft: int
+    hot: BoolArray
+    strong: BoolArray
+    size: int
+
+
+def _search(
+    x: NDArray[np.floating[Any]], samplerate_hz: float, cfg: ClickRemoval
+) -> _Search | None:
+    """Split ``x`` by its spectrum and find its clicks; None if too short."""
+    x64 = np.asarray(x, dtype=np.float64)
+    n = len(x64)
+    if n < _MIN_SAMPLES:
+        return None
+    rate = float(samplerate_hz)
+    target = n + min(round(cfg.fade_s * rate), n // 2)
+    fast = scipy.fft.next_fast_len(target, real=True)
+    n_fft = target if fast is None else int(fast)
+    spectrum = np.asarray(scipy.fft.rfft(_periodic(x64, n_fft)))
+    power = np.real(spectrum) ** 2 + np.imag(spectrum) ** 2
+    df_hz = rate / n_fft
+    narrow = power > spectral_floor(power, df_hz, cfg) * 10 ** (cfg.line_margin_db / 10)
+    freqs = np.arange(len(power)) * df_hz
+    # a smooth edge: a sharp one would ring around the clicks
+    position = np.clip((freqs / rate - cfg.high_band) / cfg.high_band_edge, 0, 1)
+    gain = np.sin(0.5 * np.pi * position) ** 2
+    high = np.asarray(scipy.fft.irfft(spectrum * np.where(narrow, 0.0, gain), n=n_fft))
+    # round-off of the transform is not noise: digital silence stays silent
+    hot, strong, size = _hot_bins(np.where(x64 == 0, 0.0, high[:n]), rate, cfg)
+    return _Search(x64, spectrum, narrow, n_fft, hot, strong, size)
+
+
+def _repaired(
+    search: _Search, hot: BoolArray, samplerate_hz: float, cfg: ClickRemoval
+) -> tuple[NDArray[np.float64], BoolArray]:
+    """``search.x`` with the runs ``hot`` repaired, and the repaired mask."""
+    n = len(search.x)
+    mask = _bins_to_mask(hot, n, search.size, cfg)
+    if not mask.any():
+        return search.x, mask
+    tonal = np.asarray(
+        scipy.fft.irfft(np.where(search.narrow, search.spectrum, 0.0), n=search.n_fft)
+    )
+    width = max(1, round(cfg.local_window_s * samplerate_hz))
+    return _repair(search.x, tonal[:n], mask, width), mask
+
+
 def clean_channel(
     x: NDArray[np.floating[Any]],
     samplerate_hz: float,
@@ -420,7 +545,8 @@ def clean_channel(
 
     This is the algorithm on one block as it is given; the result depends on
     where the block starts and ends. Use `remove_clicks` or `clean_span` for
-    recordings.
+    recordings. A single channel is its own electrode set, so
+    ``coincidence`` changes nothing here.
 
     Parameters
     ----------
@@ -439,30 +565,10 @@ def clean_channel(
         everywhere when nothing was repaired.
     """
     cfg = ClickRemoval() if config is None else config
-    x64 = np.asarray(x, dtype=np.float64)
-    n = len(x64)
-    if n < _MIN_SAMPLES:
-        return x64, np.zeros(n, dtype=bool)
-    rate = float(samplerate_hz)
-    target = n + min(round(cfg.fade_s * rate), n // 2)
-    fast = scipy.fft.next_fast_len(target, real=True)
-    n_fft = target if fast is None else int(fast)
-    spectrum = np.asarray(scipy.fft.rfft(_periodic(x64, n_fft)))
-    power = np.real(spectrum) ** 2 + np.imag(spectrum) ** 2
-    df_hz = rate / n_fft
-    narrow = power > spectral_floor(power, df_hz, cfg) * 10 ** (cfg.line_margin_db / 10)
-    freqs = np.arange(len(power)) * df_hz
-    # a smooth edge: a sharp one would ring around the clicks
-    position = np.clip((freqs / rate - cfg.high_band) / cfg.high_band_edge, 0, 1)
-    gain = np.sin(0.5 * np.pi * position) ** 2
-    high = np.asarray(scipy.fft.irfft(spectrum * np.where(narrow, 0.0, gain), n=n_fft))
-    # round-off of the transform is not noise: digital silence stays silent
-    mask = find_clicks(np.where(x64 == 0, 0.0, high[:n]), rate, cfg)
-    if not mask.any():
-        return x64, mask
-    tonal = np.asarray(scipy.fft.irfft(np.where(narrow, spectrum, 0.0), n=n_fft))
-    width = max(1, round(cfg.local_window_s * rate))
-    return _repair(x64, tonal[:n], mask, width), mask
+    search = _search(x, samplerate_hz, cfg)
+    if search is None:
+        return np.asarray(x, dtype=np.float64), np.zeros(len(x), dtype=bool)
+    return _repaired(search, search.hot, samplerate_hz, cfg)
 
 
 # ------------------------------------------------------- blocks and spans
@@ -574,6 +680,18 @@ def _blocks(
         k += 1
 
 
+def _runs_to_repair(found: list[_Search | None], cfg: ClickRemoval) -> list[BoolArray]:
+    """Per electrode, the click runs of one block to repair."""
+    empty = np.zeros(0, dtype=bool)
+    if cfg.coincidence == 0 or len(found) < 2 or any(s is None for s in found):
+        return [empty if s is None else s.hot for s in found]
+    searches = [s for s in found if s is not None]
+    hot = np.stack([s.hot for s in searches])
+    strong = np.stack([s.strong for s in searches])
+    guard_bins = round(cfg.guard_s / cfg.resolution_s)
+    return list(_coincident(hot, strong, cfg.coincidence, guard_bins))
+
+
 def _clean_range(
     samples: NDArray[np.floating[Any]],
     first: int,
@@ -597,16 +715,32 @@ def _clean_range(
                 samples[w0 - first : w1 - first].T, dtype=np.float64
             )
 
-            def one(
-                c: int, window: NDArray[np.float64] = window
-            ) -> tuple[NDArray[np.float64], BoolArray]:
-                return clean_channel(window[c], samplerate_hz, cfg)
+            def search(c: int, window: NDArray[np.float64] = window) -> _Search | None:
+                return _search(window[c], samplerate_hz, cfg)
 
             channels = range(n_channels)
-            results = list(pool.map(one, channels) if pool else map(one, channels))
+            found = list(pool.map(search, channels) if pool else map(search, channels))
+            runs = _runs_to_repair(found, cfg)
+
+            def repair(
+                c: int,
+                found: list[_Search | None] = found,
+                runs: list[BoolArray] = runs,
+            ) -> tuple[NDArray[np.float64], BoolArray] | None:
+                s = found[c]
+                if s is None or not runs[c].any():
+                    return None
+                return _repaired(s, runs[c], samplerate_hz, cfg)
+
+            results = list(
+                pool.map(repair, channels) if pool else map(repair, channels)
+            )
             keep = slice(c0 - w0, c1 - w0)
             rows = slice(c0 - first - lo, c1 - first - lo)
-            for c, (repaired, hit) in enumerate(results):
+            for c, result in enumerate(results):
+                if result is None:
+                    continue
+                repaired, hit = result
                 inside = hit[keep]
                 if inside.any():
                     # `out[rows, c]` is a view; only repaired samples change
