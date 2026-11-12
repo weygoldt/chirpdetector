@@ -1,7 +1,10 @@
 """Preprocessing of raw grid recordings before the spectrogram.
 
 Click removal (`ClickRemoval`, `remove_clicks`) repairs short broadband
-impulses that v1 often mistook for chirps. Long recordings, chunk by chunk
+impulses on multi-electrode recordings. It always uses an electrode-
+coincidence guard and refuses recordings with fewer than
+``ClickRemoval().min_electrodes`` electrodes (9 by default; single-channel
+data never), see `can_remove_clicks`. Long recordings, chunk by chunk
 (identical to cleaning the whole)::
 
     plan = plan_span(start, stop, recording.n_samples, spec_config)
@@ -10,10 +13,13 @@ impulses that v1 often mistook for chirps. Long recordings, chunk by chunk
 """
 
 from chirpdetector.preprocessing.clicks import (
+    MAX_CHIRP_ELECTRODES,
+    MIN_ISOLATED_THRESHOLD,
     CleanPlan,
     ClickRemoval,
     SampleSource,
-    clean_channel,
+    TooFewElectrodesError,
+    can_remove_clicks,
     clean_span,
     click_spans,
     plan_clean,
@@ -22,10 +28,13 @@ from chirpdetector.preprocessing.clicks import (
 )
 
 __all__ = [
+    "MAX_CHIRP_ELECTRODES",
+    "MIN_ISOLATED_THRESHOLD",
     "CleanPlan",
     "ClickRemoval",
     "SampleSource",
-    "clean_channel",
+    "TooFewElectrodesError",
+    "can_remove_clicks",
     "clean_span",
     "click_spans",
     "plan_clean",
