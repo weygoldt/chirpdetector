@@ -16,6 +16,7 @@ from chirpdetector.inference.spans import (
     TiledSpan,
     merge_tiles,
     predict_span,
+    render_span,
     render_tiles,
     tile_starts,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "TiledSpan",
     "merge_tiles",
     "predict_span",
+    "render_span",
     "render_tiles",
     "tile_starts",
 ]

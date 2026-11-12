@@ -63,6 +63,7 @@ __all__ = [
     "TiledSpan",
     "merge_tiles",
     "predict_span",
+    "render_span",
     "render_tiles",
     "tile_starts",
 ]
@@ -223,6 +224,53 @@ class _Channels:
         return self._recording.read(start, stop, self._channels)  # type: ignore[attr-defined]
 
 
+def render_span(
+    bundle: Bundle,
+    recording: object,
+    t_start_s: float,
+    t_end_s: float,
+    *,
+    channels: Sequence[int] | None = None,
+    device: str | None = None,
+) -> TiledSpan:
+    """Tile images of ``[t_start_s, t_end_s]`` of a recording, as the dataset was cut.
+
+    See `predict_span` for the parameters; the frames centred in the span
+    are tiled (widened to one tile if the span is shorter).
+    """
+    source = _Channels(recording, channels)
+    config, tiling = bundle.spectrogram, bundle.tiling
+    fs, total = source.samplerate_hz, source.n_samples
+    width, _ = tile_frames(tiling, config)
+    hop = config.layout(fs).hop_samples
+    # frames centred in [t_start_s, t_end_s], as the real test set was cut
+    first = max(0, math.ceil(t_start_s * fs / hop - 1e-9))
+    last = math.floor(t_end_s * fs / hop + 1e-9)
+    start = first * hop
+    stop = min(total, last * hop + 1)
+    needed = width * hop
+    if stop - start < needed:
+        centre = (start + stop) // 2
+        start = max(0, min(centre - needed // 2, total - needed))
+        stop = min(total, start + needed)
+    plan = plan_span(start, stop, total, fs, config)
+    click = bundle.preprocessing.get("click_removal")
+    if click is not None and can_remove_clicks(
+        source.n_channels, ClickRemoval.from_dict(dict(click)), samplerate_hz=fs
+    ):
+        samples, _ = read_clean(
+            source, plan.read_start, plan.read_stop, ClickRemoval.from_dict(dict(click))
+        )
+    else:
+        if click is not None:
+            log.warning("too few electrodes for click removal; skipped")
+        samples = source.read(plan.read_start, plan.read_stop)
+    if device is not None and device != "cpu":
+        apply_vram_limit(None, device)
+    spec = compute_spectrogram_span(samples, plan, config, device=device)
+    return render_tiles(spec, tiling)
+
+
 def predict_span(
     bundle: Bundle | str | Path,
     recording: object,
@@ -236,7 +284,7 @@ def predict_span(
     device: str | None = None,
     tolerance_s: float = DUPLICATE_TOLERANCE_S,
 ) -> pd.DataFrame:
-    """Detect chirps in ``[t_start_s, t_end_s)`` of a recording.
+    """Detect chirps in ``[t_start_s, t_end_s]`` of a recording.
 
     Parameters
     ----------
@@ -269,37 +317,9 @@ def predict_span(
         columns, ``tile`` instead of ``image_index``), de-duplicated.
     """
     bundle = bundle if isinstance(bundle, Bundle) else load_bundle(bundle)
-    source = _Channels(recording, channels)
-    config, tiling = bundle.spectrogram, bundle.tiling
-    fs, total = source.samplerate_hz, source.n_samples
-    width, _ = tile_frames(tiling, config)
-    hop = config.layout(fs).hop_samples
-    # frames centred in [t_start_s, t_end_s], as the real test set was cut
-    first = max(0, math.ceil(t_start_s * fs / hop - 1e-9))
-    last = math.floor(t_end_s * fs / hop + 1e-9)
-    start = first * hop
-    stop = min(total, last * hop + 1)
-    needed = width * hop
-    if stop - start < needed:
-        centre = (start + stop) // 2
-        start = max(0, min(centre - needed // 2, total - needed))
-        stop = min(total, start + needed)
-    plan = plan_span(start, stop, total, fs, config)
-    click = bundle.preprocessing.get("click_removal")
-    if click is not None and can_remove_clicks(
-        source.n_channels, ClickRemoval.from_dict(dict(click)), samplerate_hz=fs
-    ):
-        samples, _ = read_clean(
-            source, plan.read_start, plan.read_stop, ClickRemoval.from_dict(dict(click))
-        )
-    else:
-        if click is not None:
-            log.warning("%s: too few electrodes for click removal; skipped", name)
-        samples = source.read(plan.read_start, plan.read_stop)
-    if device is not None and device != "cpu":
-        apply_vram_limit(None, device)
-    spec = compute_spectrogram_span(samples, plan, config, device=device)
-    tiles = render_tiles(spec, tiling)
+    tiles = render_span(
+        bundle, recording, t_start_s, t_end_s, channels=channels, device=device
+    )
     detector = detector or load_detector(bundle, device=device)
     predictions = predict_images(
         bundle,
