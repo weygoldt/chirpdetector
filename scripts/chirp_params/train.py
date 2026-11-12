@@ -56,23 +56,26 @@ def scalars(meta: pd.DataFrame, variant: str) -> np.ndarray:
 class Rows:
     """Row subset of a memory-mapped uint8 array (keeps RAM use to the page cache)."""
 
-    def __init__(self, x: np.ndarray, rows: np.ndarray) -> None:
+    def __init__(self, x: np.ndarray, rows: np.ndarray, channels: list[int] | None = None) -> None:
         self.x, self.rows = x, rows
-        self.shape = (len(rows), *x.shape[1:])
+        self.channels = channels
+        n_ch = x.shape[1] if channels is None else len(channels)
+        self.shape = (len(rows), n_ch, *x.shape[2:])
 
     def __len__(self) -> int:
         return len(self.rows)
 
     def __getitem__(self, idx: np.ndarray) -> np.ndarray:
-        return np.asarray(self.x[self.rows[idx]])
+        out = np.asarray(self.x[self.rows[idx]])
+        return out if self.channels is None else np.ascontiguousarray(out[:, self.channels])
 
 
-def load(cache: Path, split: str, variant: str) -> tuple[Rows, pd.DataFrame]:
+def load(cache: Path, split: str, variant: str, channels: list[int] | None = None) -> tuple[Rows, pd.DataFrame]:
     meta = pd.read_parquet(cache / split / "meta.parquet")
     x = np.load(cache / split / f"{variant}.npy", mmap_mode="r")
     ok = np.isfinite(targets(meta)).all(axis=1) & (meta["height_hz"] > 0).to_numpy()
     rows = meta["row"].to_numpy()[ok]
-    return Rows(x, rows), meta[ok].reset_index(drop=True)
+    return Rows(x, rows, channels), meta[ok].reset_index(drop=True)
 
 
 def batches(n: int, size: int, rng: np.random.Generator | None):
@@ -111,6 +114,7 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--max-train", type=int, default=None)
+    ap.add_argument("--channels", type=int, nargs="*", default=None, help="input channels to keep")
     args = ap.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -121,12 +125,12 @@ def main() -> None:
     args.run.mkdir(parents=True, exist_ok=True)
     rectified = args.input != "A"
 
-    xtr, mtr = load(args.cache, "train", args.input)
+    xtr, mtr = load(args.cache, "train", args.input, args.channels)
     if args.max_train and len(mtr) > args.max_train:
         keep = np.sort(rng.choice(len(mtr), args.max_train, replace=False))
-        xtr, mtr = Rows(xtr.x, xtr.rows[keep]), mtr.iloc[keep].reset_index(drop=True)
-    xva, mva = load(args.cache, "val", args.input)
-    xte, mte = load(args.cache, "test", args.input)
+        xtr, mtr = Rows(xtr.x, xtr.rows[keep], args.channels), mtr.iloc[keep].reset_index(drop=True)
+    xva, mva = load(args.cache, "val", args.input, args.channels)
+    xte, mte = load(args.cache, "test", args.input, args.channels)
     ytr = targets(mtr)
     mu_y, sd_y = ytr.mean(0), ytr.std(0)
     str_ = scalars(mtr, args.input)

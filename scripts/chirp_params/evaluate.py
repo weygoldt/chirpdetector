@@ -87,6 +87,8 @@ def metrics(true: np.ndarray, pred: np.ndarray, param: str) -> dict[str, float]:
 def covariates(meta: pd.DataFrame) -> pd.DataFrame:
     cov = pd.DataFrame(index=meta.index)
     cov["family"] = meta["family"]
+    cov["height_bin"] = pd.cut(meta["height_hz"], [0, 75, 150, 300, np.inf]).astype(str)
+    cov["fwhm_bin"] = pd.cut(meta["fwhm_s"] * 1e3, [0, 5, 10, 20, 50, np.inf]).astype(str)
     cov["snr_bin"] = pd.cut(meta["snr_db"], SNR_BINS).astype(str)
     df = meta["min_df_all_hz"].fillna(np.inf)
     cov["df_bin"] = np.where(np.isinf(df), "single fish", pd.cut(df, DF_BINS).astype(str))
@@ -113,6 +115,13 @@ def main() -> None:
     est: dict[str, pd.DataFrame] = {}
     offsets = fit_box_offsets(val[val["visible"]])
     est["box (naive)"] = box_estimate(test, offsets)
+    # the footprint box comes from the clean render (an oracle detector);
+    # jitter it like the training boxes to mimic a real detector's scatter
+    jrng = np.random.default_rng(3)
+    jit = test.copy()
+    for col, sd in (("box_t0_s", 0.01), ("box_t1_s", 0.01), ("box_f0_hz", 5.0), ("box_f1_hz", 5.0)):
+        jit[col] = jit[col] + jrng.normal(0, sd, len(jit))
+    est["box (naive) [jittered box]"] = box_estimate(jit, offsets)
     if not args.no_ridge:
         for variant in ("B", "C", "K"):
             print("ridge", variant, file=sys.stderr, flush=True)
@@ -227,7 +236,7 @@ def figures(test: pd.DataFrame, est: dict[str, pd.DataFrame], bd: pd.DataFrame, 
     fig.savefig(out / "fig_pred_vs_true.png", dpi=110)
     plt.close(fig)
 
-    for cov, fname in (("snr_bin", "fig_error_vs_snr.png"), ("df_bin", "fig_error_vs_df.png")):
+    for cov, fname in (("snr_bin", "fig_error_vs_snr.png"), ("df_bin", "fig_error_vs_df.png"), ("height_bin", "fig_error_vs_height.png"), ("fwhm_bin", "fig_error_vs_fwhm.png")):
         sub = bd[bd["covariate"] == cov]
         levels = sorted(sub["level"].unique(), key=lambda s: (s == "single fish", float(s.split(",")[0].strip("(")) if s.startswith("(") else 0))
         fig, axes = plt.subplots(1, len(PARAMS), figsize=(4 * len(PARAMS), 3.3))

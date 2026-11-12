@@ -74,3 +74,19 @@ def test_detector_view_and_shift_shapes() -> None:
     y = shift_frequency(x, torch.tensor([1.0, -0.5]))
     assert y[0, 0, 6, 0] == pytest.approx(1.0)
     assert y[1, 0, 4, 0] == pytest.approx(0.5)
+
+
+def test_ridge_recovers_a_clean_long_chirp() -> None:
+    from chirpdetector.params.estimators import ridge_estimate
+
+    cfg = RectifiedConfig()
+    t = np.arange(int(0.8 * FS)) / FS
+    sigma = 0.03
+    excursion = 300.0 * np.exp(-0.5 * ((t - 0.4) / sigma) ** 2)
+    baseline = 760.0
+    signal = np.sin(_phase(baseline + excursion))
+    seg = torch.as_tensor(signal[None], dtype=torch.float32)
+    (crop,) = rectified_crop(seg, 0.0, FS, baseline, (0.25, 0.55), cfg)
+    est = ridge_estimate(crop.numpy(), 0.3, cfg)
+    assert est["height_hz"] == pytest.approx(300.0, rel=0.05)
+    assert est["fwhm_s"] == pytest.approx(2 * np.sqrt(2 * np.log(2)) * sigma, rel=0.15)

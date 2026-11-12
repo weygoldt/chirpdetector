@@ -87,6 +87,8 @@ def extract(device: torch.device) -> tuple[dict[str, np.ndarray], pd.DataFrame]:
 def predict(run: Path, x: np.ndarray, meta: pd.DataFrame, device: torch.device) -> pd.DataFrame:
     ck = torch.load(run / "model.pt", weights_only=False)
     variant = ck["args"]["input"]
+    if ck["args"].get("channels"):
+        x = np.ascontiguousarray(x[:, ck["args"]["channels"]])
     if variant == "A":
         s = np.stack([np.log(meta.in_t1_s - meta.in_t0_s), np.log((meta.in_f1_hz - meta.in_f0_hz).clip(lower=5))], 1)
     else:
