@@ -36,6 +36,11 @@ Repository = "https://github.com/weygoldt/chirpdetector"
 label = [
     "matplotlib>=3.11.2",
 ]
+# The dual-head detector subclasses RT-DETRv2's loss internals, which change
+# between transformers minor releases; tests/models pin the behaviour.
+dualhead = [
+    "transformers>=5.22.2,<5.23",
+]
 
 [dependency-groups]
 dev = [
