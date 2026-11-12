@@ -21,7 +21,7 @@ def test_help_lists_the_options() -> None:
         "--labeler",
         "--grid",
         "--tolerance-hz",
-        "--nfft",
+        "--window-s",
     ):
         assert option in result.output
 

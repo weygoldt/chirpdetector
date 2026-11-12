@@ -90,15 +90,16 @@ def label_emitters(
         float,
         typer.Option(help="Max. distance of a left click from a track baseline."),
     ] = 15.0,
-    nfft: Annotated[
-        int,
+    window_s: Annotated[
+        float,
         typer.Option(
             help=(
-                "Spectrogram window in samples: 4096 (205 ms at 20 kHz) separates "
-                "close baselines; 2048 or 1024 show the chirp's shape better."
+                "Spectrogram window in seconds, at any sample rate: 0.2048 "
+                "(4.9 Hz resolution; 4096 samples at 20 kHz) separates close "
+                "baselines; 0.1024 or 0.0512 show the chirp's shape better."
             )
         ),
-    ] = 4096,
+    ] = 0.2048,
 ) -> None:
     """Label chirp emitters on a grid of spectrogram cutouts.
 
@@ -119,7 +120,7 @@ def label_emitters(
             raise typer.BadParameter(msg)
     rows_cols = _parse_grid(grid)
     config = QueueConfig(per_bin=per_bin, seed=seed, bin_edges_hz=_parse_bins(bins))
-    cutout_config = CutoutConfig(pad_s=pad_s, pad_hz=pad_hz, nfft=nfft)
+    cutout_config = CutoutConfig(pad_s=pad_s, pad_hz=pad_hz, window_s=window_s)
     try:
         from chirpdetector.labeling.gui import run
     except ImportError as err:
