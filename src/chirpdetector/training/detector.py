@@ -377,9 +377,10 @@ def train_detector(
             len(train_groups),
             len(val_groups),
         )
-        _write_json(
-            fit_dir / "provenance.json", provenance.collect(run_id=run_id, fit=name)
-        )
+        # The code state at the start of the fit is what ran, even if the
+        # checkout changes while the model trains.
+        fit_provenance = provenance.collect(run_id=run_id, fit=name)
+        _write_json(fit_dir / "provenance.json", fit_provenance)
         request = FitRequest(
             dataset=dataset,
             train_ids=manifest.image_ids(
@@ -410,8 +411,8 @@ def train_detector(
                 "epochs_run": output.epochs_run,
                 "validation_metrics": dict(output.metrics),
                 "config": config.to_dict(),
-                "code": provenance.code_state(),
-                "uv_lock": provenance.uv_lock(),
+                "code": fit_provenance["code"],
+                "uv_lock": fit_provenance["uv_lock"],
             },
         )
         if output.weights.resolve() != bundle.weights_path:
