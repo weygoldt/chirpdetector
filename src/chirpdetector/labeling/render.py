@@ -1,0 +1,269 @@
+"""Spectrogram cutouts of single detections.
+
+A cutout is the power summed over electrodes (sum of per-channel power,
+then dB) in a long analysis window (fine frequency), around one v1 box with
+some time and frequency padding.
+
+Only the displayed band is computed: the snippet is Fourier transformed
+once, the band is cut out and shifted to zero, and an inverse FFT of the
+band gives a complex baseband signal at a decimated rate. Short-time spectra
+of that signal are the in-band part of the full-rate spectrogram (same
+window in seconds) at a fraction of the cost.
+"""
+
+from __future__ import annotations
+
+import math
+import time
+from dataclasses import dataclass
+
+import numpy as np
+import numpy.typing as npt
+import scipy.fft as sfft
+from gridtools.io import Recording, Tracks
+from numpy.lib.stride_tricks import sliding_window_view
+from scipy.signal.windows import hann
+
+from chirpdetector.labeling.queue import QueueItem
+
+__all__ = ["Cutout", "CutoutConfig", "live_baselines", "render_cutout", "zoom_baseband"]
+
+
+@dataclass(frozen=True)
+class CutoutConfig:
+    """How to render a cutout.
+
+    Parameters
+    ----------
+    pad_s
+        Time shown before the box start and after the box end.
+    pad_hz
+        Frequency shown below the lowest live track (or box bottom) and
+        above the highest live track (or box top).
+    nfft
+        Analysis window in samples at the recording rate (4096 at 20 kHz
+        is 205 ms, about 5 Hz resolution).
+    hop
+        Hop in samples at the recording rate.
+    fft_pad
+        Zero-padding factor of the FFT (smoother display only).
+    db_range
+        Colour range below the cutout's maximum.
+    max_gap_s
+        Track liveness gap (as in the queue).
+    """
+
+    pad_s: float = 0.15
+    pad_hz: float = 40.0
+    nfft: int = 4096
+    hop: int = 32
+    fft_pad: int = 2
+    db_range: float = 45.0
+    max_gap_s: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.nfft < 2 or self.hop < 1 or self.fft_pad < 1:
+            msg = "nfft must be >= 2, hop and fft_pad >= 1"
+            raise ValueError(msg)
+        if self.pad_s < 0 or self.pad_hz < 0 or self.db_range <= 0:
+            msg = "pad_s and pad_hz must be >= 0, db_range > 0"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class Cutout:
+    """A rendered cutout.
+
+    Parameters
+    ----------
+    item
+        The queue item (which never holds v1's emitter).
+    db
+        Power in dB, shape ``(n_freq, n_time)``, row 0 the lowest frequency.
+    extent
+        ``(t0_s, t1_s, f0_hz, f1_hz)`` of the pixel edges, in absolute
+        recording time; pass to ``imshow(..., origin="lower")``.
+    window
+        The requested ``(t0_s, t1_s, f0_hz, f1_hz)``; ``extent`` matches it
+        to within one pixel.
+    clim
+        Colour limits in dB.
+    baselines
+        ``(track_id, frequency_hz)`` of every track live at the detection
+        centre, sorted by frequency.
+    render_ms
+        Time it took to render.
+    """
+
+    item: QueueItem
+    db: npt.NDArray[np.float32]
+    extent: tuple[float, float, float, float]
+    window: tuple[float, float, float, float]
+    clim: tuple[float, float]
+    baselines: tuple[tuple[int, float], ...]
+    render_ms: float
+
+
+def zoom_baseband(
+    x: npt.NDArray[np.floating],
+    samplerate_hz: float,
+    f_lo_hz: float,
+    f_hi_hz: float,
+    decimation: int,
+) -> tuple[npt.NDArray[np.complex64], float, float]:
+    """Complex baseband of a band of a real multi-channel signal.
+
+    Parameters
+    ----------
+    x
+        Real signal, shape ``(n, channels)``.
+    samplerate_hz
+        Its sampling rate.
+    f_lo_hz, f_hi_hz
+        Band to keep.
+    decimation
+        Integer decimation factor; ``samplerate_hz / decimation`` must
+        exceed the band width.
+
+    Returns
+    -------
+    y
+        Shape ``(ceil(n / decimation), channels)``; sample ``m`` is at the
+        time of input sample ``m * decimation``. A sinusoid of amplitude A
+        at frequency f in the band becomes ``A * exp(2j pi (f - fc) t)``.
+    rate_hz
+        Sampling rate of ``y``.
+    fc_hz
+        Frequency shifted to zero.
+
+    Raises
+    ------
+    ValueError
+        If the band does not fit the decimated rate.
+    """
+    n = x.shape[0]
+    n_fft = decimation * math.ceil(n / decimation)
+    m = n_fft // decimation
+    df = samplerate_hz / n_fft
+    k_lo = max(0, math.floor(f_lo_hz / df))
+    k_hi = min(n_fft // 2, math.ceil(f_hi_hz / df))
+    if k_hi - k_lo >= m:
+        msg = (
+            f"band {f_lo_hz:.1f}-{f_hi_hz:.1f} Hz does not fit a decimation "
+            f"of {decimation} at {samplerate_hz:g} Hz"
+        )
+        raise ValueError(msg)
+    k_c = round(0.5 * (k_lo + k_hi))
+    spectrum = sfft.rfft(x, n=n_fft, axis=0)
+    band = np.zeros((m, x.shape[1]), dtype=np.complex64)
+    k = np.arange(k_lo, k_hi + 1)
+    band[(k - k_c) % m] = spectrum[k]
+    y = np.asarray(sfft.ifft(band, axis=0)) * np.float32(2.0 * m / n_fft)
+    return y.astype(np.complex64, copy=False), samplerate_hz / decimation, k_c * df
+
+
+def _decimation(nfft: int, hop: int, samplerate_hz: float, bandwidth_hz: float) -> int:
+    """Largest divisor of nfft and hop whose rate still holds the band."""
+    common = math.gcd(nfft, hop)
+    fits = [
+        d
+        for d in range(1, common + 1)
+        if common % d == 0 and samplerate_hz / d >= 1.25 * bandwidth_hz
+    ]
+    return max(fits) if fits else 1
+
+
+def _read_padded(rec: Recording, start: int, stop: int) -> npt.NDArray[np.float32]:
+    """Samples ``[start, stop)``, zero outside the recording."""
+    out = np.zeros((stop - start, rec.n_channels), dtype=np.float32)
+    a, b = max(start, 0), min(stop, rec.n_samples)
+    if b > a:
+        out[a - start : b - start] = rec.read(a, b)
+    return out
+
+
+def live_baselines(
+    tracks: Tracks, t_s: float, max_gap_s: float
+) -> tuple[tuple[int, float], ...]:
+    """``(track_id, frequency_hz)`` of the tracks live at ``t_s``, by frequency."""
+    live = tracks.frequencies_at(t_s, max_gap_s)
+    return tuple(
+        sorted(((int(i), float(f)) for i, f in live.items()), key=lambda p: p[1])
+    )
+
+
+def render_cutout(
+    rec: Recording, tracks: Tracks, item: QueueItem, config: CutoutConfig
+) -> Cutout:
+    """Electrode-summed spectrogram around one detection.
+
+    Parameters
+    ----------
+    rec
+        The trial's recording.
+    tracks
+        The trial's tracks.
+    item
+        The detection.
+    config
+        Rendering parameters.
+
+    Returns
+    -------
+    The cutout. Time window: the box padded by ``pad_s``. Frequency window:
+    from the lower of the lowest live baseline and the box bottom, minus
+    ``pad_hz``, to the higher of the highest live baseline and the box top,
+    plus ``pad_hz``.
+    """
+    tic = time.perf_counter()
+    fs = rec.samplerate_hz
+    baselines = live_baselines(tracks, item.t_center_s, config.max_gap_s)
+    freqs = [f for _, f in baselines]
+    f0 = max(0.0, min([item.f_low_hz, *freqs]) - config.pad_hz)
+    f1 = min(0.5 * fs, max([item.f_high_hz, *freqs]) + config.pad_hz)
+    t0 = item.t_start_s - config.pad_s
+    t1 = item.t_end_s + config.pad_s
+
+    # compute a slightly wider band so window leakage at the edges is intact
+    guard_hz = 4.0 * fs / config.nfft
+    band_lo, band_hi = max(0.0, f0 - guard_hz), min(0.5 * fs, f1 + guard_hz)
+    q = _decimation(config.nfft, config.hop, fs, band_hi - band_lo)
+    half = config.nfft // 2
+    start = (round(t0 * fs) - half - config.hop) // q * q
+    stop = round(t1 * fs) + half + config.hop
+    x = _read_padded(rec, start, stop)
+    y, fs_d, fc = zoom_baseband(x, fs, band_lo, band_hi, q)
+
+    nwin, hop = config.nfft // q, config.hop // q
+    window = hann(nwin, sym=False).astype(np.float32)
+    window /= window.sum()
+    frames = sliding_window_view(y, nwin, axis=0)[::hop]
+    t = start / fs + (np.arange(frames.shape[0]) * hop + nwin / 2) / fs_d
+    f = fc + sfft.fftshift(sfft.fftfreq(nwin * config.fft_pad)) * fs_d
+    tsel = np.flatnonzero((t >= t0) & (t <= t1))
+    fsel = np.flatnonzero((f >= f0) & (f <= f1))
+    # transform only the frames shown; sum channels before shifting
+    spectra = sfft.fft(
+        frames[tsel[0] : tsel[-1] + 1] * window, n=nwin * config.fft_pad, axis=-1
+    )
+    spectra = np.asarray(spectra, dtype=np.complex64)
+    power = np.fft.fftshift((np.abs(spectra) ** 2).sum(axis=1), axes=-1)
+    summed = power[:, fsel[0] : fsel[-1] + 1].T
+    db = (10.0 * np.log10(summed + np.float32(1e-30))).astype(np.float32)
+    dt, df = hop / fs_d, fs_d / (nwin * config.fft_pad)
+    extent = (
+        float(t[tsel[0]] - dt / 2),
+        float(t[tsel[-1]] + dt / 2),
+        float(f[fsel[0]] - df / 2),
+        float(f[fsel[-1]] + df / 2),
+    )
+    vmax = float(db.max())
+    return Cutout(
+        item=item,
+        db=db,
+        extent=extent,
+        window=(t0, t1, f0, f1),
+        clim=(vmax - config.db_range, vmax),
+        baselines=baselines,
+        render_ms=1e3 * (time.perf_counter() - tic),
+    )
