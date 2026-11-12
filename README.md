@@ -89,6 +89,14 @@ resolved config, git SHAs (with dirty flags) of chirpdetector and
 gridtools, the `uv.lock` hash, the dataset hash, versions, hardware, the
 epoch curves and one model bundle per fit.
 
+**Dual-head model.** `[model] type = "dualhead"` (needs `uv sync --extra
+dualhead`) trains an RT-DETRv2 detector (COCO weights, ResNet18-vd by
+default) whose queries predict each chirp's box *and* its emitter's
+baseline EOD frequency; `chirpdetector.evaluation.assign_by_frequency`
+then picks the nearest live track. Predictions (`predict_images`,
+`predict_span`) carry an `emitter_hz` column. See
+`chirpdetector.models.dualhead` for the design and the `[model]` keys.
+
 **GPU memory.** The GPU is shared. Run training (and any GPU job) through
 the workspace's `scripts/guarded`: it caps RAM in a systemd scope and sets
 `CHIRP_MAX_VRAM_FRACTION`, which training and inference apply with
