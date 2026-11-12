@@ -503,6 +503,14 @@ _ITEM_COLUMNS = (
 )
 
 
+def _model_hashes(preds: pd.DataFrame) -> list[str]:
+    """Distinct ``model_sha256`` values of the predictions (empty if absent)."""
+    if "model_sha256" not in preds.columns:
+        return []
+    values = as_series(preds["model_sha256"]).dropna()
+    return sorted({str(v) for v in values})
+
+
 def _rows(index: np.ndarray, local: np.ndarray) -> pd.Series:
     """Map scope-local indices (-1 = none) to table rows (NA = none)."""
     rows = np.full(len(local), -1, dtype=np.int64)
@@ -780,6 +788,7 @@ def evaluate(
                         + _table_sha256(gt.labels, LABEL_COLUMNS)
                     ).encode()
                 ).hexdigest(),
+                "model_sha256": _model_hashes(preds),
                 "n_predictions": len(preds),
                 "n_predictions_scored_recordings": scored,
                 "recordings": list(gt.recordings),
@@ -797,6 +806,17 @@ def attach_to_bundle(
     evaluated: str | Path | Sequence[str | Path],
 ) -> Path:
     """Write ``metrics.json`` into a model bundle.
+
+    For a chirpdetector bundle (a directory with ``bundle.json``, see
+    :mod:`chirpdetector.bundle`) the bundle is loaded and its weights are
+    verified first, and the predictions must have been made by exactly
+    these weights: ``result.provenance["model_sha256"]`` (the
+    ``model_sha256`` column of the predictions, which
+    :func:`chirpdetector.prediction.predict_images` writes) must be the
+    bundle's weight hash and nothing else. The hash is stored as
+    ``weights_sha256`` in ``metrics.json``, and
+    :func:`chirpdetector.bundle.load_bundle` refuses a ``metrics.json`` of
+    other weights.
 
     Parameters
     ----------
@@ -817,10 +837,27 @@ def attach_to_bundle(
     ------
     FileNotFoundError
         If the bundle directory or an evaluated file does not exist.
+    ValueError
+        If the predictions of a chirpdetector bundle were not made by its
+        weights (or carry no ``model_sha256``), or the bundle is invalid.
     """
     bundle_dir = Path(bundle_dir)
     if not bundle_dir.is_dir():
         raise FileNotFoundError(bundle_dir)
+    weights_sha256 = None
+    if (bundle_dir / "bundle.json").is_file():
+        from chirpdetector.bundle import load_bundle
+
+        weights_sha256 = load_bundle(bundle_dir).weights_sha256
+        hashes = list(result.provenance.get("model_sha256") or [])
+        if hashes != [weights_sha256]:
+            msg = (
+                f"metrics of predictions by weights {hashes or 'of unknown origin'} "
+                f"cannot be attached to bundle {bundle_dir} (weights "
+                f"{weights_sha256}); evaluate predictions made by this bundle "
+                "(chirpdetector.prediction adds their model_sha256)"
+            )
+            raise ValueError(msg)
     files = [evaluated] if isinstance(evaluated, str | Path) else list(evaluated)
     entries = []
     for f in map(Path, files):
@@ -835,6 +872,8 @@ def attach_to_bundle(
         entries.append({"path": name, "sha256": sha256_file(f)})
     data = result.to_dict()
     data["evaluated"] = entries
+    if weights_sha256 is not None:
+        data["weights_sha256"] = weights_sha256
     path = bundle_dir / "metrics.json"
     _write_text_atomic(json.dumps(data, indent=1, allow_nan=False) + "\n", path)
     return path

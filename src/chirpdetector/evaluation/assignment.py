@@ -36,7 +36,7 @@ emitter (the region was emitter-labelled); spot scopes always take part.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -63,6 +63,7 @@ __all__ = [
     "DEFAULT_BIN_EDGES_HZ",
     "SINGLE_BIN",
     "UNKNOWN_BIN",
+    "assign_by_frequency",
     "assignment_summary",
     "assignment_table",
     "bin_names",
@@ -117,6 +118,91 @@ def delta_f_at(
         ordered = np.sort(freqs[pair], axis=1)  # NaN sort last
         delta[pair] = np.nanmin(np.diff(ordered, axis=1), axis=1)
     return delta, n_live
+
+
+def assign_by_frequency(
+    predictions: pd.DataFrame,
+    tracks: Mapping[str, Tracks],
+    tolerance_hz: float,
+    *,
+    max_gap_s: float = 1.0,
+) -> pd.DataFrame:
+    """Assign predictions to the live track nearest their ``emitter_hz``.
+
+    For models that predict the emitter's baseline EOD frequency along with
+    the box: the emitter is the track alive at the prediction's centre time
+    whose frequency is closest to ``emitter_hz``, if it is within
+    ``tolerance_hz``.
+
+    Parameters
+    ----------
+    predictions
+        Prediction table with ``recording``, ``t_start_s``, ``t_end_s`` (or
+        ``t_center_s``) and ``emitter_hz``.
+    tracks
+        Tracks per recording, on the predictions' clock.
+    tolerance_hz
+        Largest allowed distance between ``emitter_hz`` and the track.
+    max_gap_s
+        A track is live where its detections are at most this far apart
+        (as in :func:`delta_f_at`).
+
+    Returns
+    -------
+    DataFrame
+        A copy with ``emitter_id`` (Int64; NA where ``emitter_hz`` is NaN,
+        the recording has no tracks, or no live track is within the
+        tolerance) and ``emitter_df_hz``, the distance to the chosen track
+        (NaN where unassigned). An existing ``emitter_id`` is replaced.
+
+    Raises
+    ------
+    ValueError
+        If ``emitter_hz`` is missing or the tolerance is not positive.
+    """
+    if not (np.isfinite(tolerance_hz) and tolerance_hz > 0):
+        msg = f"tolerance_hz must be positive, got {tolerance_hz}"
+        raise ValueError(msg)
+    if "emitter_hz" not in predictions.columns:
+        msg = "predictions have no emitter_hz column"
+        raise ValueError(msg)
+    out = predictions.copy()
+    n = len(out)
+    ids = np.full(n, -1, dtype=np.int64)
+    distance = np.full(n, np.nan)
+    if "t_center_s" in out.columns:
+        centre = floats(out["t_center_s"])
+    else:
+        centre = 0.5 * (floats(out["t_start_s"]) + floats(out["t_end_s"]))
+    emitter = floats(out["emitter_hz"])
+    recordings = np.asarray(strings(out["recording"]), dtype=object)
+    for recording in sorted(set(recordings.tolist())):
+        if recording not in tracks:
+            continue
+        rows = np.flatnonzero((recordings == recording) & np.isfinite(emitter))
+        if not rows.size:
+            continue
+        rec_tracks = tracks[recording]
+        track_ids = rec_tracks.ids
+        freqs = np.full((rows.size, len(track_ids)), np.nan)
+        for j, ident in enumerate(track_ids):
+            freqs[:, j] = rec_tracks.track(int(ident)).frequency_at(
+                centre[rows], max_gap_s
+            )
+        gap = np.abs(freqs - emitter[rows, None])
+        gap[~np.isfinite(gap)] = np.inf
+        if gap.shape[1] == 0:
+            continue
+        best = np.argmin(gap, axis=1)
+        best_gap = gap[np.arange(rows.size), best]
+        ok = best_gap <= tolerance_hz
+        ids[rows[ok]] = track_ids[best[ok]]
+        distance[rows[ok]] = best_gap[ok]
+    assigned = pd.array(ids, dtype="Int64")
+    assigned[ids < 0] = pd.NA
+    out["emitter_id"] = assigned
+    out["emitter_df_hz"] = distance
+    return out
 
 
 def df_bins(
