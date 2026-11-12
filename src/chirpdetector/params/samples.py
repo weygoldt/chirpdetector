@@ -79,7 +79,12 @@ from chirpdetector.params.crops import (
     DecoderInputs,
     decoder_inputs,
 )
-from chirpdetector.params.truth import PARAMETERS, TRUTH_PAD_S, scene_truth
+from chirpdetector.params.truth import (
+    PARAMETERS,
+    TRUTH_PAD_S,
+    TRUTH_VERSION,
+    scene_truth,
+)
 from chirpdetector.spectrogram import SpectrogramConfig
 
 __all__ = [
@@ -833,7 +838,11 @@ def _identity(
             "run_id": detector.training.get("run_id"),
             "score_threshold": detector.score_threshold,
         },
-        "truth": {"definition": "chirpdetector.params.truth", "pad_s": TRUTH_PAD_S},
+        "truth": {
+            "definition": "chirpdetector.params.truth",
+            "version": TRUTH_VERSION,
+            "pad_s": TRUTH_PAD_S,
+        },
         "scenes": [
             {
                 "source_id": r.source_id,

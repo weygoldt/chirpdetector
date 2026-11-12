@@ -221,3 +221,37 @@ def test_natural_prior_weights(params_scenes: Path) -> None:
         assert 0 < info["ess"] <= ids.size
     with pytest.raises(ValueError, match="level"):
         natural_prior_weights(ids, scenes, level="individual")
+
+
+def test_a_chirp_truth_ignores_the_emitters_other_chirps(clean_scene: Path) -> None:
+    """A window reaching into the next chirp of the same fish must not change
+    the truth: the peak and undershoot of a neighbour are not this chirp's."""
+    from gridtools.sim.scene import load_scene_model
+
+    from chirpdetector.params.truth import chirp_truth
+
+    chirps = pd.read_csv(clean_scene / "chirps.csv").sort_values("t_onset_s")
+    chirps = chirps.loc[~chirps["truncated"].to_numpy(bool)]
+    model = load_scene_model(clean_scene)
+    pairs = [
+        (a, b)
+        for (_, a), (_, b) in zip(
+            chirps.iloc[:-1].iterrows(), chirps.iloc[1:].iterrows(), strict=True
+        )
+        if b["excursion_hz"] > 1.2 * a["excursion_hz"]
+    ]
+    assert pairs, "the clean scene needs a chirp followed by a larger one"
+    a, b = pairs[0]
+    support = (float(a["t_support_start_s"]), float(a["t_support_stop_s"]))
+    reach = float(b["t_support_stop_s"]) - support[1] + 0.01  # covers chirp b
+    own = chirp_truth(model, int(a["emitter_id"]), support, chirp_id=int(a["chirp_id"]))
+    wide = chirp_truth(
+        model, int(a["emitter_id"]), support, pad_s=reach, chirp_id=int(a["chirp_id"])
+    )
+    for name in ("height_hz", "fwhm_s", "width10_s", "undershoot_hz"):
+        assert getattr(wide, name) == pytest.approx(getattr(own, name), abs=1e-6)
+    # with every chirp in the phase, the window would report chirp b's peak
+    mixed = chirp_truth(model, int(a["emitter_id"]), support, pad_s=reach)
+    assert mixed.height_hz > 1.1 * own.height_hz
+    with pytest.raises(ValueError, match="not a chirp of fish"):
+        chirp_truth(model, int(a["emitter_id"]), support, chirp_id=10_000)

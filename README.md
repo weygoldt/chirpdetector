@@ -125,8 +125,9 @@ a calibrated standard deviation.
 
 **Ground truth** (`chirpdetector.params.truth`) is the simulator's
 noise-free instantaneous frequency of the emitter, one value per EOD period:
-cycle boundaries are the 2π crossings of the emitter's phase
-(`SceneModel.phase(..., chirps="all")`), and each period gets `1/T_k` minus
+cycle boundaries are the 2π crossings of the emitter's phase with only that
+chirp (its other chirps left out, so that a neighbour in a burst cannot lend
+its peak or undershoot), and each period gets `1/T_k` minus
 the period mean of the chirp-free baseline (with drift). Height is the
 largest of these excursions; the widths are the times between the crossings
 of 50 % and 10 % of the height that bracket the peak (interpolated between

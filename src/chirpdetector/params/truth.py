@@ -6,10 +6,14 @@ decoder. Nothing here is read from a spectrogram.
 Per-period frequency
 --------------------
 The ground truth is the noise-free instantaneous frequency the simulator
-integrated for the emitter (`gridtools.sim.render.SceneModel.phase` with
-``chirps="all"``: baseline, drift, ramps, shared drift and the placed chirp
-traces, trapezoid rule at the scene rate), turned into one value per EOD
-period:
+integrated for the emitter (`gridtools.sim.render.SceneModel.phase`:
+baseline, drift, ramps, shared drift and the placed chirp trace, trapezoid
+rule at the scene rate), turned into one value per EOD period. A chirp's
+truth is measured on the phase with only that chirp
+(``phase(..., chirps=<the emitter's other chirps>, phase="natural")``): a
+neighbouring chirp of the same fish that falls inside the analysed window
+(its support plus `TRUTH_PAD_S`, e.g. in a burst) would otherwise lend it
+its peak or its undershoot.
 
 * cycle boundaries ``t_m`` are the times where the unwrapped phase crosses
   ``2 pi m`` (linear interpolation between samples);
@@ -69,6 +73,7 @@ __all__ = [
     "PARAMETERS",
     "TRUTH_COLUMNS",
     "TRUTH_PAD_S",
+    "TRUTH_VERSION",
     "ChirpParams",
     "chirp_truth",
     "excursion_params",
@@ -84,6 +89,10 @@ PARAMETERS: tuple[str, ...] = ("height_hz", "fwhm_s", "width10_s", "undershoot_h
 
 TRUTH_PAD_S = 0.02
 """Time added on both sides of a chirp's support when its truth is measured."""
+
+TRUTH_VERSION = 2
+"""Version of the definition (2: each chirp measured without the emitter's
+other chirps); sample sets record it and are not reused across versions."""
 
 TRUTH_COLUMNS: tuple[str, ...] = (*PARAMETERS, "edge_clipped", "t_peak_s")
 """Columns `scene_truth` adds to a scene's chirp table."""
@@ -278,6 +287,7 @@ def chirp_truth(
     support_s: tuple[float, float],
     *,
     pad_s: float = TRUTH_PAD_S,
+    chirp_id: int | None = None,
 ) -> ChirpParams:
     """Ground truth of one simulated chirp.
 
@@ -292,6 +302,9 @@ def chirp_truth(
         ``(t_support_start_s, t_support_stop_s)`` of the chirp.
     pad_s
         Added on both sides of the support (clipped to the scene).
+    chirp_id
+        The chirp: the emitter's other chirps are left out of the phase
+        (module docstring). None measures the phase with all of them.
 
     Returns
     -------
@@ -304,7 +317,18 @@ def chirp_truth(
     if stop - start < 3:
         nan = float("nan")
         return ChirpParams(nan, nan, nan, nan, True)
-    phase = model.phase(int(emitter_id), start, stop, chirps="all")
+    if chirp_id is None:
+        phase = model.phase(int(emitter_id), start, stop, chirps="all")
+    else:
+        others = [
+            c for c in model.fish[int(emitter_id)].chirp_ids if c != int(chirp_id)
+        ]
+        if len(others) == len(model.fish[int(emitter_id)].chirp_ids):
+            msg = f"chirp {chirp_id} is not a chirp of fish {emitter_id}"
+            raise ValueError(msg)
+        phase = model.phase(
+            int(emitter_id), start, stop, chirps=others, phase="natural"
+        )
     base = model.base_frequency(int(emitter_id), start, stop)
     tau, delta = per_period_trace(phase, base, fs, start / fs)
     return measure_period_params(tau, delta)
@@ -351,6 +375,12 @@ def scene_truth(
         chirps["t_support_stop_s"].to_numpy(dtype=np.float64),
         strict=True,
     ):
-        params = chirp_truth(model, int(emitter), (float(t0), float(t1)), pad_s=pad_s)
+        params = chirp_truth(
+            model,
+            int(emitter),
+            (float(t0), float(t1)),
+            pad_s=pad_s,
+            chirp_id=int(chirp_id),
+        )
         rows.append({"chirp_id": int(chirp_id), **params.to_dict()})
     return pd.DataFrame(rows).loc[:, list(columns)]

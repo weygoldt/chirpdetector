@@ -117,7 +117,7 @@ from chirpdetector.params.samples import (
     extract_samples,
     parse_split,
 )
-from chirpdetector.params.truth import PARAMETERS, TRUTH_PAD_S
+from chirpdetector.params.truth import PARAMETERS, TRUTH_PAD_S, TRUTH_VERSION
 from chirpdetector.resources import apply_vram_limit
 from chirpdetector.training import provenance
 
@@ -143,13 +143,15 @@ TARGET_DEFINITIONS = {
     "model_space": {p: f"log({p} + {LOG_OFFSETS[p]:g})" for p in PARAMETERS},
     "ground_truth": (
         "per-EOD-period frequency of the emitter (chirpdetector.params.truth): "
-        "cycle boundaries at the 2 pi crossings of SceneModel.phase(chirps='all'), "
+        "cycle boundaries at the 2 pi crossings of SceneModel.phase with only this "
+        "chirp (the emitter's other chirps omitted, phase='natural'), "
         "delta_k = 1/T_k minus the period mean of the baseline (with drift); "
         "height = max delta_k; fwhm/width10 from the crossings of 50 %/10 % of the "
         "height bracketing the peak, interpolated between period midpoints; "
         "undershoot = max(0, -min delta_k after the peak)"
     ),
     "truth_pad_s": TRUTH_PAD_S,
+    "truth_version": TRUTH_VERSION,
 }
 
 
