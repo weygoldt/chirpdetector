@@ -17,11 +17,22 @@ classifiers = [
 dependencies = [
     "gridtools",
     "numpy>=2.5",
+    "pandas>=3.1.1",
+    "scipy>=1.18.1",
     "torch>=2.15",
+    "typer>=0.29.1",
 ]
+
+[project.scripts]
+chirpdetector = "chirpdetector.cli:app"
 
 [project.urls]
 Repository = "https://github.com/weygoldt/chirpdetector"
+
+[project.optional-dependencies]
+label = [
+    "matplotlib>=3.11.2",
+]
 
 [dependency-groups]
 dev = [
