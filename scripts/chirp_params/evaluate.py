@@ -126,13 +126,22 @@ def main() -> None:
     if not args.no_ridge:
         for variant in ("B", "C", "K"):
             print("ridge", variant, file=sys.stderr, flush=True)
-            r_test = ridge_table(args.cache, "test", variant, test)
-            r_val = ridge_table(args.cache, "val", variant, val)
+            cached = {sp: args.out / f"ridge_{variant}_{sp}.parquet" for sp in ("test", "val")}
+            if all(f.exists() for f in cached.values()):
+                r_test, r_val = (pd.read_parquet(cached[sp]) for sp in ("test", "val"))
+            else:
+                r_test = ridge_table(args.cache, "test", variant, test)
+                r_val = ridge_table(args.cache, "val", variant, val)
+                r_test.to_parquet(cached["test"])
+                r_val.to_parquet(cached["val"])
             name = {"B": "ridge B (sum)", "C": "ridge C (top-3)", "K": "ridge K (clean, ceiling)"}[variant]
             est[name] = r_test
             est[name + " +bias corr."] = apply_bias(r_test, log_bias(r_val, val))
     for run in sorted(p for p in args.runs.iterdir() if (p / "test_predictions.parquet").exists()):
-        pred = pd.read_parquet(run / "test_predictions.parquet")
+        pred = pd.concat(
+            [pd.read_parquet(f) for f in [run / "test_predictions.parquet", *sorted(run.glob("pred_*.parquet"))]],
+            ignore_index=True,
+        )
         for cond, g in pred.groupby("condition"):
             g = g.set_index("chirp_row").reindex(test["row"])
             name = f"net {run.name}" + ("" if cond == "true_baseline" else f" [{cond}]")

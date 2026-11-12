@@ -91,7 +91,9 @@ def _neighbours(tracks, emitter: int, t: float, baseline: float) -> dict:
     }
 
 
-def _load_scene(directory: Path, split: str, rng: np.random.Generator, jitter: bool):
+def _load_scene(
+    directory: Path, split: str, rng: np.random.Generator, jitter: tuple[float, float] | None
+):
     chirps = pd.read_csv(directory / "chirps.csv")
     chirps = chirps[~chirps["truncated"]].reset_index(drop=True)
     model = load_scene_model(directory)
@@ -112,11 +114,11 @@ def _load_scene(directory: Path, split: str, rng: np.random.Generator, jitter: b
         )
         info.update(nb)
         box = [row.box_t0_s, row.box_t1_s, row.box_f0_hz, row.box_f1_hz]
-        if jitter:
-            box[0] += rng.normal(0, JITTER_T_S)
-            box[1] += rng.normal(0, JITTER_T_S)
-            box[2] += rng.normal(0, JITTER_F_HZ)
-            box[3] += rng.normal(0, JITTER_F_HZ)
+        if jitter is not None:
+            box[0] += rng.normal(0, jitter[0])
+            box[1] += rng.normal(0, jitter[0])
+            box[2] += rng.normal(0, jitter[1])
+            box[3] += rng.normal(0, jitter[1])
             if box[1] - box[0] < 0.05:
                 box[0:2] = [row.box_t0_s, row.box_t1_s]
         info.update(
@@ -146,6 +148,8 @@ def main() -> None:
     parser.add_argument("--max-scenes", type=int, default=None)
     parser.add_argument("--jitter", action="store_true", help="jitter boxes on any split (always on for train)")
     parser.add_argument("--suffix", default="", help="output directory = split + suffix")
+    parser.add_argument("--jitter-t-s", type=float, default=JITTER_T_S)
+    parser.add_argument("--jitter-f-hz", type=float, default=JITTER_F_HZ)
     args = parser.parse_args()
     frac = float(os.environ.get("CHIRP_MAX_VRAM_FRACTION", "0.1"))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -160,7 +164,9 @@ def main() -> None:
         for d in dirs
     ]
     n = int(sum(counts))
-    jitter = args.jitter or args.split == "train"
+    jitter = (
+        (args.jitter_t_s, args.jitter_f_hz) if args.jitter or args.split == "train" else None
+    )
     out = args.out / (args.split + args.suffix)
     out.mkdir(parents=True, exist_ok=True)
     shp_r = (n, len(RCFG.windows_s), RCFG.n_freqs, RCFG.n_times)
