@@ -1,5 +1,6 @@
 """Evaluate chirp detection and emitter assignment against ground truth."""
 
+from chirpdetector.evaluation.assignment import delta_f_at, df_bins
 from chirpdetector.evaluation.detection import (
     average_precision,
     bootstrap_regions,
@@ -34,6 +35,8 @@ __all__ = [
     "bootstrap_regions",
     "clopper_pearson",
     "confidence_intervals",
+    "delta_f_at",
+    "df_bins",
     "non_max_suppression",
     "pr_curve",
     "read_ground_truth",
