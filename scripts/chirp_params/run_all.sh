@@ -27,4 +27,5 @@ p2=$!
 wait $p1 $p2
 $guard --name params-eval --mem 6G --vram 0.0 -- $py "$here/evaluate.py" "$cache" "$runs" "$out" > "$out/evaluate.log" 2>&1
 $guard --name params-real --mem 5G --vram 0.1 -- $py "$here/real_check.py" "$runs" "$out/real" > "$out/real.log" 2>&1
+$py "$here/analyze_real.py" "$out/real" > "$out/real_analysis.log" 2>&1
 echo "all done"

@@ -209,6 +209,12 @@ def main() -> None:
             df = frame(m, lv, f"baseline_sd_{sd:g}")
             df["baseline_err_hz"] = err
             preds.append(df)
+    jdir = args.cache / "test_jbox"
+    if (jdir / "meta.parquet").exists():  # same chirps, jittered boxes
+        xj, mj = load(args.cache, "test_jbox", args.input, args.channels)
+        assert (mj["row"].to_numpy() == mte["row"].to_numpy()).all()
+        sj = (scalars(mj, args.input) - mu_s) / sd_s
+        preds.append(frame(*predict(model, xj, sj.astype(np.float32), device), "jittered_box"))
     pd.concat(preds, ignore_index=True).to_parquet(args.run / "test_predictions.parquet")
     print(f"done in {time.time() - t0:.0f} s", flush=True)
 

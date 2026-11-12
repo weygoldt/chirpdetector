@@ -15,7 +15,7 @@ Training splits use boxes jittered by N(0, 10 ms) per time edge and
 N(0, 5 Hz) per frequency edge (stand-in for detector box error); val/test
 use the exact footprint boxes.
 
-Usage: extract.py SPLIT OUT_DIR [--max-scenes N]
+Usage: extract.py SPLIT OUT_DIR [--max-scenes N] [--jitter --suffix _jbox]
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ def _neighbours(tracks, emitter: int, t: float, baseline: float) -> dict:
     }
 
 
-def _load_scene(directory: Path, split: str, rng: np.random.Generator):
+def _load_scene(directory: Path, split: str, rng: np.random.Generator, jitter: bool):
     chirps = pd.read_csv(directory / "chirps.csv")
     chirps = chirps[~chirps["truncated"]].reset_index(drop=True)
     model = load_scene_model(directory)
@@ -112,7 +112,7 @@ def _load_scene(directory: Path, split: str, rng: np.random.Generator):
         )
         info.update(nb)
         box = [row.box_t0_s, row.box_t1_s, row.box_f0_hz, row.box_f1_hz]
-        if split == "train":
+        if jitter:
             box[0] += rng.normal(0, JITTER_T_S)
             box[1] += rng.normal(0, JITTER_T_S)
             box[2] += rng.normal(0, JITTER_F_HZ)
@@ -144,6 +144,8 @@ def main() -> None:
     parser.add_argument("split", choices=list(SPLIT_DIRS))
     parser.add_argument("out", type=Path)
     parser.add_argument("--max-scenes", type=int, default=None)
+    parser.add_argument("--jitter", action="store_true", help="jitter boxes on any split (always on for train)")
+    parser.add_argument("--suffix", default="", help="output directory = split + suffix")
     args = parser.parse_args()
     frac = float(os.environ.get("CHIRP_MAX_VRAM_FRACTION", "0.1"))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -158,7 +160,8 @@ def main() -> None:
         for d in dirs
     ]
     n = int(sum(counts))
-    out = args.out / args.split
+    jitter = args.jitter or args.split == "train"
+    out = args.out / (args.split + args.suffix)
     out.mkdir(parents=True, exist_ok=True)
     shp_r = (n, len(RCFG.windows_s), RCFG.n_freqs, RCFG.n_times)
     mm = {
@@ -173,11 +176,11 @@ def main() -> None:
     k = 0
     t_start = time.time()
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [pool.submit(_load_scene, d, args.split, rng) for d in dirs[:3]]
+        futures = [pool.submit(_load_scene, d, args.split, rng, jitter) for d in dirs[:3]]
         for i, _d in enumerate(dirs):
             rows, segments, cleans, signal, fs = futures[i].result()
             if i + 3 < len(dirs):
-                futures.append(pool.submit(_load_scene, dirs[i + 3], args.split, rng))
+                futures.append(pool.submit(_load_scene, dirs[i + 3], args.split, rng, jitter))
             futures[i] = None  # free memory
             with torch.no_grad():
                 spec = compute_spectrogram(signal, fs, DCFG, device=device)
