@@ -33,6 +33,29 @@ uv run chirpdetector label-emitters /mnt/data2/2019_tube_competition/2019-12-09-
     --out /mnt/data1/chirp_v2/labels/emitters --per-bin 20 --seed 0 --labeler pw
 ```
 
+## Evaluating detections
+
+`chirpdetector evaluate` scores predictions against hand labels (audian files
+with `labeled_region` spans), `label-emitters` output, or simulated scenes
+(`chirps.csv`). The default matching rule is that of the v1 detector
+benchmark: centre times within 100 ms and overlapping frequency ranges,
+matched one-to-one (most pairs, then smallest total |Δt|); only predictions
+inside a labelled region and its frequency band count.
+
+```sh
+uv run chirpdetector evaluate /mnt/data2/2019_tube_competition/2019-12-09-10_00 \
+    --labels /mnt/data2/2019_tube_competition/2019-12-09-10_00/traces-grid1-editable-labels.csv \
+    --out /mnt/data1/chirp_v2/eval/v1-2019-12-09 --plot
+```
+
+The output directory holds `metrics.json` (with the sha256 of every input)
+and CSV tables: precision, recall and F1 per recording, dataset and pooled
+for thresholds 0.25-0.95; exact binomial and region-bootstrap CIs; PR curves
+and average precision; the outcome of every label and prediction; and
+emitter accuracy, coverage, calibration and end-to-end metrics by ΔF. v1's
+pre-NMS boxes need `--nms-iou 0.2`. From Python, use
+`chirpdetector.evaluation.evaluate`.
+
 ## Development
 
 chirpdetector depends on [gridtools](https://github.com/weygoldt/gridtools),
