@@ -316,9 +316,15 @@ def box_power(
 ) -> float:
     """Power in a chirp box of the electrode-summed spectrogram."""
     config = SpectrogramConfig(
-        window_lengths_samples=(nfft,), hop_samples=50, f_min_hz=500.0, f_max_hz=1500.0
+        reference_window_s=nfft / RATE,
+        extra_windows_s=(),
+        hop_s=50 / RATE,
+        f_min_hz=500.0,
+        f_max_hz=1500.0,
     )
-    spec = compute_spectrogram(torch.from_numpy(np.ascontiguousarray(samples)), config)
+    spec = compute_spectrogram(
+        torch.from_numpy(np.ascontiguousarray(samples)), RATE, config
+    )
     t0, t1, f0, f1 = box
     ti = (spec.times_s >= t0) & (spec.times_s <= t1)
     fi = (spec.freqs_hz >= f0) & (spec.freqs_hz <= f1)
@@ -704,7 +710,7 @@ class TestSpans:
         config = SpectrogramConfig()
         cleaned_whole, _ = remove_clicks(x, RATE)
         start, stop = 70_001, 150_000
-        plan = plan_span(start, stop, len(x), config)
+        plan = plan_span(start, stop, len(x), RATE, config)
         samples, _ = read_clean(recording, plan.read_start, plan.read_stop)
         assert np.array_equal(samples, cleaned_whole[plan.read_slice])
         part = compute_spectrogram_span(samples, plan, config)
@@ -712,7 +718,7 @@ class TestSpans:
             cleaned_whole[plan.read_slice], plan, config
         )
         assert torch.equal(part.power, reference.power)
-        whole = compute_spectrogram(cleaned_whole, config)
+        whole = compute_spectrogram(cleaned_whole, RATE, config)
         frames = slice(plan.frame_start, plan.frame_stop)
         torch.testing.assert_close(
             part.power, whole.power[:, :, frames], rtol=1e-6, atol=0.0

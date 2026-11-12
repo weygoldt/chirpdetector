@@ -51,11 +51,12 @@ class ImageGeometry:
     t_first_s
         Centre time of column 0.
     dt_s
-        Time per column (the hop).
+        Time per column: the actual hop, ``hop_samples / samplerate_hz``.
     f_lowest_hz
         Centre frequency of the bottom row (``height_px - 1``).
     df_hz
-        Frequency per row (the bin spacing).
+        Frequency per row: the actual bin spacing, ``samplerate_hz /
+        n_fft``.
     """
 
     width_px: int
@@ -67,14 +68,18 @@ class ImageGeometry:
 
     @classmethod
     def from_spectrogram(cls, spec: Spectrogram) -> ImageGeometry:
-        """Geometry of ``to_image(normalize(spec, ...))``."""
+        """Geometry of ``to_image(normalize(spec, ...))``.
+
+        Uses the actual hop and bin spacing at the recording's rate
+        (``spec.layout``), not the config's nominal values.
+        """
         return cls(
             width_px=spec.n_times,
             height_px=spec.n_freqs,
             t_first_s=float(spec.times_s[0]),
-            dt_s=spec.config.hop_s,
+            dt_s=spec.layout.hop_s,
             f_lowest_hz=float(spec.freqs_hz[0]),
-            df_hz=spec.config.df_hz,
+            df_hz=spec.layout.df_hz,
         )
 
     @property

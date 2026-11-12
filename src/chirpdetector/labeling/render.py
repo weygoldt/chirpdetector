@@ -9,6 +9,10 @@ once, the band is cut out and shifted to zero, and an inverse FFT of the
 band gives a complex baseband signal at a decimated rate. Short-time spectra
 of that signal are the in-band part of the full-rate spectrogram (same
 window in seconds) at a fraction of the cost.
+
+Window and hop are durations, so a cutout looks the same at any sample
+rate. At 20 kHz the defaults are the former 4096-sample window and 32-sample
+hop, decimated exactly as before.
 """
 
 from __future__ import annotations
@@ -40,11 +44,12 @@ class CutoutConfig:
     pad_hz
         Frequency shown below the lowest live track (or box bottom) and
         above the highest live track (or box top).
-    nfft
-        Analysis window in samples at the recording rate (4096 at 20 kHz
-        is 205 ms, about 5 Hz resolution).
-    hop
-        Hop in samples at the recording rate.
+    window_s
+        Analysis window (0.2048 s: 4096 samples at 20 kHz, 4.9 Hz
+        resolution). Shorter windows show a chirp's shape better but
+        separate close baselines worse.
+    hop_s
+        Hop between spectra (0.0016 s: 32 samples at 20 kHz).
     fft_pad
         Zero-padding factor of the FFT (smoother display only).
     db_range
@@ -55,15 +60,18 @@ class CutoutConfig:
 
     pad_s: float = 0.15
     pad_hz: float = 40.0
-    nfft: int = 4096
-    hop: int = 32
+    window_s: float = 0.2048
+    hop_s: float = 0.0016
     fft_pad: int = 2
     db_range: float = 45.0
     max_gap_s: float = 1.0
 
     def __post_init__(self) -> None:
-        if self.nfft < 2 or self.hop < 1 or self.fft_pad < 1:
-            msg = "nfft must be >= 2, hop and fft_pad >= 1"
+        if not (self.window_s > 0 and self.hop_s > 0) or self.fft_pad < 1:
+            msg = "window_s and hop_s must be > 0 (seconds), fft_pad >= 1"
+            raise ValueError(msg)
+        if self.window_s > 10.0:
+            msg = f"window_s is {self.window_s:g} s; is this a sample count?"
             raise ValueError(msg)
         if self.pad_s < 0 or self.pad_hz < 0 or self.db_range <= 0:
             msg = "pad_s and pad_hz must be >= 0, db_range > 0"
@@ -173,6 +181,36 @@ def _decimation(nfft: int, hop: int, samplerate_hz: float, bandwidth_hz: float) 
     return max(fits) if fits else 1
 
 
+def _sampling(
+    window_s: float, hop_s: float, samplerate_hz: float, bandwidth_hz: float
+) -> tuple[int, int, int]:
+    """Decimation and window/hop lengths at the decimated rate.
+
+    Returns ``(q, n_window, n_hop)``: the snippet is decimated by ``q``,
+    spectra use ``n_window`` samples every ``n_hop`` samples at
+    ``samplerate_hz / q``.
+
+    The window and hop are first rounded to samples at the recording rate.
+    If a common divisor of both gives at least half the largest decimation
+    the band allows, it is used and the lengths are exact (always the case
+    at 20 kHz with the defaults: 4096 and 32 samples). Otherwise (e.g. at
+    48 kHz, 9830 and 77 samples have no common divisor) the snippet is
+    decimated by the largest factor the band and the hop allow, and window
+    and hop are rounded at the decimated rate; they then differ from the
+    requested durations by at most half a decimated sample, which is
+    invisible in a display.
+    """
+    n_window = max(2, round(window_s * samplerate_hz))
+    n_hop = max(1, round(hop_s * samplerate_hz))
+    q_band = max(1, math.floor(samplerate_hz / (1.25 * bandwidth_hz)))
+    q_best = max(1, min(q_band, n_hop))
+    q_exact = _decimation(n_window, n_hop, samplerate_hz, bandwidth_hz)
+    if 2 * q_exact >= q_best:
+        return q_exact, n_window // q_exact, n_hop // q_exact
+    rate = samplerate_hz / q_best
+    return q_best, max(2, round(window_s * rate)), max(1, round(hop_s * rate))
+
+
 def _read_padded(rec: Recording, start: int, stop: int) -> npt.NDArray[np.float32]:
     """Samples ``[start, stop)``, zero outside the recording."""
     out = np.zeros((stop - start, rec.n_channels), dtype=np.float32)
@@ -225,16 +263,15 @@ def render_cutout(
     t1 = item.t_end_s + config.pad_s
 
     # compute a slightly wider band so window leakage at the edges is intact
-    guard_hz = 4.0 * fs / config.nfft
+    guard_hz = 4.0 * fs / max(2, round(config.window_s * fs))
     band_lo, band_hi = max(0.0, f0 - guard_hz), min(0.5 * fs, f1 + guard_hz)
-    q = _decimation(config.nfft, config.hop, fs, band_hi - band_lo)
-    half = config.nfft // 2
-    start = (round(t0 * fs) - half - config.hop) // q * q
-    stop = round(t1 * fs) + half + config.hop
+    q, nwin, hop = _sampling(config.window_s, config.hop_s, fs, band_hi - band_lo)
+    half = nwin * q // 2
+    start = (round(t0 * fs) - half - hop * q) // q * q
+    stop = round(t1 * fs) + half + hop * q
     x = _read_padded(rec, start, stop)
     y, fs_d, fc = zoom_baseband(x, fs, band_lo, band_hi, q)
 
-    nwin, hop = config.nfft // q, config.hop // q
     window = hann(nwin, sym=False).astype(np.float32)
     window /= window.sum()
     frames = sliding_window_view(y, nwin, axis=0)[::hop]

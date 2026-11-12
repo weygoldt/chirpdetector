@@ -7,7 +7,7 @@ coincidence guard and refuses recordings with fewer than
 data never), see `can_remove_clicks`. Long recordings, chunk by chunk
 (identical to cleaning the whole)::
 
-    plan = plan_span(start, stop, recording.n_samples, spec_config)
+    plan = plan_span(start, stop, recording.n_samples, recording.samplerate_hz, spec_config)
     samples, mask = read_clean(recording, plan.read_start, plan.read_stop)
     spec = compute_spectrogram_span(samples, plan, spec_config)
 """

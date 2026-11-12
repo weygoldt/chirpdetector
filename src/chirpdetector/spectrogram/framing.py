@@ -2,11 +2,13 @@
 
 Frame convention
 ----------------
-Frame ``k`` (an integer, counted from the first sample of the recording) is
-centred on sample ``k * hop_samples``. Every channel's window (length ``n``,
-even) covers samples ``[k * hop - n / 2, k * hop + n / 2)``; the periodic
-window's peak sits exactly on sample ``k * hop``. The frame's time is that
-sample's time, ``t0_s + k * hop_samples / samplerate_hz``.
+At sample rate ``fs`` the config's hop is ``hop_samples = round(fs *
+hop_s)`` (see `SpectrogramConfig.layout`). Frame ``k`` (an integer, counted
+from the first sample of the recording) is centred on sample ``k *
+hop_samples``. Every channel's window (length ``n``, even) covers samples
+``[k * hop - n / 2, k * hop + n / 2)``; the periodic window's peak sits
+exactly on sample ``k * hop``. The frame's time is that sample's time,
+``t0_s + k * hop_samples / fs``, exactly.
 
 Recording edges
 ---------------
@@ -19,12 +21,13 @@ signal (their power fades over the first and last half reference window)
 and are flagged ``complete == False`` in the result. Zero padding (rather
 than reflection) is the only extension that cannot create mirrored
 pseudo-chirps, and because it is defined on the recording, not on the
-chunk, a span gives the same frames as the whole recording.
+chunk, a span gives the same frames as the whole recording. A recording
+shorter than the reference window is rejected.
 
 Spans
 -----
 A span ``[start, stop)`` (in samples) owns the frames whose centres lie in
-it. Consecutive spans therefore partition the frames of a recording without
+it. Consecutive spans therefore partition a recording's frames without
 gaps or duplicates. `plan_span` says which samples to read and how much zero
 padding to add; with those samples, `compute_spectrogram_span` produces the
 same frames as computing the whole recording at once.
@@ -37,36 +40,43 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from chirpdetector.spectrogram.config import SpectrogramConfig
+from chirpdetector.spectrogram.config import SpectrogramConfig, StftLayout
 
 
-def context_samples(config: SpectrogramConfig) -> int:
+def context_samples(samplerate_hz: float, config: SpectrogramConfig) -> int:
     """Samples needed on each side of a frame centre.
 
-    This is half the reference (longest) window. To compute frames whose
-    centres lie in ``[start, stop)``, samples from ``start - context`` to
-    ``stop + context`` (clipped to the recording) are sufficient.
+    This is half the FFT length (half the reference window, rounded up by
+    at most one sample). To compute frames whose centres lie in ``[start,
+    stop)``, samples from ``start - context`` to ``stop + context`` (clipped
+    to the recording) are sufficient.
 
     Parameters
     ----------
+    samplerate_hz
+        Sample rate of the recording.
     config
         Spectrogram configuration.
 
     Returns
     -------
     int
-        Half the reference window length, in samples.
+        ``n_fft // 2`` at that rate.
     """
-    return config.n_fft // 2
+    return config.layout(samplerate_hz).context_samples
 
 
-def n_frames_total(n_samples: int, config: SpectrogramConfig) -> int:
+def n_frames_total(
+    n_samples: int, samplerate_hz: float, config: SpectrogramConfig
+) -> int:
     """Number of frames of a recording with ``n_samples`` samples.
 
     Parameters
     ----------
     n_samples
         Length of the recording.
+    samplerate_hz
+        Sample rate of the recording.
     config
         Spectrogram configuration.
 
@@ -79,11 +89,12 @@ def n_frames_total(n_samples: int, config: SpectrogramConfig) -> int:
     if n_samples < 1:
         msg = f"n_samples must be >= 1, got {n_samples}"
         raise ValueError(msg)
-    return -(-n_samples // config.hop_samples)
+    return -(-n_samples // config.layout(samplerate_hz).hop_samples)
 
 
 def frame_times_s(
     frame_indices: NDArray[np.int64],
+    samplerate_hz: float,
     config: SpectrogramConfig,
     t0_s: float = 0.0,
 ) -> NDArray[np.float64]:
@@ -93,6 +104,8 @@ def frame_times_s(
     ----------
     frame_indices
         Absolute frame indices ``k``.
+    samplerate_hz
+        Sample rate of the recording.
     config
         Spectrogram configuration.
     t0_s
@@ -103,8 +116,14 @@ def frame_times_s(
     NDArray[np.float64]
         ``t0_s + k * hop_samples / samplerate_hz``.
     """
-    sample_positions = np.asarray(frame_indices, dtype=np.int64) * config.hop_samples
-    return t0_s + sample_positions / config.samplerate_hz
+    return _frame_times_s(frame_indices, config.layout(samplerate_hz), t0_s)
+
+
+def _frame_times_s(
+    frame_indices: NDArray[np.int64], layout: StftLayout, t0_s: float
+) -> NDArray[np.float64]:
+    sample_positions = np.asarray(frame_indices, dtype=np.int64) * layout.hop_samples
+    return t0_s + sample_positions / layout.samplerate_hz
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +141,9 @@ class SpanPlan:
         recording edges).
     n_samples_total
         Length of the whole recording.
+    samplerate_hz
+        Sample rate the plan was made for; `compute_spectrogram_span` uses
+        it.
     """
 
     frame_start: int
@@ -131,6 +153,7 @@ class SpanPlan:
     pad_before: int
     pad_after: int
     n_samples_total: int
+    samplerate_hz: float
 
     @property
     def n_frames(self) -> int:
@@ -152,6 +175,7 @@ def plan_span(
     start_sample: int,
     stop_sample: int,
     n_samples_total: int,
+    samplerate_hz: float,
     config: SpectrogramConfig,
 ) -> SpanPlan:
     """Plan the computation of the frames centred in ``[start, stop)``.
@@ -164,6 +188,8 @@ def plan_span(
         lies inside it.
     n_samples_total
         Length of the whole recording.
+    samplerate_hz
+        Sample rate of the recording.
     config
         Spectrogram configuration.
 
@@ -176,17 +202,28 @@ def plan_span(
     Raises
     ------
     ValueError
-        If the span is outside the recording or contains no frame centre
-        (it is shorter than one hop and falls between two centres).
+        If the config does not fit the rate (see `SpectrogramConfig.layout`),
+        the recording is shorter than the reference window, the span is
+        outside the recording, or the span contains no frame centre (it is
+        shorter than one hop and falls between two centres).
     """
+    layout = config.layout(samplerate_hz)
     start, stop, total = int(start_sample), int(stop_sample), int(n_samples_total)
+    window = layout.window_lengths_samples[0]
+    if total < window:
+        msg = (
+            f"recording of {total} samples ({total / layout.samplerate_hz:g} s) is "
+            f"shorter than the reference window ({window} samples, "
+            f"{config.reference_window_s:g} s)"
+        )
+        raise ValueError(msg)
     if not 0 <= start < stop <= total:
         msg = (
             "need 0 <= start_sample < stop_sample <= n_samples_total, "
             f"got {start}, {stop}, {total}"
         )
         raise ValueError(msg)
-    hop = config.hop_samples
+    hop = layout.hop_samples
     frame_start = -(-start // hop)
     frame_stop = -(-stop // hop)
     if frame_stop <= frame_start:
@@ -195,9 +232,9 @@ def plan_span(
             f"(frame centres are multiples of {hop} samples)"
         )
         raise ValueError(msg)
-    half = context_samples(config)
+    half = layout.context_samples
     first_needed = frame_start * hop - half
-    stop_needed = (frame_stop - 1) * hop + half
+    stop_needed = (frame_stop - 1) * hop - half + layout.n_fft
     read_start = max(0, first_needed)
     read_stop = min(total, stop_needed)
     return SpanPlan(
@@ -208,6 +245,7 @@ def plan_span(
         pad_before=read_start - first_needed,
         pad_after=stop_needed - read_stop,
         n_samples_total=total,
+        samplerate_hz=layout.samplerate_hz,
     )
 
 
@@ -215,6 +253,7 @@ def complete_frames(
     frame_start: int,
     frame_stop: int,
     n_samples_total: int,
+    samplerate_hz: float,
     config: SpectrogramConfig,
 ) -> NDArray[np.bool_]:
     """Flag frames whose reference window lies entirely inside the recording.
@@ -225,6 +264,8 @@ def complete_frames(
         Absolute frame indices ``[frame_start, frame_stop)``.
     n_samples_total
         Length of the whole recording.
+    samplerate_hz
+        Sample rate of the recording.
     config
         Spectrogram configuration.
 
@@ -233,6 +274,14 @@ def complete_frames(
     NDArray[np.bool_]
         ``True`` where no zero padding entered the frame.
     """
-    half = context_samples(config)
-    centres = np.arange(frame_start, frame_stop, dtype=np.int64) * config.hop_samples
-    return (centres - half >= 0) & (centres + half <= n_samples_total)
+    return _complete_frames(
+        frame_start, frame_stop, n_samples_total, config.layout(samplerate_hz)
+    )
+
+
+def _complete_frames(
+    frame_start: int, frame_stop: int, n_samples_total: int, layout: StftLayout
+) -> NDArray[np.bool_]:
+    half = layout.context_samples
+    centres = np.arange(frame_start, frame_stop, dtype=np.int64) * layout.hop_samples
+    return (centres - half >= 0) & (centres - half + layout.n_fft <= n_samples_total)

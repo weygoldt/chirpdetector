@@ -74,7 +74,9 @@ clipped to the recording. A sample therefore comes out the same however the
 recording is chunked, as long as each chunk is read with the margins
 `plan_clean` asks for. Typical use with the spectrogram::
 
-    plan = plan_span(start, stop, recording.n_samples, spec_config)
+    plan = plan_span(
+        start, stop, recording.n_samples, recording.samplerate_hz, spec_config
+    )
     samples, mask = read_clean(recording, plan.read_start, plan.read_stop)
     spec = compute_spectrogram_span(samples, plan, spec_config)
 """
