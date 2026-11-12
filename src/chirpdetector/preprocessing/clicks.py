@@ -9,12 +9,16 @@ itself a numpy port of ``wavetracker.clicks`` (wavetracker commit eaebd4d;
 wavetracker by Till Raab and Joerg Henninger, maintained by Patrick Weygoldt
 and Jan Benda; audian by Jan Benda, maintained by Patrick Weygoldt). Both
 source projects are licensed under the GPL; this module keeps that origin and
-is not relicensed by being copied here. The algorithm and its defaults are
-unchanged. What changed: field names carry units (``max_duration`` became
-``max_duration_s`` and so on), the configuration validates itself and
-round-trips through JSON, and the block scheduling is expressed as spans of a
+is not relicensed by being copied here. Detection and repair, and their
+defaults, are unchanged. What changed: a mandatory electrode-coincidence
+guard (below), field names that carry units (``max_duration`` became
+``max_duration_s`` and so on), a configuration that validates itself and
+round-trips through JSON, and block scheduling expressed as spans of a
 recording (`plan_clean`, `clean_span`, `read_clean`) to match
-`chirpdetector.spectrogram`.
+`chirpdetector.spectrogram`. Everything is in seconds or Hz, so recordings of
+any sampling rate are cleaned alike; audian's search band, a fraction of the
+sampling rate (0.2 and 0.05), is ``high_band_hz`` 4000 and
+``high_band_edge_hz`` 1000 here, the same at 20 kHz.
 
 Why
 ---
@@ -27,8 +31,8 @@ How
 ---
 Each channel is split by its spectrum over a block:
 
-- Clicks are searched in the top of the spectrum, above ``high_band`` of the
-  sampling rate (4 kHz at 20 kHz), where a click reaches and a fish's
+- Clicks are searched in the top of the spectrum, above ``high_band_hz``
+  (4 kHz, whatever the sampling rate), where a click reaches and a fish's
   narrowband EOD does not. Loud events longer than ``max_duration_s`` are
   signals and stay.
 - Cutting the clicks out is not enough: a hole in a loud EOD is itself a
@@ -39,6 +43,27 @@ Each channel is split by its spectrum over a block:
 
 Samples outside a click are returned exactly as they came in, and a channel
 without a click is returned untouched.
+
+The electrode-coincidence guard (not in audian) is mandatory
+------------------------------------------------------------
+On grid recordings the higher EOD harmonics of a fish next to an electrode
+reach the click band during a big chirp, so audian's per-channel removal
+repairs chirps (24 of 335 hand-labelled chirps touched, up to -11 dB). Real
+clicks reach most electrodes (8-14 of 15), chirp-triggered events at most
+`MAX_CHIRP_ELECTRODES` (4). An event is therefore repaired on all electrodes
+only when it reaches at least ``coincidence`` of them (0.5 by default),
+otherwise only where it is very strong (``isolated_threshold``). This only
+works with enough electrodes: below `ClickRemoval.min_electrodes` (9 for the
+default) a loud chirp can pass the coincidence test, and on a single channel
+clicks and chirps cannot be told apart at all, so the functions refuse such
+recordings (`TooFewElectrodesError`). Pipelines check first with
+`can_remove_clicks` and skip click removal, with a warning, where it is
+False.
+
+Validation (2026-11-12): /mnt/data1/chirp_v2/preprocessing/clicks/report.md,
+produced by ``scripts/click_removal_report.py`` at chirpdetector commit
+b1b7d35 (the script compares the then-possible unguarded settings and was
+removed with them).
 
 Blocks
 ------
@@ -77,16 +102,40 @@ BoolArray = NDArray[np.bool_]
 # periodic; it is returned as it is.
 _MIN_SAMPLES = 64
 
+#: Most electrodes a chirp-triggered event reached in the validation. The
+#: 30 unguarded events inside the 23 labelled chirps (of 43) that triggered
+#: in the two 2022 tube trials reached 1-4 of 11 electrodes; no chirp
+#: triggered in the 2019 trials, and the two events inside 2020-06-03 chirp
+#: boxes are clicks, on 6 and 14 of 15 electrodes. Over the whole 2022
+#: recordings (2 x 4 h, 11 electrodes) the events on 5-7 electrodes are the
+#: trials' periodic interference (97% with a partner exactly 1 s away) or
+#: clicks; none of the 19 others shows a chirp. The guard needs
+#: ``coincidence * n_electrodes`` to exceed it.
+MAX_CHIRP_ELECTRODES = 4
+
+
+#: Least ``isolated_threshold`` [robust sd of the high band] that left every
+#: chirp intact in the validation (none of 335 labelled chirps touched; 24
+#: per channel still repaired 12 of them). Setting ``isolated_threshold`` to
+#: ``threshold`` would switch the guard off, so lower values are refused.
+MIN_ISOLATED_THRESHOLD = 48.0
+
+
+class TooFewElectrodesError(ValueError):
+    """The recording has too few electrodes for guarded click removal."""
+
 
 @dataclass(frozen=True, slots=True)
 class ClickRemoval:
     """What counts as a click, and how it is repaired.
 
-    The defaults are wavetracker's ``ClickConfig``, measured there on field
-    recordings of weakly electric fish and on lab recordings with known
-    identities. The configuration is frozen, validated on construction and
-    round-trips through JSON (`to_dict` / `from_dict`), so it can be stored
-    in model bundles.
+    The detection and repair defaults are wavetracker's ``ClickConfig``,
+    measured there on field recordings of weakly electric fish and on lab
+    recordings with known identities. The electrode-coincidence guard
+    (``coincidence``, ``isolated_threshold``) is chirpdetector's and cannot
+    be switched off; it needs `min_electrodes` electrodes. The configuration
+    is frozen, validated on construction and round-trips through JSON
+    (`to_dict` / `from_dict`), so it can be stored in model bundles.
 
     Parameters
     ----------
@@ -96,10 +145,12 @@ class ClickRemoval:
         noise never does.
     extent_threshold
         A click lasts for as long as it stays above this many.
-    high_band
-        Clicks are searched above this fraction of the sampling rate ...
-    high_band_edge
-        ... reached over this further fraction, with a raised-sine edge.
+    high_band_hz
+        Clicks are searched above this frequency ...
+    high_band_edge_hz
+        ... reached over this further band, with a raised-sine edge. The
+        sampling rate's Nyquist frequency must be at least
+        ``high_band_hz + high_band_edge_hz`` (see `min_samplerate_hz`).
     max_duration_s
         Events longer than this are signals, not clicks.
     guard_s
@@ -134,23 +185,24 @@ class ClickRemoval:
         ``max_duration_s``, so that a long event touching a block is seen
         whole enough to be told from a click.
     coincidence
-        Guard for chirps, not in audian: the fraction of the electrodes a
-        click must reach (at ``threshold``, within one event) to be
-        repaired on all of them. An event on fewer electrodes is repaired
-        only where it reaches ``isolated_threshold``. The harmonics of a
-        loud chirp reach the high band only on the electrodes next to the
-        fish, static from the amplifier or the water reaches most of them.
-        0 (the default) repairs every channel on its own, as audian does.
+        Guard for chirps, not in audian, and mandatory: the fraction of the
+        electrodes a click must reach (at ``threshold``, within one event)
+        to be repaired on all of them, in [0.5, 1]. An event on fewer
+        electrodes is repaired only where it reaches ``isolated_threshold``.
+        The harmonics of a loud chirp reach the high band only on the
+        electrodes next to the fish; static from the amplifier or the water
+        reaches most of them. Higher values protect chirps on smaller grids
+        (see `min_electrodes`) but leave more clicks.
     isolated_threshold
         What a click on fewer than ``coincidence`` of the electrodes must
         reach, in robust standard deviations of the high band; at least
-        ``threshold`` when the guard is on, unused when it is off.
+        ``threshold`` and `MIN_ISOLATED_THRESHOLD` (48).
     """
 
     threshold: float = 12.0
     extent_threshold: float = 8.0
-    high_band: float = 0.2
-    high_band_edge: float = 0.05
+    high_band_hz: float = 4000.0
+    high_band_edge_hz: float = 1000.0
     max_duration_s: float = 0.5
     guard_s: float = 0.002
     resolution_s: float = 0.001
@@ -164,12 +216,28 @@ class ClickRemoval:
     sample_stride: int = 16
     block_s: float = 2.0
     margin_s: float = 0.5
-    coincidence: float = 0.0
+    coincidence: float = 0.5
     isolated_threshold: float = 48.0
 
     def __post_init__(self) -> None:
         _canonicalize(self)
         _validate(self)
+
+    @property
+    def min_electrodes(self) -> int:
+        """Fewest electrodes the guard protects chirps on.
+
+        An event must reach ``ceil(coincidence * n)`` electrodes to be
+        repaired everywhere; this exceeds `MAX_CHIRP_ELECTRODES` from
+        ``floor(MAX_CHIRP_ELECTRODES / coincidence) + 1`` electrodes on
+        (9 for ``coincidence=0.5``, 5 for 1.0).
+        """
+        return math.floor(MAX_CHIRP_ELECTRODES / self.coincidence + 1e-9) + 1
+
+    @property
+    def min_samplerate_hz(self) -> float:
+        """Lowest sampling rate whose Nyquist frequency holds the search band."""
+        return 2.0 * (self.high_band_hz + self.high_band_edge_hz)
 
     def block_samples(self, samplerate_hz: float) -> int:
         """Length of a block in samples (at least 64)."""
@@ -190,12 +258,29 @@ class ClickRemoval:
         Missing keys take their defaults; unknown keys raise, so that a
         bundle written by a newer version is not silently misread.
         """
+        renamed = sorted(set(data) & set(_RENAMED))
+        if renamed:
+            msg = "; ".join(f"{key}: {_RENAMED[key]}" for key in renamed)
+            raise ValueError(f"outdated ClickRemoval keys: {msg}")
         known = {f.name for f in fields(cls)}
         unknown = set(data) - known
         if unknown:
             msg = f"unknown ClickRemoval keys: {sorted(unknown)}"
             raise ValueError(msg)
         return cls(**data)
+
+
+#: Keys of older configurations and what replaced them.
+_RENAMED = {
+    "high_band": (
+        "a fraction of the sampling rate, replaced by high_band_hz "
+        "(0.2 at 20 kHz is high_band_hz=4000)"
+    ),
+    "high_band_edge": (
+        "a fraction of the sampling rate, replaced by high_band_edge_hz "
+        "(0.05 at 20 kHz is high_band_edge_hz=1000)"
+    ),
+}
 
 
 def _is_real(value: object) -> TypeGuard[int | float | np.integer | np.floating]:
@@ -225,8 +310,8 @@ def _validate(cfg: ClickRemoval) -> None:
     positive = (
         "threshold",
         "extent_threshold",
-        "high_band",
-        "high_band_edge",
+        "high_band_hz",
+        "high_band_edge_hz",
         "max_duration_s",
         "resolution_s",
         "line_width_hz",
@@ -248,12 +333,6 @@ def _validate(cfg: ClickRemoval) -> None:
             f"threshold ({cfg.threshold})"
         )
         raise ValueError(msg)
-    if cfg.high_band + cfg.high_band_edge > 0.5:
-        msg = (
-            "high_band + high_band_edge must be at most 0.5 (Nyquist), got "
-            f"{cfg.high_band} + {cfg.high_band_edge}"
-        )
-        raise ValueError(msg)
     if not 0 < cfg.floor_quantile <= 1:
         msg = f"floor_quantile must lie in (0, 1], got {cfg.floor_quantile!r}"
         raise ValueError(msg)
@@ -261,13 +340,19 @@ def _validate(cfg: ClickRemoval) -> None:
     if not isinstance(stride, int) or isinstance(stride, bool) or stride < 1:
         msg = f"sample_stride must be a positive integer, got {stride!r}"
         raise ValueError(msg)
-    if not 0 <= cfg.coincidence <= 1:
-        msg = f"coincidence must lie in [0, 1], got {cfg.coincidence!r}"
+    if not 0.5 <= cfg.coincidence <= 1:
+        msg = (
+            f"coincidence must lie in [0.5, 1], got {cfg.coincidence!r}: the "
+            "electrode-coincidence guard is mandatory, since without it loud "
+            "chirps are repaired as clicks"
+        )
         raise ValueError(msg)
-    if cfg.coincidence > 0 and cfg.isolated_threshold < cfg.threshold:
+    least_isolated = max(cfg.threshold, MIN_ISOLATED_THRESHOLD)
+    if cfg.isolated_threshold < least_isolated:
         msg = (
             f"isolated_threshold ({cfg.isolated_threshold}) must be at least "
-            f"threshold ({cfg.threshold}) when the coincidence guard is on"
+            f"{least_isolated} (threshold, and {MIN_ISOLATED_THRESHOLD}): a "
+            "lower bar repairs loud chirps on the electrodes next to the fish"
         )
         raise ValueError(msg)
     if cfg.margin_s < cfg.max_duration_s:
@@ -495,6 +580,23 @@ class _Search:
     size: int
 
 
+def _high_band_gain(
+    freqs_hz: NDArray[np.floating[Any]], samplerate_hz: float, cfg: ClickRemoval
+) -> NDArray[np.float64]:
+    """Gain of the click search band: 0 below ``high_band_hz``, 1 above
+    ``high_band_hz + high_band_edge_hz``, a raised sine between them.
+
+    A smooth edge, because a sharp one would ring around the clicks.
+    Computed in fractions of the sampling rate, as audian does, so that at
+    20 kHz (4000 / 20000 is exactly the double 0.2) the gain, and with it
+    every result, is bit-identical to audian's.
+    """
+    band = cfg.high_band_hz / samplerate_hz
+    edge = cfg.high_band_edge_hz / samplerate_hz
+    position = np.clip((freqs_hz / samplerate_hz - band) / edge, 0, 1)
+    return np.asarray(np.sin(0.5 * np.pi * position) ** 2, dtype=np.float64)
+
+
 def _search(
     x: NDArray[np.floating[Any]], samplerate_hz: float, cfg: ClickRemoval
 ) -> _Search | None:
@@ -512,9 +614,7 @@ def _search(
     df_hz = rate / n_fft
     narrow = power > spectral_floor(power, df_hz, cfg) * 10 ** (cfg.line_margin_db / 10)
     freqs = np.arange(len(power)) * df_hz
-    # a smooth edge: a sharp one would ring around the clicks
-    position = np.clip((freqs / rate - cfg.high_band) / cfg.high_band_edge, 0, 1)
-    gain = np.sin(0.5 * np.pi * position) ** 2
+    gain = _high_band_gain(freqs, rate, cfg)
     high = np.asarray(scipy.fft.irfft(spectrum * np.where(narrow, 0.0, gain), n=n_fft))
     # round-off of the transform is not noise: digital silence stays silent
     hot, strong, size = _hot_bins(np.where(x64 == 0, 0.0, high[:n]), rate, cfg)
@@ -536,17 +636,17 @@ def _repaired(
     return _repair(search.x, tonal[:n], mask, width), mask
 
 
-def clean_channel(
+def _clean_channel(
     x: NDArray[np.floating[Any]],
     samplerate_hz: float,
     config: ClickRemoval | None = None,
 ) -> tuple[NDArray[np.float64], BoolArray]:
     """Repair the clicks in one channel's block ``x`` (samples,).
 
-    This is the algorithm on one block as it is given; the result depends on
-    where the block starts and ends. Use `remove_clicks` or `clean_span` for
-    recordings. A single channel is its own electrode set, so
-    ``coincidence`` changes nothing here.
+    The unguarded algorithm on one block as it is given (audian's, kept for
+    testing the port); the result depends on where the block starts and
+    ends. Private on purpose: without the electrode-coincidence guard it
+    repairs loud chirps. Use `remove_clicks`, `clean_span` or `read_clean`.
 
     Parameters
     ----------
@@ -565,6 +665,7 @@ def clean_channel(
         everywhere when nothing was repaired.
     """
     cfg = ClickRemoval() if config is None else config
+    _check_samplerate(samplerate_hz, cfg)
     search = _search(x, samplerate_hz, cfg)
     if search is None:
         return np.asarray(x, dtype=np.float64), np.zeros(len(x), dtype=bool)
@@ -682,9 +783,9 @@ def _blocks(
 
 def _runs_to_repair(found: list[_Search | None], cfg: ClickRemoval) -> list[BoolArray]:
     """Per electrode, the click runs of one block to repair."""
-    empty = np.zeros(0, dtype=bool)
-    if cfg.coincidence == 0 or len(found) < 2 or any(s is None for s in found):
-        return [empty if s is None else s.hot for s in found]
+    if any(s is None for s in found):
+        # A block too short to search: None on every electrode alike.
+        return [np.zeros(0, dtype=bool) for _ in found]
     searches = [s for s in found if s is not None]
     hot = np.stack([s.hot for s in searches])
     strong = np.stack([s.strong for s in searches])
@@ -759,6 +860,62 @@ def _clean_range(
     return out, mask
 
 
+def can_remove_clicks(
+    n_electrodes: int,
+    config: ClickRemoval | None = None,
+    *,
+    samplerate_hz: float | None = None,
+) -> bool:
+    """Whether a recording can be cleaned safely.
+
+    It needs at least ``config.min_electrodes`` electrodes and, when
+    ``samplerate_hz`` is given, a sampling rate of at least
+    ``config.min_samplerate_hz``. Pipelines should skip click removal (with
+    a warning) when this is False, rather than call `remove_clicks`, which
+    raises `TooFewElectrodesError` or `ValueError`.
+    """
+    cfg = ClickRemoval() if config is None else config
+    if samplerate_hz is not None and not samplerate_hz >= cfg.min_samplerate_hz:
+        return False
+    return int(n_electrodes) >= cfg.min_electrodes
+
+
+def _check_electrodes(n_electrodes: int, cfg: ClickRemoval) -> None:
+    if n_electrodes >= cfg.min_electrodes:
+        return
+    if n_electrodes == 1:
+        msg = (
+            "click removal needs a multi-electrode recording: on a single "
+            "channel a click and a loud chirp's harmonics cannot be told apart, "
+            "and the chirp would be repaired as a click. Skip click removal "
+            "for single-channel data."
+        )
+    else:
+        msg = (
+            f"click removal needs at least {cfg.min_electrodes} electrodes for "
+            f"coincidence={cfg.coincidence} (got {n_electrodes}): on fewer, a "
+            f"loud chirp (seen on up to {MAX_CHIRP_ELECTRODES} electrodes) can "
+            "pass the coincidence guard and be repaired as a click. Skip click "
+            "removal for this recording, or raise `coincidence` (fewer clicks "
+            "removed) if the grid is only slightly too small."
+        )
+    raise TooFewElectrodesError(msg)
+
+
+def _check_samplerate(samplerate_hz: float, cfg: ClickRemoval) -> None:
+    if not (math.isfinite(samplerate_hz) and samplerate_hz > 0):
+        msg = f"samplerate_hz must be positive, got {samplerate_hz!r}"
+        raise ValueError(msg)
+    if samplerate_hz < cfg.min_samplerate_hz:
+        msg = (
+            f"clicks are searched up to {cfg.high_band_hz + cfg.high_band_edge_hz:g} "
+            f"Hz (high_band_hz + high_band_edge_hz), above the Nyquist frequency "
+            f"of a {samplerate_hz:g} Hz recording: click removal needs at least "
+            f"{cfg.min_samplerate_hz:g} Hz"
+        )
+        raise ValueError(msg)
+
+
 def _check_samples(samples: NDArray[Any], samplerate_hz: float) -> None:
     if samples.ndim != 2:
         msg = f"samples must be 2-D (n_samples, n_electrodes), got {samples.shape}"
@@ -766,9 +923,6 @@ def _check_samples(samples: NDArray[Any], samplerate_hz: float) -> None:
     if not np.issubdtype(samples.dtype, np.floating):
         msg = f"samples must be floating point, got {samples.dtype}"
         raise TypeError(msg)
-    if not (math.isfinite(samplerate_hz) and samplerate_hz > 0):
-        msg = f"samplerate_hz must be positive, got {samplerate_hz!r}"
-        raise ValueError(msg)
 
 
 def remove_clicks[T: np.floating[Any]](
@@ -807,9 +961,20 @@ def remove_clicks[T: np.floating[Any]](
         input's dtype, and a boolean ``(n_samples, n_electrodes)`` mask of
         the repaired samples. ``cleaned`` equals ``samples`` exactly wherever
         ``mask`` is False.
+
+    Raises
+    ------
+    TooFewElectrodesError
+        If ``samples`` has fewer than ``config.min_electrodes`` electrodes
+        (always for single-channel data); see `can_remove_clicks`.
+    ValueError
+        If ``samplerate_hz`` is below ``config.min_samplerate_hz``: the
+        search band would reach past the Nyquist frequency.
     """
     _check_samples(samples, samplerate_hz)
     cfg = ClickRemoval() if config is None else config
+    _check_samplerate(samplerate_hz, cfg)
+    _check_electrodes(samples.shape[1], cfg)
     if start_sample < 0:
         msg = f"start_sample must be >= 0, got {start_sample}"
         raise ValueError(msg)
@@ -850,9 +1015,18 @@ def clean_span[T: np.floating[Any]](
         ``(cleaned, mask)`` for recording samples ``[plan.start,
         plan.stop)``, equal to the same samples of `remove_clicks` on the
         whole recording.
+
+    Raises
+    ------
+    TooFewElectrodesError
+        If there are fewer than ``config.min_electrodes`` electrodes.
+    ValueError
+        If ``samplerate_hz`` is below ``config.min_samplerate_hz``.
     """
     _check_samples(samples, samplerate_hz)
     cfg = ClickRemoval() if config is None else config
+    _check_samplerate(samplerate_hz, cfg)
+    _check_electrodes(samples.shape[1], cfg)
     if samples.shape[0] != plan.n_read:
         msg = (
             f"expected {plan.n_read} samples for clean plan "
@@ -903,6 +1077,15 @@ def read_clean(
     -------
     tuple
         ``(cleaned, mask)``, as `clean_span`.
+
+    Raises
+    ------
+    TooFewElectrodesError
+        If the recording has fewer than ``config.min_electrodes``
+        electrodes (always for single-channel data); see
+        `can_remove_clicks`.
+    ValueError
+        If its sampling rate is below ``config.min_samplerate_hz``.
     """
     rate = float(recording.samplerate_hz)
     plan = plan_clean(start_sample, stop_sample, recording.n_samples, rate, config)

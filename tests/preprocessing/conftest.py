@@ -2,8 +2,11 @@
 
 Two families: audian's own test signals (a 700 Hz tone, Gaussian noise of
 1e-3, impulses of 0.2 ms decay), kept so that the ported tests assert what
-they asserted there; and a small grid recording with two chirping fish,
-built with gridtools, for what matters here: that chirps survive.
+they asserted there, here laid out on a grid of 9 or 15 electrodes; and a
+grid recording with two chirping fish, built with gridtools, for what
+matters here: that chirps survive. Click removal refuses grids smaller
+than ``ClickRemoval().min_electrodes`` (9), so every multi-electrode
+signal has at least 9.
 """
 
 from __future__ import annotations
@@ -59,21 +62,38 @@ def holes(n: int, at: tuple[int, ...] | list[int]) -> NDArray[np.bool_]:
     return hole
 
 
-def channels(n: int = N) -> NDArray[np.float64]:
-    """Three channels: clicks on a tone, clicks before a tone, plain noise.
+#: Weak clicks (0.05, 22.8 robust sd of the high band: above `threshold`,
+#: below `isolated_threshold`) on electrodes 3 and up, i.e. on 6 of 9 or 12
+#: of 15 electrodes: repaired by coincidence.
+WEAK_MANY = (int(1.6 * RATE), int(3.9 * RATE))
+#: The same weak click on electrode 3 alone: left by the guard.
+WEAK_ONE = int(5.2 * RATE)
+WEAK = 0.05
 
-    ``n`` frames, with the clicks of the first `N` repeated every `N`.
+
+def channels(n: int = N, n_electrodes: int = 9) -> NDArray[np.float64]:
+    """audian's three channels on a grid of ``n_electrodes`` (at least 4).
+
+    Electrode 0: strong clicks (1.0) on a tone; 1: a strong click before a
+    tone starts; 2: plain noise; 3 and up: noise with the weak clicks
+    `WEAK_MANY` on all of them and `WEAK_ONE` on electrode 3 only. ``n``
+    samples, with the clicks of the first `N` repeated every `N`.
     """
     at = [a + k for k in range(0, n, N) for a in CLICKS if a + k < n]
     late = [int(2.5 * RATE) + k for k in range(0, n, N)]
-    return np.stack(
-        [
-            noise(n, 1) + tone(n) + sum(click(n, a) for a in at),
-            noise(n, 2) + tone(n, start=3.0) + sum(click(n, a) for a in late),
-            noise(n, 4),
-        ],
-        axis=1,
-    )
+    many = [a + k for k in range(0, n, N) for a in WEAK_MANY if a + k < n]
+    one = [WEAK_ONE + k for k in range(0, n, N) if WEAK_ONE + k < n]
+    columns = [
+        noise(n, 1) + tone(n) + sum(click(n, a) for a in at),
+        noise(n, 2) + tone(n, start=3.0) + sum(click(n, a) for a in late),
+        noise(n, 4),
+    ]
+    for e in range(3, n_electrodes):
+        x = noise(n, 10 + e) + sum(click(n, a, WEAK) for a in many)
+        if e == 3:
+            x = x + sum(click(n, a, WEAK) for a in one)
+        columns.append(x)
+    return np.stack(columns, axis=1)
 
 
 @pytest.fixture(scope="session")
@@ -89,23 +109,32 @@ def sig() -> SimpleNamespace:
         noise=noise,
         tone=tone,
         holes=holes,
+        WEAK=WEAK,
+        WEAK_MANY=WEAK_MANY,
+        WEAK_ONE=WEAK_ONE,
     )
 
 
 @pytest.fixture(scope="session")
-def three_channels() -> NDArray[np.float64]:
-    """`channels` over twice `N` (12 s)."""
-    return channels(2 * N)
+def grid() -> NDArray[np.float64]:
+    """`channels` on 9 electrodes over twice `N` (12 s)."""
+    return channels(2 * N, 9)
+
+
+@pytest.fixture(scope="session")
+def grid15() -> NDArray[np.float64]:
+    """`channels` on 15 electrodes over `N` (6 s)."""
+    return channels(N, 15)
 
 
 @dataclass(frozen=True)
 class ChirpScene:
-    """Two chirping fish on four electrodes, with and without clicks.
+    """Two chirping fish on a grid, with and without clicks.
 
     Attributes
     ----------
     truth
-        Fish and noise, float32 ``(n, 4)``.
+        Fish and noise, float32 ``(n, n_electrodes)``.
     signal
         ``truth`` plus the clicks.
     boxes
@@ -130,17 +159,21 @@ def chirp_scene(
     loudness: float,
     harmonics: Harmonics = MEASURED_HARMONICS,
     seed: int = 7,
-    n_electrodes: int = 4,
+    n_electrodes: int = 9,
+    dead: tuple[int, ...] = (),
 ) -> ChirpScene:
     """8 s, fish at 900 and 700 Hz, each chirping small, big, small, big.
 
     On ``n_electrodes`` (at least 4; those beyond the fourth pick up both
-    fish at 2% of their peak). Fish 0 is loudest on electrode 0, ``loudness`` times the robust sd of
-    the high band (above 0.2 fs) of the pink noise (sd 1); fish 1 is 4x
-    weaker, loudest on electrode 3. Small chirps: +60 Hz, 10 ms FWHM;
-    big: +300 Hz, 30 ms. Clicks (0.5 ms decay, 300-3000x the noise sd) sit
-    at least 0.3 s from every chirp, except one at the peak of fish 0's
-    second big chirp, on electrodes 0 and 1.
+    fish at 2% of their peak). Fish 0 is loudest on electrode 0,
+    ``loudness`` times the robust sd of the high band (above 0.2 fs) of
+    the pink noise (sd 1); fish 1 is 4x weaker, loudest on electrode 3.
+    Small chirps: +60 Hz, 10 ms FWHM; big: +300 Hz, 30 ms. Clicks (0.5 ms
+    decay) sit at least 0.3 s from every chirp, except one at the peak of
+    fish 0's second big chirp: strong ones (300-3000x the noise sd) on one
+    to four electrodes, and a weak one (25x, about 25 robust sd of the
+    high band: below `isolated_threshold`) on every live electrode at 6.3 s.
+    Electrodes in ``dead`` are digital silence throughout.
     """
     rng = np.random.default_rng(seed)
     n = int(8 * RATE)
@@ -174,15 +207,19 @@ def chirp_scene(
     signal = truth.copy()
     clicks: list[tuple[int, tuple[int, ...]]] = []
     at_chirp = 3  # fish 0's second big chirp, at 5.2 s
-    times = [0.4, 2.0, 3.3, 4.6, 7.6, peaks[at_chirp]]
+    times = [0.4, 2.0, 3.3, 4.6, 7.6, peaks[at_chirp], 6.3]
     electrodes = [(0,), (1, 2), (3,), (0, 1, 2, 3), (2,), (0, 1)]
+    live = tuple(e for e in range(n_electrodes) if e not in dead)
+    electrodes.append(live)
     for k, (tc, els) in enumerate(zip(times, electrodes, strict=True)):
         at = int(tc * RATE)
-        amplitude = 300.0 * 10 ** (k % 2)
+        amplitude = 25.0 if k == len(times) - 1 else 300.0 * 10 ** (k % 2)
         shape = click(n, at, amplitude, tau=0.0005)
         for el in els:
             signal[:, el] += shape
         clicks.append((at, els))
+    truth[:, list(dead)] = 0.0
+    signal[:, list(dead)] = 0.0
     return ChirpScene(
         truth.astype(np.float32),
         signal.astype(np.float32),
@@ -196,26 +233,39 @@ def chirp_scene(
 @pytest.fixture(scope="session")
 def make_chirp_scene() -> Callable[..., ChirpScene]:
     """Factory of `ChirpScene` (cached per loudness)."""
-    cache: dict[tuple[float, int, int], ChirpScene] = {}
+    cache: dict[tuple[float, int, int, tuple[int, ...]], ChirpScene] = {}
 
     def make(
         loudness: float,
         harmonics: Harmonics = MEASURED_HARMONICS,
-        n_electrodes: int = 4,
+        n_electrodes: int = 9,
+        dead: tuple[int, ...] = (),
     ) -> ChirpScene:
-        key = (loudness, id(harmonics), n_electrodes)
+        key = (loudness, id(harmonics), n_electrodes, dead)
         if key not in cache:
-            cache[key] = chirp_scene(loudness, harmonics, n_electrodes=n_electrodes)
+            cache[key] = chirp_scene(
+                loudness, harmonics, n_electrodes=n_electrodes, dead=dead
+            )
         return cache[key]
 
     return make
 
 
 @pytest.fixture(scope="session")
-def three_channels_cleaned(
-    three_channels: NDArray[np.float64],
+def grid_cleaned(
+    grid: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
-    """`three_channels` cleaned whole: the reference for chunked cleaning."""
+    """`grid` cleaned whole: the reference for chunked cleaning."""
     from chirpdetector.preprocessing import remove_clicks
 
-    return remove_clicks(three_channels, RATE)
+    return remove_clicks(grid, RATE)
+
+
+@pytest.fixture(scope="session")
+def grid15_cleaned(
+    grid15: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """`grid15` cleaned whole."""
+    from chirpdetector.preprocessing import remove_clicks
+
+    return remove_clicks(grid15, RATE)
