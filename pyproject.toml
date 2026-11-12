@@ -1,98 +1,63 @@
-[tool.poetry]
+[project]
 name = "chirpdetector"
-version = "0.0.1"
-description = "Detect brief communication signals of weakly electric fish in the frequency domain"
-authors = ["Patrick Weygoldt <patrick@weygoldt.com>"]
-license = "MIT"
+version = "2.0.0.dev0"
+description = "Detect chirps of wave-type weakly electric fish in grid recordings and assign them to their emitters."
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = ">=3.11,<3.13"
-numpy = "^1.26.1"
-matplotlib = "^3.8.0"
-scikit-learn = "^1.3.2"
-toml = "^0.10.2"
-pandas = "^2.1.2"
-pydantic = "^2.4.2"
-rich = "^13.6.0"
-click = "^8.1.7"
-rich-click = "^1.7.1"
-gridtools = {path = "../gridtools", develop = true}
-albumentations = "^1.3.1"
-h5py = "^3.10.0"
-
-[tool.poetry.group.dev.dependencies]
-pre-commit = "^3.5.0"
-pytest-coverage = "^0.0"
-pytest = "^7.4.3"
-ruff = "^0.1.6"
-pyright = "^1.1.337"
-mkdocs-glightbox = "^0.3.5"
-mkdocs-click = "^0.8.1"
-
-[tool.poetry.scripts]
-chirpdetector = "chirpdetector.chirpdetector:chirpdetector"
-cpd = "chirpdetector.chirpdetector:chirpdetector"
-testeval = "chirpdetector.evaluation.eval_detection:eval_detection_cli"
-
-[tool.ruff]
-line-length = 79
-
-[tool.ruff.lint]
-select = [
-    "W", # pycodestyle
-    "E", # pycodestyle
-    "F", # Pyflakes
-    "UP", # pyupgrade
-    "B", # flake8-bugbear
-    "SIM", # flake8-simplify
-    "ANN", # flake8-annotations
-    "A", # flake8-builtins
-    "COM", # flake8-commas
-    "C4", # flake8-comprehensions
-    "EM", # flake8-error-msg
-    "EXE", # flake8-executable
-    "ICN", # flake8-import-conventions
-    "PT", # flake8-pytest-style
-    "Q", # flake8-quotes
-    "RET", # flake8-return
-    "SIM", # flake8-simplify
-    "ARG", # flake8-unused-arguments
-    "PTH", # flake8-use-pathlib
-    "PD", # pandas-vet
-    "PL", # pylint
-    "TRY", # tryceratops
-    "NPY", # numpy-specific
-    "I", # isort
-    "C90", # complexity (McCabe)
-    "N", # pep8-naming
-    "D", # pydocstyle
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+authors = [{ name = "Patrick Weygoldt", email = "patrick@weygoldt.com" }]
+keywords = ["electric fish", "chirps", "object detection", "neuroethology"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-ignore = [
-    "COM812", # missing trailing comma
-    "TD002", # missing todo author
-    "TD003", # missing todo link
+dependencies = [
+    "gridtools",
+    "numpy>=2.5",
 ]
 
-[tool.ruff.lint.pydocstyle]
-convention = "numpy"
+[project.urls]
+Repository = "https://github.com/weygoldt/chirpdetector"
 
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-line-ending = "auto"
+[dependency-groups]
+dev = [
+    "hypothesis>=6.170",
+    "pre-commit>=4.7",
+    "pyright>=1.1.414",
+    "pytest>=9.2",
+    "pytest-cov>=7.1",
+    "ruff>=0.17",
+]
 
-[tool.black]
-line-length = 79
-
-[tool.pyright]
-include = ["chirpdetector", "tests"]
-defineConstant = { DEBUG = true }
-reportMissingImports = true
-reportMissingTypeStubs = false
-pythonVersion = "3.11"
-pythonPlatform = "Linux"
+[tool.uv.sources]
+# "gridtools" on PyPI is an unrelated package; always resolve the sibling checkout.
+gridtools = { path = "../gridtools", editable = true }
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.13.7,<0.14"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--import-mode=importlib"]
+markers = [
+    "slow: long-running tests",
+    "gpu: tests that need a CUDA device (skipped if absent)",
+    "data: tests that need the recordings on /mnt/data2 (skipped if absent)",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "NPY", "RUF", "PT"]
+ignore = ["E501"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"

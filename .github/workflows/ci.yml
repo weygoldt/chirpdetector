@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    defaults:
+      run:
+        working-directory: chirpdetector
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: chirpdetector
+      # chirpdetector resolves gridtools from the sibling checkout ../gridtools.
+      - uses: actions/checkout@v7
+        with:
+          repository: weygoldt/gridtools
+          ref: v2
+          path: gridtools
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: ${{ matrix.python-version }}
+          working-directory: chirpdetector
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run pytest -q --cov=chirpdetector --cov-report=term
