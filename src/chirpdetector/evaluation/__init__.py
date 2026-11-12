@@ -33,7 +33,11 @@ report
     :func:`evaluate`, :class:`EvaluationResult`, :func:`attach_to_bundle`.
 """
 
-from chirpdetector.evaluation.assignment import delta_f_at, df_bins
+from chirpdetector.evaluation.assignment import (
+    assign_by_frequency,
+    delta_f_at,
+    df_bins,
+)
 from chirpdetector.evaluation.detection import (
     average_precision,
     bootstrap_regions,
@@ -76,6 +80,7 @@ __all__ = [
     "Scope",
     "admissible_pairs",
     "assign",
+    "assign_by_frequency",
     "attach_to_bundle",
     "average_precision",
     "bootstrap_regions",

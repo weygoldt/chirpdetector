@@ -5,8 +5,13 @@ Predictions
 One row per detected chirp: the box ``t_start_s, t_end_s, f_low_hz,
 f_high_hz``, a detector ``score`` and the ``recording`` it belongs to;
 optionally the assigned emitter ``emitter_id`` (a track id, nullable
-integer; NA = no emitter assigned) and its probability ``emitter_prob``.
-Other columns (e.g. v1's ``batch``) are kept.
+integer; NA = no emitter assigned) and its probability ``emitter_prob``,
+and the emitter's EOD frequency ``emitter_hz`` predicted by models with an
+emitter head (NaN = none; turned into ``emitter_id`` by
+:func:`~chirpdetector.evaluation.assignment.assign_by_frequency`), and the
+``model_sha256`` of the weights that made the predictions (see
+:func:`~chirpdetector.evaluation.report.attach_to_bundle`). Other columns
+(e.g. v1's ``batch``) are kept.
 
 Ground truth
 ------------
@@ -249,13 +254,15 @@ def validate_predictions(
     -------
     A copy with a fresh index; box columns and ``score`` as float64,
     ``recording`` as str, ``emitter_id`` as Int64 (all NA if absent) and
-    ``emitter_prob`` as float64 (all NaN if absent).
+    ``emitter_prob`` as float64 (all NaN if absent); ``emitter_hz``, if
+    present, as float64.
 
     Raises
     ------
     ValueError
         On a missing column, a non-finite box or score, an inverted box, a
-        non-integral emitter id or an emitter probability outside [0, 1].
+        non-integral emitter id, an emitter probability outside [0, 1] or
+        an emitter frequency that is not positive.
     """
     df = predictions.copy().reset_index(drop=True)
     missing = [c for c in PREDICTION_COLUMNS if c not in df.columns]
@@ -293,6 +300,12 @@ def validate_predictions(
         df["emitter_prob"] = prob
     else:
         df["emitter_prob"] = np.full(len(df), np.nan)
+    if "emitter_hz" in df.columns:
+        emitter = floats(df["emitter_hz"])
+        if np.any(np.isinf(emitter)) or np.any(emitter[np.isfinite(emitter)] <= 0):
+            msg = "predictions: emitter_hz must be positive (or NaN)"
+            raise ValueError(msg)
+        df["emitter_hz"] = emitter
     return df
 
 

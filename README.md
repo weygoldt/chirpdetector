@@ -56,6 +56,53 @@ emitter accuracy, coverage, calibration and end-to-end metrics by ΔF. v1's
 pre-NMS boxes need `--nms-iou 0.2`. From Python, use
 `chirpdetector.evaluation.evaluate`.
 
+## Detector datasets
+
+A detector dataset is a directory with `dataset.json` (front end, tiling,
+sources, group-wise splits, per-image geometry, content hashes),
+`boxes.parquet` (chirp boxes and ignore regions in absolute time and
+frequency, with the emitter's EOD frequency), `images/*.png` and YOLO
+`labels/*.txt`. Builders write it with `chirpdetector.data.DatasetWriter`;
+the contract is documented in `chirpdetector.data.contract`. Check a
+dataset with
+
+```sh
+uv run chirpdetector dataset validate /mnt/data1/chirp_v2/datasets/sim_v1
+```
+
+## Training a detector
+
+```sh
+scripts/guarded --name train-r1 --mem 24G --vram 0.6 -- \
+    uv run chirpdetector train detector train.toml \
+        --dataset /mnt/data1/chirp_v2/datasets/sim_v1 --run-dir /mnt/data1/chirp_v2/runs/r1
+```
+
+The config (`chirpdetector.training.config`) selects the model (default
+YOLO26s), optimisation, augmentation (only optional time reversal; no
+vertical flips, colour jitter, rotation, scaling, translation or mosaic,
+which break the time and frequency axes of a spectrogram) and grouped
+k-fold cross-validation over the `train` groups; a final model is trained
+on all `train` groups with the `val` groups for early stopping. `--fold k`
+or `--fold final` trains a single fit. The run directory holds the
+resolved config, git SHAs (with dirty flags) of chirpdetector and
+gridtools, the `uv.lock` hash, the dataset hash, versions, hardware, the
+epoch curves and one model bundle per fit.
+
+**GPU memory.** The GPU is shared. Run training (and any GPU job) through
+the workspace's `scripts/guarded`: it caps RAM in a systemd scope and sets
+`CHIRP_MAX_VRAM_FRACTION`, which training and inference apply with
+`torch.cuda.set_per_process_memory_fraction` before building a model (the
+smaller of it and the config's `max_vram_fraction`). Batch sizes are fixed
+in the config; AutoBatch is not used.
+
+**Bundles.** `chirpdetector bundle inspect BUNDLE` verifies the weights'
+sha256 and prints the model, front end, tiling, preprocessing, training
+provenance and attached metrics. Metrics are attached with
+`chirpdetector.evaluation.attach_to_bundle` and only for predictions made
+by the bundle's own weights (`chirpdetector.prediction` records their
+hash).
+
 ## Development
 
 chirpdetector depends on [gridtools](https://github.com/weygoldt/gridtools),
