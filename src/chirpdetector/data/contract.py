@@ -1422,11 +1422,35 @@ class Dataset:
 
     def boxes_of(self, image_id: str, kind: BoxKind = "chirp") -> pd.DataFrame:
         """Boxes of one image and kind, ordered by ``box_index``."""
-        mask = (_column(self.boxes, "image_id") == image_id) & (
-            _column(self.boxes, "kind") == kind
-        )
-        rows = cast("pd.DataFrame", self.boxes.loc[mask.to_numpy()])
-        return rows.sort_values("box_index", kind="stable").reset_index(drop=True)
+        rows = self._box_rows().get((image_id, kind))
+        if rows is None:
+            return self.boxes.iloc[:0].reset_index(drop=True)
+        return self.boxes.iloc[rows].reset_index(drop=True)
+
+    def _box_rows(self) -> dict[tuple[str, str], NDArray[np.intp]]:
+        """Row positions per (image, kind), ordered by ``box_index`` (cached)."""
+        cached = self.__dict__.get("_rows_cache")
+        if cached is None:
+            order = np.lexsort(
+                (
+                    _column(self.boxes, "box_index").to_numpy(),
+                    _column(self.boxes, "kind").to_numpy(dtype=object),
+                    _column(self.boxes, "image_id").to_numpy(dtype=object),
+                )
+            )
+            keys = list(
+                zip(
+                    _column(self.boxes, "image_id").to_numpy(dtype=object)[order],
+                    _column(self.boxes, "kind").to_numpy(dtype=object)[order],
+                    strict=True,
+                )
+            )
+            cached = {}
+            for position, key in zip(order.tolist(), keys, strict=True):
+                cached.setdefault((str(key[0]), str(key[1])), []).append(position)
+            cached = {k: np.asarray(v, dtype=np.intp) for k, v in cached.items()}
+            object.__setattr__(self, "_rows_cache", cached)
+        return cached
 
     def tracks_dir(self, source_id: str) -> Path | None:
         """Tracks directory of a source (resolved against the dataset dir)."""
