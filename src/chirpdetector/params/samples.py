@@ -95,6 +95,7 @@ __all__ = [
     "BoxSource",
     "SampleSet",
     "SceneRef",
+    "detector_overlap",
     "discover_scenes",
     "extract_samples",
     "load_samples",
@@ -857,6 +858,30 @@ def _identity(
     }
 
 
+def detector_overlap(
+    scenes: Sequence[SceneRef], detector: Bundle
+) -> dict[str, list[str]]:
+    """Scenes, per decoder split, that the detector trained or validated on.
+
+    The detector bundle records its dataset groups (``training.train_groups``
+    and ``val_groups``; for simulated scenes the group is the scene's source
+    id). A decoder trained on the detector's training scenes sees boxes the
+    detector fits better than on new scenes (recorded, expected); a decoder
+    validated or tested on them would be calibrated or scored on such
+    boxes, which `extract_samples` refuses.
+    """
+    groups = {
+        str(g)
+        for key in ("train_groups", "val_groups")
+        for g in detector.training.get(key, []) or []
+    }
+    out: dict[str, list[str]] = {s: [] for s in SPLITS}
+    for ref in scenes:
+        if ref.source_id in groups:
+            out[ref.split].append(ref.source_id)
+    return out
+
+
 def _resolve_device(device: str) -> str:
     if device == "auto":
         import torch
@@ -866,7 +891,10 @@ def _resolve_device(device: str) -> str:
 
 
 def _assemble(
-    directory: Path, identity: Mapping[str, Any], refs: Sequence[SceneRef]
+    directory: Path,
+    identity: Mapping[str, Any],
+    refs: Sequence[SceneRef],
+    extra: Mapping[str, Any] | None = None,
 ) -> SampleSet:
     """Concatenate the shards into ``samples.parquet`` and ``crops.npy``."""
     shards = directory / SHARDS_DIR
@@ -911,6 +939,7 @@ def _assemble(
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         **identity,
         "counts": counts,
+        **dict(extra or {}),
         "files": {
             TABLE_FILE: sha256_file(directory / TABLE_FILE),
             CROPS_FILE: sha256_file(directory / CROPS_FILE),
@@ -997,6 +1026,24 @@ def extract_samples(
     )
     directory = Path(out)
     say = progress or log.info
+    extra: dict[str, Any] = {}
+    if detector is not None:
+        overlap = detector_overlap(scenes, detector)
+        leaked = overlap["val"] + overlap["test"]
+        if leaked:
+            msg = (
+                f"{len(leaked)} val/test scenes of the decoder are training or "
+                f"validation scenes of the detector, e.g. {leaked[0]}; evaluate "
+                "the decoder on scenes the detector has not seen"
+            )
+            raise ValueError(msg)
+        extra["detector_overlap"] = {s: len(v) for s, v in overlap.items()}
+        if overlap["train"]:
+            say(
+                f"{len(overlap['train'])} of the decoder's train scenes are "
+                "detector training scenes (their boxes fit better than on new "
+                "scenes; val and test are clean)"
+            )
     if (directory / MANIFEST_FILE).is_file():
         existing = load_samples(directory)
         stored = {k: existing.manifest.get(k) for k in identity}
@@ -1081,7 +1128,7 @@ def extract_samples(
                 if nxt is not None:
                     queue.append(pool.submit(_prepare_scene, nxt, click))
                 handle(prepared)
-    result = _assemble(directory, identity, scenes)
+    result = _assemble(directory, identity, scenes, extra)
     pending_path.unlink(missing_ok=True)
     return result
 

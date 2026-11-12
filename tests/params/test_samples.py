@@ -14,6 +14,7 @@ from chirpdetector.bundle import Bundle
 from chirpdetector.params.samples import (
     SAMPLE_COLUMNS,
     BoxSource,
+    detector_overlap,
     discover_scenes,
     extract_samples,
     load_samples,
@@ -203,6 +204,32 @@ def test_detector_extraction_matches_predictions(
     assert (np.abs(matched["dt_match_s"].to_numpy(float)) <= 0.1).all()
     # every matched box is its chirp's footprint
     np.testing.assert_allclose(matched["t_start_s"], matched["box_t0_s"])
+    assert samples.manifest["detector_overlap"] == {"train": 0, "val": 0, "test": 0}
+
+
+def test_scenes_the_detector_saw_are_not_val_or_test(
+    params_scenes: Path, stub_detector: Bundle, tmp_path: Path
+) -> None:
+    """A decoder must not be calibrated or scored on the detector's own scenes."""
+    from dataclasses import replace
+
+    refs = discover_scenes([params_scenes])
+    test_id = next(r.source_id for r in refs if r.split == "test")
+    train_id = next(r.source_id for r in refs if r.split == "train")
+    seen = replace(
+        stub_detector,
+        training={"run_id": "stub", "train_groups": [test_id], "val_groups": []},
+    )
+    assert detector_overlap(refs, seen)["test"] == [test_id]
+    with pytest.raises(ValueError, match="val/test scenes of the decoder"):
+        extract_samples(refs, tmp_path / "x", detector=seen, workers=0, device="cpu")
+    assert not (tmp_path / "x").exists()
+    # the detector's training scenes may be the decoder's training scenes
+    fine = replace(
+        stub_detector,
+        training={"run_id": "stub", "train_groups": [], "val_groups": [train_id]},
+    )
+    assert detector_overlap(refs, fine) == {"train": [train_id], "val": [], "test": []}
 
 
 def test_natural_prior_weights(params_scenes: Path) -> None:
