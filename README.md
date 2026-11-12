@@ -144,9 +144,10 @@ simulated scenes, matches its boxes one-to-one to the true chirps (centre
 within 100 ms, overlapping frequency ranges) and trains on those *predicted*
 boxes: a params bundle is only valid with the detector it was trained with,
 whose weight hash it records (`predict_span` refuses another detector).
-Splits follow the detector datasets (seeds 0-1599 train, 1600-1799 val,
-1800-1999 test); by default only scenes on real background segments are used
-(`scene_background = "hybrid"`).
+A scene's split is the `train`/`val`/`test` directory it lies in (as
+`gridtools sim run` writes them, and as the detector datasets use them with
+`--split-dir`); `split = "train=0:1600,..."` assigns by seed instead. Only
+scenes on real background segments are used (`scene_background = "hybrid"`).
 
 ```sh
 scripts/guarded --name params --mem 12G --vram 0.1 -- \

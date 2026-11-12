@@ -39,9 +39,12 @@ A sample is ``usable`` (has a valid target) if it is matched to a chirp
 that is not truncated by the scene's edges and whose per-period truth is
 finite and not edge-clipped.
 
-Splits follow the detector datasets: by scene seed (`SplitRule`, default
-0-1599 train, 1600-1799 val, 1800-1999 test); a scene inside a directory
-named ``train``, ``val`` or ``test`` must agree with its seed's split.
+Splits come from the scene directories (`discover_scenes`): a scene in
+``.../train/``, ``.../val/`` or ``.../test/`` belongs to that split, as in
+the detector datasets built with ``--split-dir`` (seeds of later scene sets,
+e.g. train_v3's 2000-4999, lie outside the old 0-1999 seed ranges). A seed
+rule can be given instead; a scene in a split directory must then agree
+with it. Each scene's split is recorded in the manifest.
 
 Extraction is resumable: each scene is written to ``shards/`` first, and
 the sample set is assembled once every scene is done.
@@ -69,7 +72,7 @@ import pandas as pd
 
 from chirpdetector.bundle import Bundle
 from chirpdetector.data.contract import SPLITS, sha256_file
-from chirpdetector.data.scenes import DEFAULT_SPLIT, SplitRule, scene_id
+from chirpdetector.data.scenes import SplitRule, scene_id
 from chirpdetector.params.crops import (
     SCALAR_NAMES,
     CropConfig,
@@ -83,6 +86,7 @@ __all__ = [
     "BACKGROUNDS",
     "SAMPLES_FORMAT",
     "SAMPLE_COLUMNS",
+    "SPLIT_BY_DIRECTORY",
     "BoxSource",
     "SampleSet",
     "SceneRef",
@@ -90,6 +94,7 @@ __all__ = [
     "extract_samples",
     "load_samples",
     "match_predictions",
+    "parse_split",
 ]
 
 log = logging.getLogger(__name__)
@@ -272,9 +277,28 @@ background segment (``scene.json`` ``background.used``), only synthetic-noise
 scenes."""
 
 
+SPLIT_BY_DIRECTORY = "directory"
+"""`discover_scenes` split rule: the ``train``/``val``/``test`` directory a
+scene lies in (the layout ``gridtools sim run`` writes per split, e.g.
+``scenes/train_v3/{train,val,test}``; the detector datasets' ``--split-dir``)."""
+
+
+def parse_split(text: str | None) -> SplitRule | None:
+    """A split rule from its config form.
+
+    ``"directory"`` (or None) gives None: split by the scene's directory
+    (`SPLIT_BY_DIRECTORY`). Otherwise seed ranges or fractions as in
+    `chirpdetector.data.scenes.SplitRule.parse`, e.g.
+    ``"train=0:1600,val=1600:1800,test=1800:2000"``.
+    """
+    if text is None or text == SPLIT_BY_DIRECTORY:
+        return None
+    return SplitRule.parse(text)
+
+
 def discover_scenes(
     roots: Iterable[str | Path],
-    split: SplitRule = DEFAULT_SPLIT,
+    split: SplitRule | None = None,
     *,
     background: str = "any",
 ) -> list[SceneRef]:
@@ -286,8 +310,11 @@ def discover_scenes(
         Scene directories, directories of scenes, or directories of
         ``train``/``val``/``test`` scene directories.
     split
-        Seed -> split rule (default: 0-1599 train, 1600-1799 val,
-        1800-1999 test).
+        None (default): every scene goes to the split its directory is
+        named after (``.../train/002000`` is a train scene), whatever its
+        seed; scenes outside such a directory are refused. A `SplitRule`
+        assigns by seed (or root) instead, and a scene that also lies in a
+        split directory must agree with it.
     background
         ``"hybrid"`` keeps only scenes on a real background segment
         (``scene.json`` ``background.used`` true; the author's rule for the
@@ -298,8 +325,9 @@ def discover_scenes(
     FileNotFoundError
         If a root holds no scene.
     ValueError
-        If a scene's directory names a split other than its seed's, or two
-        scenes have the same source id.
+        If a scene's directory names a split other than its seed's, a scene
+        lies in no split directory (``split`` None), or two scenes have the
+        same source id.
     """
     infos: dict[Path, dict[str, Any]] = {}
     for root in roots:
@@ -310,10 +338,23 @@ def discover_scenes(
             raise FileNotFoundError(msg)
         for d in dirs:
             infos[d] = json.loads((d / "scene.json").read_text())
-    splits = split.assign_scenes({d: int(info["seed"]) for d, info in infos.items()})
     if background not in BACKGROUNDS:
         msg = f"background must be one of {BACKGROUNDS}, got {background!r}"
         raise ValueError(msg)
+    if split is None:
+        outside = sorted(str(d) for d in infos if d.parent.name not in SPLITS)
+        if outside:
+            msg = (
+                f"{len(outside)} scenes lie in no train/val/test directory, e.g. "
+                f"{outside[0]}; move them into split directories or give a seed "
+                "split (e.g. train=0:1600,val=1600:1800,test=1800:2000)"
+            )
+            raise ValueError(msg)
+        splits = {d: d.parent.name for d in infos}
+    else:
+        splits = split.assign_scenes(
+            {d: int(info["seed"]) for d, info in infos.items()}
+        )
     refs: list[SceneRef] = []
     seen: set[str] = set()
     for d, info in infos.items():
@@ -772,10 +813,13 @@ def _identity(
     spectrogram: SpectrogramConfig,
     preprocessing: Mapping[str, Any],
     detector: Bundle | None,
-    split: SplitRule,
     scenes: Sequence[SceneRef],
 ) -> dict[str, Any]:
-    """What determines a sample set's content (compared when resuming)."""
+    """What determines a sample set's content (compared when resuming).
+
+    The split of every scene is part of ``scenes``; how it was derived (by
+    directory or by seed) does not change the content.
+    """
     return {
         "crop": crop.to_dict(),
         "boxes": boxes.to_dict(),
@@ -789,7 +833,6 @@ def _identity(
             "run_id": detector.training.get("run_id"),
             "score_threshold": detector.score_threshold,
         },
-        "split": split.to_dict(),
         "truth": {"definition": "chirpdetector.params.truth", "pad_s": TRUTH_PAD_S},
         "scenes": [
             {
@@ -879,7 +922,6 @@ def extract_samples(
     detector: Bundle | None = None,
     spectrogram: SpectrogramConfig | None = None,
     preprocessing: Mapping[str, Any] | None = None,
-    split: SplitRule = DEFAULT_SPLIT,
     workers: int = 4,
     device: str = "auto",
     progress: Callable[[str], None] | None = None,
@@ -902,8 +944,6 @@ def extract_samples(
         Front end and preprocessing without a detector (default: the
         dataset builders' defaults, `SpectrogramConfig()` and click
         removal); must equal the detector's if both are given.
-    split
-        Recorded in the manifest (the scenes carry their split).
     workers
         Processes that read, clean and compute ground truth (the main
         process computes spectrograms, detections and crops).
@@ -944,7 +984,6 @@ def extract_samples(
         spectrogram=spectrogram,
         preprocessing=preprocessing,
         detector=detector,
-        split=split,
         scenes=scenes,
     )
     directory = Path(out)

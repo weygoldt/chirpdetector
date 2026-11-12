@@ -85,6 +85,7 @@ from chirpdetector.params.samples import (
     discover_scenes,
     extract_samples,
     load_samples,
+    parse_split,
 )
 from chirpdetector.params.truth import PARAMETERS
 
@@ -1020,9 +1021,13 @@ def _test_samples(
     device: str,
 ) -> SampleSet:
     """A sample set with the split's scenes, made like the bundle's training set."""
-    background = str(bundle.training.get("config", {}).get("scene_background", "any"))
+    trained = bundle.training.get("config", {})
+    background = str(trained.get("scene_background", "any"))
+    rule = parse_split(trained.get("split"))
     refs = [
-        r for r in discover_scenes(scenes, background=background) if r.split == split
+        r
+        for r in discover_scenes(scenes, rule, background=background)
+        if r.split == split
     ]
     if not refs:
         msg = f"no {split} scenes under {list(map(str, scenes))}"

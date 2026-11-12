@@ -3,15 +3,15 @@
 Typical use::
 
     chirpdetector train params params.toml \\
-        --scenes /mnt/data1/chirp_v2/scenes/train_v1 \\
-        --scenes /mnt/data1/chirp_v2/scenes/train_v2 \\
-        --detector /mnt/data1/chirp_v2/runs/yolo26s_sim_v2_r2/final/bundle \\
+        --scenes /mnt/data1/chirp_v2/scenes/train_v3 \\
+        --detector /mnt/data1/chirp_v2/runs/yolo26s_sim_v3_r1/final/bundle \\
         --run-dir /mnt/data1/chirp_v2/params/runs/p1
 
 (run it through ``scripts/guarded``; the GPU is shared). `train_params`
 
-1. finds the scenes and their splits (by seed, as the detector datasets:
-   0-1599 train, 1600-1799 val, 1800-1999 test);
+1. finds the scenes and their splits (by default the ``train``/``val``/
+   ``test`` directory each scene lies in, as the detector datasets built
+   with ``--split-dir``; ``split`` can give seed ranges instead);
 2. extracts (or reuses) the sample set (`chirpdetector.params.samples`):
    with ``boxes.mode = "detector"`` the detector bundle is run over every
    scene and its predictions matched to the true chirps, so the decoder
@@ -34,6 +34,8 @@ Configuration (TOML; every key optional, these are the defaults)::
     workers = 4                # sample extraction processes
     scene_background = "hybrid"  # only scenes on real background segments
                                  # ("any": also synthetic-noise scenes)
+    split = "directory"        # split = the scene's train/val/test directory;
+                               # or seed ranges "train=0:1600,val=1600:1800,test=1800:2000"
 
     [boxes]                    # chirpdetector.params.samples.BoxSource
     mode = "detector"          # or "footprint"
@@ -95,6 +97,7 @@ import pandas as pd
 import torch
 
 from chirpdetector.bundle import Bundle, load_bundle
+from chirpdetector.data.scenes import SplitRule
 from chirpdetector.params.bundle import ParamsBundle, write_params_bundle
 from chirpdetector.params.calibration import CalibrationConfig, fit_calibration
 from chirpdetector.params.crops import SCALAR_NAMES, CropConfig
@@ -107,10 +110,12 @@ from chirpdetector.params.model import (
     to_model_space,
 )
 from chirpdetector.params.samples import (
+    SPLIT_BY_DIRECTORY,
     BoxSource,
     SampleSet,
     discover_scenes,
     extract_samples,
+    parse_split,
 )
 from chirpdetector.params.truth import PARAMETERS, TRUTH_PAD_S
 from chirpdetector.resources import apply_vram_limit
@@ -193,8 +198,12 @@ class ParamsTrainingConfig:
     ``scene_background`` filters the scenes (`chirpdetector.params.samples.
     discover_scenes`); the default, ``"hybrid"``, keeps only scenes on real
     background segments (no synthetic-noise-only scenes in training,
-    validation or test). ``calibration_min_score`` is the score threshold of the validation boxes
-    the calibration is fitted on (None: the detector's own threshold).
+    validation or test). ``split`` assigns scenes to splits:
+    ``"directory"`` (default) by the ``train``/``val``/``test`` directory
+    they lie in, or seed ranges such as
+    ``"train=0:1600,val=1600:1800,test=1800:2000"``.
+    ``calibration_min_score`` is the score threshold of the validation
+    boxes the calibration is fitted on (None: the detector's own threshold).
     """
 
     seed: int = 0
@@ -202,6 +211,7 @@ class ParamsTrainingConfig:
     max_vram_fraction: float | None = None
     workers: int = 4
     scene_background: str = "hybrid"
+    split: str = SPLIT_BY_DIRECTORY
     boxes: BoxSource = field(default_factory=BoxSource)
     crop: CropConfig = field(default_factory=CropConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
@@ -218,6 +228,16 @@ class ParamsTrainingConfig:
                 f"{self.scene_background!r}"
             )
             raise ValueError(msg)
+        try:
+            parse_split(self.split)
+        except ValueError as err:
+            msg = f"split: {err}"
+            raise ValueError(msg) from err
+
+    @property
+    def split_rule(self) -> SplitRule | None:
+        """`split` parsed (None: by directory)."""
+        return parse_split(self.split)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ParamsTrainingConfig:
@@ -256,6 +276,7 @@ class ParamsTrainingConfig:
             "max_vram_fraction": self.max_vram_fraction,
             "workers": self.workers,
             "scene_background": self.scene_background,
+            "split": self.split,
             "boxes": self.boxes.to_dict(),
             "crop": self.crop.to_dict(),
             "model": self.model.to_dict(),
@@ -537,7 +558,9 @@ def train_params(
     device = _device(config.device)
     if device.type == "cuda":
         apply_vram_limit(config.max_vram_fraction, device)
-    refs = discover_scenes(scenes, background=config.scene_background)
+    refs = discover_scenes(
+        scenes, config.split_rule, background=config.scene_background
+    )
     samples = extract_samples(
         refs,
         Path(samples_dir) if samples_dir is not None else run_dir / "samples",

@@ -18,6 +18,7 @@ from chirpdetector.params.samples import (
     extract_samples,
     load_samples,
     match_predictions,
+    parse_split,
 )
 from chirpdetector.params.truth import scene_truth
 
@@ -56,7 +57,7 @@ def test_matching_is_one_to_one_by_time_and_frequency() -> None:
     assert (empty == -1).all()
 
 
-def test_scenes_are_split_by_seed_and_filtered_by_background(
+def test_scenes_are_split_by_directory_and_filtered_by_background(
     params_scenes: Path, tmp_path: Path
 ) -> None:
     refs = discover_scenes([params_scenes])
@@ -73,11 +74,47 @@ def test_scenes_are_split_by_seed_and_filtered_by_background(
     assert len(discover_scenes([params_scenes], background="synthetic")) == len(refs)
     with pytest.raises(ValueError, match="background"):
         discover_scenes([params_scenes], background="real")
-    # a scene in a 'val' directory whose seed says 'train'
-    wrong = tmp_path / "val" / "000000"
-    shutil.copytree(params_scenes / "train" / "000000", wrong)
+    # a scene in a 'val' directory whose seed (0) says 'train' under the old
+    # seed ranges: by default the directory decides, a seed rule must agree
+    moved = tmp_path / "val" / "000000"
+    shutil.copytree(params_scenes / "train" / "000000", moved)
+    assert [r.split for r in discover_scenes([tmp_path])] == ["val"]
     with pytest.raises(ValueError, match="'val' directory"):
-        discover_scenes([tmp_path])
+        discover_scenes([tmp_path], parse_split("train=0:1600,val=1600:1800"))
+    # scenes outside split directories need a seed rule
+    loose = tmp_path / "loose"
+    shutil.copytree(params_scenes / "test" / "001800", loose / "001800")
+    with pytest.raises(ValueError, match="no train/val/test directory"):
+        discover_scenes([loose])
+    rule = parse_split("train=0:1600,val=1600:1800,test=1800:2000")
+    assert [r.split for r in discover_scenes([loose], rule)] == ["test"]
+    assert parse_split("directory") is None
+
+
+def test_seeds_outside_the_old_ranges_are_split_by_directory(
+    params_scenes: Path, tmp_path: Path
+) -> None:
+    """train_v3 uses seeds 2000-4999, outside the detector's old 0-1999 ranges."""
+    for split, old, new in (
+        ("train", 0, 2000),
+        ("val", 1600, 4400),
+        ("test", 1800, 4700),
+    ):
+        target = tmp_path / split / f"{new:06d}"
+        shutil.copytree(params_scenes / split / f"{old:06d}", target)
+        info = json.loads((target / "scene.json").read_text())
+        info["seed"] = new
+        (target / "scene.json").write_text(json.dumps(info))
+    refs = discover_scenes([tmp_path])
+    assert {(r.split, r.seed) for r in refs} == {
+        ("train", 2000),
+        ("val", 4400),
+        ("test", 4700),
+    }
+    with pytest.raises(ValueError, match="no split range"):
+        discover_scenes(
+            [tmp_path], parse_split("train=0:1600,val=1600:1800,test=1800:2000")
+        )
 
 
 def test_scene_truth_recovers_the_templates(clean_scene: Path) -> None:
