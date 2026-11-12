@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, cast
 import typer
 
 import chirpdetector
+from chirpdetector.cli_data import data_app
 
 if TYPE_CHECKING:
     from chirpdetector.evaluation.matching import MatchMethod
@@ -23,6 +24,8 @@ app = typer.Typer(
     add_completion=False,
     help="Detect chirps of wave-type weakly electric fish and assign them to their emitters.",
 )
+
+app.add_typer(data_app, name="data")
 
 
 @app.callback()
