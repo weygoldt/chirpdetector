@@ -63,12 +63,12 @@ four hand-labelled real recordings:
 - ``edge_harmonic_window_hz = (15, 170)``: twice the emitter's baseline
   lay 20-168 Hz above the lower edge of YOLO26s's boxes on harmonic
   copies (min-max, n = 527; real copies: 22-61 Hz).
-- ``edge_fundamental_window_hz = (-20, 160)``: the baseline lay -7 to 164 Hz
+- ``edge_fundamental_window_hz = (-20, 170)``: the baseline lay -7 to 164 Hz
   above the lower edge for 99.8 % of YOLO26s's true positives
   (0.1-99.9 % quantiles; real labels: -14 to 117 Hz).
 
 The windows are wide, and rule 2 then also protects copies that have
-any live track within about 150 Hz above their lower edge (11 % of the
+any live track within 170 Hz above their lower edge (11 % of the
 simulated copies at score >= 0.5, whose scenes hold fish up to 1,100 Hz;
 in the competition recordings, harmonic copies lie > 400 Hz above every
 fish). Wide windows trade precision for recall, on purpose.
@@ -92,9 +92,12 @@ rule* then marks a detection that overlaps another, at least as confident
 detection in time (temporal IoU >= ``pair_min_tiou``) at half its emitter
 frequency (head: ``|e - 2 e'| <= pair_tolerance_hz``; edge: the same with
 ``e = f_low_hz + edge_offset_hz``, tolerance ``edge_pair_tolerance_hz``).
-On the sim_v4 test tiles (tracks ignored) it marked 1,640 dual-head
-detections with score >= 0.5, two of them on real chirps, and 116
-YOLO26s detections, none on real chirps. It still cannot tell a copy
+On the sim_v4 test tiles with the tracks withheld, it marked 1,342
+dual-head detections with score >= 0.5 (1,302 on harmonic ignore
+regions, 39 unmatched false positives, 1 matched to a true chirp) and 173
+YOLO26s detections (172 on harmonic regions, none on true chirps); the
+tracked rule dropped 1,356 of the 1,402 and 178 of the 218 detections on
+harmonic regions. It still cannot tell a copy
 from the chirp of a second fish at twice the frequency, which mixed
 recordings (e.g. *Eigenmannia* at 300-600 Hz next to *A. leptorhynchus*
 at 600-1000 Hz) contain. So by default it only flags (column
