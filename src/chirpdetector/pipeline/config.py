@@ -2,8 +2,8 @@
 
 A run config names the models, the thresholds, the track source, the
 compute budget and the validation outputs. Every key has a default except
-the run name and the detector bundle; unknown keys are refused, so a typo
-cannot silently fall back to a default. Example (all keys)::
+the run name; unknown keys are refused, so a typo cannot silently fall back
+to a default. Example (all keys)::
 
     [run]
     name = "v2_2019_competition"        # OUT/<name>/...
@@ -41,6 +41,21 @@ cannot silently fall back to a default. Example (all keys)::
     candidates_per_cell = 6
     seed = 0
 
+Models
+------
+``detector`` and ``decoder`` are bundle directories (relative to the config
+file) or references to published models (`chirpdetector.pretrained`):
+``"default"`` or ``"pretrained:NAME"``. Without ``detector``, the default
+pretrained detector is used. Without ``decoder``, the published decoder
+trained on the detector's boxes is used if there is one (for the default
+detector: the default decoder), else none; ``decoder = "none"`` switches
+it off. References resolve to ``"pretrained:<versioned name>"`` in the
+resolved config, so a run made with one default model is not resumed with
+another. Pretrained models are downloaded when the run loads them.
+
+`default_config` is the config of ``chirpdetector run --out OUT
+RECORDING...`` without a config file: pretrained models, every default.
+
 The resolved config (defaults filled in) is written next to every output
 and hashed (`config_hash`); a finished recording is only skipped on resume
 if it was made with the same models and detection settings.
@@ -56,6 +71,9 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
+from chirpdetector import pretrained
+from chirpdetector.pretrained import DEFAULT, PREFIX, Kind
+
 __all__ = [
     "AssignmentConfig",
     "ComputeConfig",
@@ -64,6 +82,7 @@ __all__ = [
     "ModelsConfig",
     "PipelineConfig",
     "ValidationConfig",
+    "default_config",
     "load_config",
 ]
 
@@ -82,15 +101,17 @@ class ModelsConfig:
     Attributes
     ----------
     detector
-        Detector bundle directory.
+        Detector bundle directory, or ``"pretrained:NAME"`` (module
+        docstring).
     decoder
-        Chirp-parameter decoder bundle (None: no chirp parameters).
+        Chirp-parameter decoder bundle or ``"pretrained:NAME"`` (None: no
+        chirp parameters).
     allow_detector_mismatch
         Use a decoder trained on another detector's boxes (not validated).
     """
 
-    detector: Path
-    decoder: Path | None = None
+    detector: Path | str
+    decoder: Path | str | None = None
     allow_detector_mismatch: bool = False
 
 
@@ -354,14 +375,15 @@ def config_from_dict(
         return p if p.is_absolute() else (base / p).resolve()
 
     models = dict(data.get("models", {}))
-    if "detector" not in models:
-        msg = "[models] needs a detector bundle"
-        raise ConfigError(msg)
-    models["detector"] = path(models["detector"])
-    if models.get("decoder") in (None, "", "none"):
+    detector = _pretrained(models.get("detector", DEFAULT), "detector")
+    models["detector"] = path(models["detector"]) if detector is None else detector
+    if "decoder" not in models:
+        models["decoder"] = _decoder_for(detector)
+    elif models["decoder"] in (None, "", "none"):
         models["decoder"] = None
     else:
-        models["decoder"] = path(models["decoder"])
+        decoder = _pretrained(models["decoder"], "decoder")
+        models["decoder"] = path(models["decoder"]) if decoder is None else decoder
     return PipelineConfig(
         name=str(run["name"]),
         out=path(run.get("out", "/mnt/data1/chirp_v2/detections")),
@@ -370,6 +392,44 @@ def config_from_dict(
         assignment=_section(AssignmentConfig, data.get("assignment", {}), "assignment"),
         compute=_section(ComputeConfig, data.get("compute", {}), "compute"),
         validation=_section(ValidationConfig, data.get("validation", {}), "validation"),
+    )
+
+
+def _pretrained(value: object, kind: Kind) -> str | None:
+    """``"pretrained:<name>"`` for a model reference, None for a path."""
+    try:
+        name = pretrained.reference(value, kind)
+    except (KeyError, ValueError) as err:
+        msg = f"[models] {kind}: {err.args[0] if err.args else err}"
+        raise ConfigError(msg) from err
+    return None if name is None else f"{PREFIX}{name}"
+
+
+def _decoder_for(detector: str | None) -> str | None:
+    """The published decoder trained on a published detector's boxes, if any."""
+    if detector is None:
+        return None
+    name = detector.removeprefix(PREFIX)
+    decoders = [
+        m
+        for m in pretrained.list_models()
+        if m.kind == "decoder" and m.detector == name
+    ]
+    default = pretrained.ALIASES.get("decoder")
+    decoders.sort(key=lambda m: m.name != default)  # the default decoder first
+    return f"{PREFIX}{decoders[0].name}" if decoders else None
+
+
+def default_config(out: str | Path, *, name: str = "default") -> PipelineConfig:
+    """The built-in run config: pretrained models and every default.
+
+    The device is CUDA if available, else the CPU.
+    """
+    import torch
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return config_from_dict(
+        {"run": {"name": name, "out": str(out)}, "compute": {"device": device}}
     )
 
 

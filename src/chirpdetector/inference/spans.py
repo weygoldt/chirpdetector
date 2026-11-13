@@ -396,7 +396,9 @@ def predict_span(
     Parameters
     ----------
     bundle
-        Model bundle (or its directory).
+        Model bundle (or its directory); ``"default"`` for the default
+        pretrained detector (`chirpdetector.pretrained`, downloaded on
+        first use).
     recording
         A `gridtools.io.Recording` (``samplerate_hz``, ``n_samples``,
         ``n_channels``, ``read(start, stop, channels)``); time 0 is its
@@ -418,8 +420,8 @@ def predict_span(
         See `merge_tiles`.
     params
         Optional chirp-parameter decoder (a params bundle, its directory,
-        or a loaded `chirpdetector.params.ParamsEstimator`): adds its
-        columns (`chirpdetector.params.PARAM_COLUMNS`) to every detection.
+        ``"default"`` for the default pretrained decoder, or a loaded
+        `chirpdetector.params.ParamsEstimator`): adds its columns (`chirpdetector.params.PARAM_COLUMNS`) to every detection.
         The spectrogram is then computed over the span widened by the
         decoder's context (half a canvas), so that every crop is the one
         the decoder was trained on; detection uses the span's own frames,

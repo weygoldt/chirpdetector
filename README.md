@@ -16,8 +16,56 @@ and label real data.
 ## Installation
 
 ```sh
-uv add "chirpdetector @ git+https://github.com/weygoldt/chirpdetector@v2"
+pip install "git+https://github.com/weygoldt/chirpdetector"
 ```
+
+(or `uv pip install` / `uv add` with the same URL). The pretrained models are
+downloaded on first use.
+
+## Pretrained models
+
+The published detector and chirp-parameter decoder (release
+[`models-v1`](https://github.com/weygoldt/chirpdetector/releases/tag/models-v1))
+are downloaded on first use, checked against their sha256 and cached in
+`$CHIRPDETECTOR_CACHE`, else `$XDG_CACHE_HOME/chirpdetector`, else
+`~/.cache/chirpdetector`. `"default"` names them wherever a bundle is
+expected:
+
+```python
+from gridtools.io import load_tracks, open_recording
+from chirpdetector.inference import predict_span
+
+trial = "/mnt/data2/2019_tube_competition/2020-05-18-10_00"
+detections = predict_span(
+    "default",  # the pretrained detector
+    open_recording(trial),
+    9350.0,
+    9370.0,
+    name="2020-05-18-10_00",
+    tracks=load_tracks(trial),
+    params="default",  # the pretrained decoder
+)
+```
+
+```sh
+chirpdetector models list                # models, aliases, cache state
+chirpdetector models download            # every model (e.g. before going offline)
+chirpdetector models path detector       # bundle directory (downloads if missing)
+chirpdetector run --out OUT REC_DIR...   # whole recordings, built-in default config
+```
+
+| name | alias | model |
+|---|---|---|
+| `dualhead-rtdetrv2-r18-sim_v4` | `detector` | dual-head RT-DETRv2-r18: chirp boxes and the emitter's EOD frequency |
+| `decoder-dualhead-sim_v4` | `decoder` | chirp parameters (height, FWHM, width at 10 %, undershoot) for that detector's boxes |
+
+`load_bundle("default")`, `load_params_bundle("default")`, `predict_span("default",
+..., params="default")` and a run config without `[models]` use them;
+`"pretrained:NAME"` names a model by name or alias (`chirpdetector.pretrained`
+has the Python API). `CHIRPDETECTOR_OFFLINE=1` forbids downloads: a missing
+model then raises an error that says how to get it and where to put it.
+`CHIRPDETECTOR_MODELS_URL` replaces the release URL (tests, mirrors).
+Loading and running the models never touches the network.
 
 ## Labelling chirp emitters
 
@@ -495,7 +543,8 @@ recomputed from the raw data; PNG plus an NPZ with the data to redraw it).
 ## Development
 
 chirpdetector depends on [gridtools](https://github.com/weygoldt/gridtools),
-expected as a sibling checkout (`../gridtools`, branch `v2`).
+installed from GitHub (branch `main`). To work on both, install a gridtools
+checkout over it: `uv pip install -e ../gridtools`.
 
 ```sh
 uv sync

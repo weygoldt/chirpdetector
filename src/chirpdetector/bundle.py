@@ -214,7 +214,11 @@ def load_bundle(path: str | Path) -> Bundle:
     Parameters
     ----------
     path
-        Bundle directory (or its ``bundle.json``).
+        Bundle directory (or its ``bundle.json``); or ``"default"``, the
+        default pretrained detector, or ``"pretrained:NAME"``, a published
+        detector (`chirpdetector.pretrained`; downloaded on first use).
+        Only these strings are references: ``Path("default")`` is a
+        directory.
 
     Returns
     -------
@@ -229,8 +233,12 @@ def load_bundle(path: str | Path) -> Bundle:
         to other weights.
     FileNotFoundError
         If there is no ``bundle.json``.
+    chirpdetector.pretrained.PretrainedError
+        If a pretrained detector is not cached and cannot be downloaded.
     """
-    path = Path(path)
+    from chirpdetector import pretrained
+
+    path = pretrained.resolve(path, "detector") or Path(path)
     directory = path.parent if path.name == BUNDLE_FILE else path
     record_path = directory / BUNDLE_FILE
     if not record_path.is_file():

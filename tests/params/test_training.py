@@ -28,6 +28,7 @@ from chirpdetector.params.report import real_section
 from chirpdetector.params.samples import discover_scenes
 from chirpdetector.params.training import ParamsTrainingConfig, train_params
 
+from ..release import Release
 from .conftest import TINY_CONFIG, footprint_detections
 
 runner = CliRunner()
@@ -186,6 +187,34 @@ def test_predict_span_adds_parameter_columns(
     )
     assert len(none) == 0
     assert set(ESTIMATE_COLUMNS) <= set(none.columns)
+
+
+def test_predict_span_resolves_the_default_models(
+    detector_run: Path, stub_detector: Bundle, params_scenes: Path, release: Release
+) -> None:
+    detector = release.publish(stub_detector.path, "stub-detector-v1")
+    decoder = release.publish(
+        detector_run / "bundle", "stub-decoder-v1", "decoder", detector=detector.name
+    )
+    recording = open_recording(params_scenes / "test" / "001800" / "recording.wav")
+    explicit = predict_span(
+        stub_detector,
+        recording,
+        1.0,
+        7.0,
+        name="s",
+        device="cpu",
+        params=detector_run / "bundle",
+    )
+    default = predict_span(
+        "default", recording, 1.0, 7.0, name="s", device="cpu", params="default"
+    )
+    pd.testing.assert_frame_equal(default, explicit)
+    assert default.attrs["provenance"] == explicit.attrs["provenance"]
+    assert sorted(release.server.requests) == sorted([detector.asset, decoder.asset])
+    assert ParamsEstimator("default", device="cpu").bundle.path == (
+        release.cache / decoder.name
+    )
 
 
 def test_predict_span_refuses_another_detectors_decoder(

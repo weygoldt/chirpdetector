@@ -16,12 +16,15 @@ log = logging.getLogger(__name__)
 
 
 def run_command(
-    config_file: Annotated[
-        Path, typer.Argument(exists=True, dir_okay=False, help="Run config (TOML).")
-    ],
-    recordings: Annotated[
+    inputs: Annotated[
         list[Path] | None,
-        typer.Argument(help="Recording directories (fishgrid raw or a single wav)."),
+        typer.Argument(
+            metavar="[CONFIG.toml] [RECORDING]...",
+            help="Run config (TOML; optional: without it, the pretrained models "
+            "and every default, see --out), then recording directories (fishgrid "
+            "raw or a single wav).",
+            show_default=False,
+        ),
     ] = None,
     dataset: Annotated[
         Path | None,
@@ -32,10 +35,18 @@ def run_command(
         ),
     ] = None,
     out: Annotated[
-        Path | None, typer.Option("--out", help="Output root (overrides [run] out).")
+        Path | None,
+        typer.Option(
+            "--out",
+            help="Output root (overrides [run] out; required without a config).",
+        ),
     ] = None,
     name: Annotated[
-        str | None, typer.Option("--name", help="Run name (overrides [run] name).")
+        str | None,
+        typer.Option(
+            "--name",
+            help="Run name (overrides [run] name; 'default' without a config).",
+        ),
     ] = None,
     dry_run: Annotated[
         bool,
@@ -75,11 +86,32 @@ def run_command(
     run manifest (run.json), a log (run.log) and validation candidates.
     Recordings that are complete are skipped; a failing recording is logged
     and the run continues (exit status 1 at the end).
+
+    Without CONFIG.toml (`chirpdetector run --out OUT RECORDING...`), the
+    pretrained detector and decoder (downloaded on first use) and every
+    default setting are used, on CUDA if available.
     """
-    from chirpdetector.pipeline.config import load_config
+    from chirpdetector.pipeline.config import default_config, load_config
     from chirpdetector.pipeline.run import _done, discover_recordings, run_pipeline
 
-    config = load_config(config_file)
+    paths_given = list(inputs or [])
+    config_file: Path | None = None
+    if paths_given and paths_given[0].suffix.lower() == ".toml":
+        config_file = paths_given.pop(0)
+        if not config_file.is_file():
+            typer.echo(f"config {config_file} does not exist", err=True)
+            raise typer.Exit(2)
+    recordings = paths_given
+    if config_file is not None:
+        config = load_config(config_file)
+    elif out is None:
+        typer.echo(
+            "give a run config (CONFIG.toml) or --out OUT for the default config",
+            err=True,
+        )
+        raise typer.Exit(2)
+    else:
+        config = default_config(out.resolve())
     run_name = name or config.name
     if dry_run:
         limit_s = 300.0 if limit_s is None else limit_s

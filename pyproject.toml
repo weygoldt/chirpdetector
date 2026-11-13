@@ -15,13 +15,20 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
-    "gridtools",
+    # A direct reference: "gridtools" on PyPI is an unrelated package. The
+    # root project of chirp_competition_upgrade overrides it with the
+    # editable submodule for development.
+    "gridtools @ git+https://github.com/weygoldt/gridtools@main",
     "numpy>=2.5",
     "opencv-python>=4.12",
     "pandas>=3.1.1",
     "pyarrow>=26",
     "scipy>=1.18.1",
     "torch>=2.15",
+    # The dual-head detector (the default model) subclasses RT-DETRv2's loss
+    # internals, which change between transformers minor releases;
+    # tests/models pin the behaviour.
+    "transformers>=5.22.2,<5.23",
     "typer>=0.29.1",
     "ultralytics>=8.4.211,<8.5",
 ]
@@ -36,8 +43,8 @@ Repository = "https://github.com/weygoldt/chirpdetector"
 label = [
     "matplotlib>=3.11.2",
 ]
-# The dual-head detector subclasses RT-DETRv2's loss internals, which change
-# between transformers minor releases; tests/models pin the behaviour.
+# Kept so that existing `chirpdetector[dualhead]` installs keep working;
+# transformers is a core dependency now.
 dualhead = [
     "transformers>=5.22.2,<5.23",
 ]
@@ -52,10 +59,6 @@ dev = [
     "ruff>=0.17",
 ]
 
-[tool.uv.sources]
-# "gridtools" on PyPI is an unrelated package; always resolve the sibling checkout.
-gridtools = { path = "../gridtools", editable = true }
-
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14"]
 build-backend = "uv_build"
@@ -67,6 +70,7 @@ markers = [
     "slow: long-running tests",
     "gpu: tests that need a CUDA device (skipped if absent)",
     "data: tests that need the recordings on /mnt/data2 (skipped if absent)",
+    "network: tests that download the published models (CHIRPDETECTOR_TEST_NETWORK=1)",
 ]
 
 [tool.ruff]

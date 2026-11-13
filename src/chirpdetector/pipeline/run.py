@@ -208,7 +208,10 @@ def load_models(config: PipelineConfig) -> Models:
             bundle, allow_mismatch=config.models.allow_detector_mismatch
         )
         dec_info = {
-            "path": str(config.models.decoder),
+            # a pretrained reference ("pretrained:NAME") resolves to the cache
+            "path": str(estimator.bundle.path)
+            if isinstance(config.models.decoder, str)
+            else str(config.models.decoder),
             "weights_sha256": estimator.bundle.weights_sha256,
             "detector_sha256": (estimator.bundle.detector or {}).get("weights_sha256"),
             "architecture": estimator.bundle.model.get("architecture"),

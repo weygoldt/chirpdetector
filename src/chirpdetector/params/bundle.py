@@ -240,6 +240,13 @@ def write_params_bundle(
 def load_params_bundle(path: str | Path) -> ParamsBundle:
     """Load a params bundle and verify it.
 
+    Parameters
+    ----------
+    path
+        Bundle directory (or its ``bundle.json``); or ``"default"``, the
+        default pretrained decoder, or ``"pretrained:NAME"``, a published
+        decoder (`chirpdetector.pretrained`; downloaded on first use).
+
     Raises
     ------
     BundleError
@@ -248,8 +255,12 @@ def load_params_bundle(path: str | Path) -> ParamsBundle:
         one, or ``metrics.json`` belongs to other weights.
     FileNotFoundError
         If there is no ``bundle.json``.
+    chirpdetector.pretrained.PretrainedError
+        If a pretrained decoder is not cached and cannot be downloaded.
     """
-    path = Path(path)
+    from chirpdetector import pretrained
+
+    path = pretrained.resolve(path, "decoder") or Path(path)
     directory = path.parent if path.name == BUNDLE_FILE else path
     record = directory / BUNDLE_FILE
     if not record.is_file():

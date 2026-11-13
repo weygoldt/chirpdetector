@@ -23,8 +23,8 @@ emitter's baseline), which `chirpdetector.prediction` maps to
 
 Backends register a factory with `register_backend`; ``ultralytics-yolo``
 (YOLO26, `chirpdetector.models.yolo`) and ``dualhead`` (RT-DETRv2 with an
-emitter-frequency head, `chirpdetector.models.dualhead`; needs the
-``dualhead`` extra) are built in.
+emitter-frequency head, `chirpdetector.models.dualhead`; the default
+pretrained model, `chirpdetector.pretrained`) are built in.
 """
 
 from __future__ import annotations

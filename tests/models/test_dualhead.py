@@ -506,6 +506,36 @@ def test_predict_span_returns_the_emitter_frequency(
     assert out["emitter_hz"].between(low, high).all()
 
 
+def test_loading_and_running_a_bundle_needs_no_network(
+    make_tiny_bundle: Callable[[SpectrogramConfig, Tiling], Bundle],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import socket
+
+    import transformers
+
+    config = SpectrogramConfig()
+    tiling = Tiling(
+        tile_duration_s=0.64, overlap_s=0.2, width_px=128, height_px=config.n_freqs
+    )
+    bundle = make_tiny_bundle(config, tiling)
+
+    def refuse(*_: object, **__: object) -> Any:
+        msg = "network access"
+        raise AssertionError(msg)
+
+    # the weights file holds the whole config: no hub, no socket
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    monkeypatch.setattr(transformers.RTDetrV2Config, "from_pretrained", refuse)
+    monkeypatch.setattr(transformers.PreTrainedModel, "from_pretrained", refuse)
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "empty-hf-home"))
+    detector = load_detector(load_bundle(bundle.path), device="cpu")
+    tile = np.zeros((tiling.height_px, tiling.width_px, 3), dtype=np.uint8)
+    assert len(detector.predict([tile], score_threshold=0.0)) == 1
+
+
 def test_training_can_continue_from_a_weights_file(tmp_path: Path) -> None:
     first, start = engine.build_model(DualHeadModelConfig(**TINY), emitter_unit=63 / 64)
     assert start["source"] == "random"

@@ -13,6 +13,7 @@ from typer.core import TyperGroup
 import chirpdetector
 from chirpdetector.cli_benchmark import benchmark_app
 from chirpdetector.cli_data import data_app
+from chirpdetector.cli_models import models_app
 from chirpdetector.cli_pipeline import (
     check_reference_command,
     render_command,
@@ -33,6 +34,7 @@ app = typer.Typer(
 )
 
 app.add_typer(data_app, name="data")
+app.add_typer(models_app, name="models")
 app.command("run")(run_command)
 app.command("render")(render_command)
 app.command("check-reference")(check_reference_command)

@@ -138,7 +138,8 @@ class ParamsEstimator:
     Parameters
     ----------
     bundle
-        Params bundle (or its directory).
+        Params bundle (or its directory); ``"default"`` for the default
+        pretrained decoder (`chirpdetector.params.load_params_bundle`).
     device
         Torch device of the network (default: CUDA if available).
     batch_size

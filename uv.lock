@@ -188,6 +188,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "scipy" },
     { name = "torch" },
+    { name = "transformers" },
     { name = "typer" },
     { name = "ultralytics" },
 ]
@@ -212,7 +213,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gridtools", editable = "../gridtools" },
+    { name = "gridtools", git = "https://github.com/weygoldt/gridtools?rev=main" },
     { name = "matplotlib", marker = "extra == 'label'", specifier = ">=3.11.2" },
     { name = "numpy", specifier = ">=2.5" },
     { name = "opencv-python", specifier = ">=4.12" },
@@ -220,6 +221,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=26" },
     { name = "scipy", specifier = ">=1.18.1" },
     { name = "torch", specifier = ">=2.15" },
+    { name = "transformers", specifier = ">=5.22.2,<5.23" },
     { name = "transformers", marker = "extra == 'dualhead'", specifier = ">=5.22.2,<5.23" },
     { name = "typer", specifier = ">=0.29.1" },
     { name = "ultralytics", specifier = ">=8.4.211,<8.5" },
@@ -586,7 +588,7 @@ wheels = [
 [[package]]
 name = "gridtools"
 version = "2.0.0.dev0"
-source = { editable = "../gridtools" }
+source = { git = "https://github.com/weygoldt/gridtools?rev=main#6cc3e3f48f34eb95c2977223bc0e294027a24770" }
 dependencies = [
     { name = "h5py" },
     { name = "numpy" },
@@ -594,31 +596,6 @@ dependencies = [
     { name = "pyarrow" },
     { name = "scipy" },
     { name = "typer" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "h5py", specifier = ">=3.16" },
-    { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.11" },
-    { name = "numpy", specifier = ">=2.5" },
-    { name = "pandas", specifier = ">=3.1" },
-    { name = "pyarrow", specifier = ">=26" },
-    { name = "scipy", specifier = ">=1.18" },
-    { name = "typer", specifier = ">=0.29.1" },
-]
-provides-extras = ["plot"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "audioio", specifier = ">=2.9.0" },
-    { name = "hypothesis", specifier = ">=6.170" },
-    { name = "matplotlib", specifier = ">=3.11" },
-    { name = "pre-commit", specifier = ">=4.7" },
-    { name = "pyright", specifier = ">=1.1.414" },
-    { name = "pytest", specifier = ">=9.2" },
-    { name = "pytest-cov", specifier = ">=7.1" },
-    { name = "ruff", specifier = ">=0.17" },
-    { name = "soundfile", specifier = ">=0.14.0" },
 ]
 
 [[package]]

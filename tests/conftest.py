@@ -1,8 +1,9 @@
-"""Shared test setup: torch threads, synthetic trials, the ``data`` marker."""
+"""Shared test setup: torch threads, synthetic trials, markers, model downloads."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import os
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 import matplotlib
@@ -15,6 +16,10 @@ import pytest
 import torch
 from gridtools.io import Tracks, save_tracks
 from scipy.io import wavfile
+
+from chirpdetector import pretrained
+
+from .release import ModelServer, Release
 
 # Test workloads are tiny; many intra-op threads only add contention on a
 # shared machine (a 1 s FFT test took 9 s with 16 threads under full load).
@@ -29,16 +34,64 @@ CHIRP_T_S = 4.0
 CHIRP_BOX = (3.93, 4.07, 680.0, 820.0)
 
 
+NETWORK_OPT_IN = "CHIRPDETECTOR_TEST_NETWORK"
+"""``1``: run the tests marked ``network`` (they download the published models)."""
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Skip tests marked ``data`` when the recordings are not mounted."""
-    if DATA_TRIAL.exists():
-        return
-    skip = pytest.mark.skip(reason=f"{DATA_TRIAL} not available")
+    """Skip ``data`` tests without the recordings, ``network`` tests unless opted in."""
+    skips = {}
+    if not DATA_TRIAL.exists():
+        skips["data"] = pytest.mark.skip(reason=f"{DATA_TRIAL} not available")
+    if os.environ.get(NETWORK_OPT_IN) != "1":
+        skips["network"] = pytest.mark.skip(reason=f"set {NETWORK_OPT_IN}=1 to run")
     for item in items:
-        if "data" in item.keywords:
-            item.add_marker(skip)
+        for marker, skip in skips.items():
+            if marker in item.keywords:
+                item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _no_model_downloads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Keep every test off the user's model cache and off GitHub.
+
+    Tests that download use `release` (a local server) or, marked
+    ``network``, undo this themselves.
+    """
+    monkeypatch.setenv(
+        pretrained.ENV_CACHE, str(tmp_path_factory.getbasetemp() / "no-cache")
+    )
+    monkeypatch.setenv(
+        pretrained.ENV_MODELS_URL, "http://127.0.0.1:9/no-downloads-in-tests"
+    )
+    monkeypatch.delenv(pretrained.ENV_OFFLINE, raising=False)
+
+
+@pytest.fixture
+def release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Release]:
+    """A local model release: publish fake bundles, download them into a fresh cache.
+
+    The registry is empty until `Release.publish`; the cache and the base
+    URL point at this release.
+    """
+    assets = tmp_path / "release" / "assets"
+    assets.mkdir(parents=True)
+    cache = tmp_path / "release" / "cache"
+    server = ModelServer(assets)
+    monkeypatch.setenv(pretrained.ENV_CACHE, str(cache))
+    monkeypatch.setenv(pretrained.ENV_MODELS_URL, server.url)
+    monkeypatch.setattr(pretrained, "REGISTRY", {})
+    monkeypatch.setattr(pretrained, "ALIASES", {})
+    try:
+        yield Release(
+            assets=assets, cache=cache, server=server, monkeypatch=monkeypatch
+        )
+    finally:
+        server.close()
 
 
 def write_detections(
