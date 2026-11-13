@@ -395,6 +395,23 @@ def discover_scenes(
 # ------------------------------------------------------------------ matching
 
 
+def chirp_centres(chirps: pd.DataFrame) -> npt.NDArray[np.float64]:
+    """Matching centre of each chirp: its footprint box midpoint.
+
+    Falls back to ``t_center_s`` where the box is missing (no
+    ``box_t0_s``/``box_t1_s`` columns, or NaN edges).
+    """
+    centre = chirps["t_center_s"].to_numpy(dtype=np.float64).copy()
+    if {"box_t0_s", "box_t1_s"} <= set(chirps.columns):
+        mid = 0.5 * (
+            chirps["box_t0_s"].to_numpy(dtype=np.float64)
+            + chirps["box_t1_s"].to_numpy(dtype=np.float64)
+        )
+        ok = np.isfinite(mid)
+        centre[ok] = mid[ok]
+    return centre
+
+
 def match_predictions(
     predictions: pd.DataFrame, chirps: pd.DataFrame, tolerance_s: float = 0.1
 ) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.float64]]:
@@ -405,9 +422,14 @@ def match_predictions(
     predictions
         ``t_start_s, t_end_s, f_low_hz, f_high_hz, score``.
     chirps
-        ``t_center_s, f_low_hz, f_high_hz`` (the scene's ``chirps.csv``).
+        ``box_t0_s, box_t1_s`` (else ``t_center_s``), ``f_low_hz,
+        f_high_hz`` (the scene's ``chirps.csv``).
     tolerance_s
-        Largest difference of centre times.
+        Largest difference of centre times. A chirp's centre is its
+        footprint box midpoint, the point a prediction's box midpoint
+        estimates (`chirpdetector.data.dataset_ground_truth` does the
+        same); the template's own ``t_center_s`` lies early in long chirps
+        with a slow decay and would leave them unmatched.
 
     Returns
     -------
@@ -427,7 +449,7 @@ def match_predictions(
         predictions["t_start_s"].to_numpy(dtype=np.float64)
         + predictions["t_end_s"].to_numpy(dtype=np.float64)
     )
-    label_t = chirps["t_center_s"].to_numpy(dtype=np.float64)
+    label_t = chirp_centres(chirps)
     li, pj, adt = admissible_pairs(
         label_t,
         (
@@ -839,6 +861,7 @@ def _identity(
             "run_id": detector.training.get("run_id"),
             "score_threshold": detector.score_threshold,
         },
+        "matching": {"chirp_centre": "footprint box midpoint", "version": 2},
         "truth": {
             "definition": "chirpdetector.params.truth",
             "version": TRUTH_VERSION,
