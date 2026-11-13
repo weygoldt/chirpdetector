@@ -154,7 +154,7 @@ def test_bias_curve_ignores_the_noise_of_small_bins() -> None:
     sigma = rng.uniform(0.05, 0.25, n)  # heteroscedastic, known per chirp
     pred = mean + sigma * rng.normal(size=n)
     noisy = fit_bias_map(
-        y, pred, n_bins=40, min_count=50, min_slope=0.2, smooth_knots=1
+        y, pred, n_bins=40, min_count=50, min_slope=0.2, smooth_fraction=0
     )
     smooth = fit_bias_map(y, pred)  # defaults: smoothed, slope >= 0.5
     slopes = np.diff(smooth.y) / np.diff(smooth.x)
@@ -183,3 +183,58 @@ def test_bias_curve_ignores_the_noise_of_small_bins() -> None:
     raw_rank = float(np.asarray(spearmanr(s2, raw_error)[0]))
     assert rank(smooth) > rank(noisy) + 0.05
     assert rank(smooth) > 0.8 * raw_rank
+
+
+def test_curves_per_sigma_stratum_remove_visibility_dependent_shrinkage() -> None:
+    """Poorly seen chirps (large sigma) shrink more. One pooled curve leaves
+    them under-corrected and the well seen ones over-corrected; a curve per
+    sigma tercile, chosen by the decoder's own sigma, does not."""
+    rng = np.random.default_rng(6)
+
+    def simulate(n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        y = rng.uniform(3.0, 6.0, n)
+        sigma = np.exp(rng.uniform(np.log(0.04), np.log(0.35), n))
+        slope = 1.0 - sigma  # 0.96 for the best seen chirps, 0.65 for the worst
+        pred = 4.5 + slope * (y - 4.5) + sigma * rng.normal(size=n)
+        columns = (np.tile(v[:, None], (1, len(PARAMETERS))) for v in (y, pred, sigma))
+        return tuple(columns)  # type: ignore[return-value]
+
+    y, pred, sigma = simulate(6000)
+    pooled = fit_calibration(y, pred, sigma, CalibrationConfig(sigma_strata=1))
+    strata = fit_calibration(y, pred, sigma, CalibrationConfig())
+    assert len(strata.stratum_maps["height_hz"]) == 3
+    assert strata.fitted_on["sigma_strata"]["height_hz"] == 3
+    y2, pred2, sigma2 = simulate(60_000)
+    small = y2[:, 0] < 3.5
+    sharp, blurred = sigma2[:, 0] < 0.07, sigma2[:, 0] > 0.2
+
+    def biases(cal: ParamCalibration) -> tuple[float, float]:
+        err = cal.apply(pred2, sigma2)[0][:, 0] - y2[:, 0]
+        return (
+            float(np.median(err[small & sharp])),
+            float(np.median(err[small & blurred])),
+        )
+
+    pooled_sharp, pooled_blurred = biases(pooled)
+    assert pooled_sharp < -0.05  # over-corrected
+    assert pooled_blurred > 0.1  # under-corrected
+    sharp_bias, blurred_bias = biases(strata)
+    assert abs(sharp_bias) < 0.5 * abs(pooled_sharp)
+    assert abs(blurred_bias) < 0.5 * abs(pooled_blurred)
+    restored = ParamCalibration.from_dict(strata.to_dict())
+    np.testing.assert_allclose(
+        restored.apply(pred2[:100], sigma2[:100])[0],
+        strata.apply(pred2[:100], sigma2[:100])[0],
+    )
+    # a bundle written before strata existed still loads (pooled curve)
+    old = strata.to_dict()
+    old.pop("sigma_edges")
+    old.pop("stratum_maps")
+    legacy = ParamCalibration.from_dict(old)
+    np.testing.assert_allclose(
+        legacy.apply(pred2[:100], sigma2[:100])[0][:, 0],
+        strata.maps["height_hz"].inverse(pred2[:100, 0]),
+    )
+    # too few chirps for three strata: fewer
+    few = fit_calibration(y[:300], pred[:300], sigma[:300], CalibrationConfig())
+    assert few.fitted_on["sigma_strata"]["height_hz"] < 3

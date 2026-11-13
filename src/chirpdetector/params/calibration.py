@@ -45,7 +45,8 @@ Fitting the curve
 1. Quantile bins of the true value (``n_bins``, at least ``min_count``
    chirps each); knots at the bins' median true value and median estimate.
 2. **Smoothing**: each knot's estimate is replaced by a weighted local
-   linear fit through it and its neighbours (``smooth_knots`` knots,
+   linear fit through it and its neighbours (a window of
+   ``smooth_fraction`` of the knots, odd, at least 3: 13 of 40 knots;
    weights = bin sizes; the window is cut at the ends, where a local
    linear fit, unlike a running mean, has no boundary bias, so the
    strongest shrinkage at the smallest and largest values is kept).
@@ -63,6 +64,26 @@ and |error| 0.42 -> 0.22 for height, 0.35 -> 0.07 for undershoot) and its
 coverage uneven across sigma quintiles. With the smoothing the same
 decoder keeps the decile-wise bias at most ~2 % (height) while those
 side effects largely disappear.
+
+Conditioning on the decoder's sigma
+-----------------------------------
+How far an estimate is pulled toward the training mix depends on how well
+the chirp is seen: at low SNR the network falls back on its prior more.
+One curve fitted over the validation mix of SNRs then under-corrects
+poorly visible chirps and over-corrects well visible ones (plumbing
+decoder, smallest fifth of heights: +12 % at SNR <= -10 dB, -7 % above 10
+dB after a pooled calibration). SNR is not known at inference, but the
+decoder's own raw sigma is, and it tracks visibility. With
+``sigma_strata = 3`` (default) the validation chirps are split into
+terciles of their raw sigma (per parameter) and each tercile gets its own
+curve; an estimate is mapped with the curve of its sigma's tercile. On the
+plumbing decoder this cut the residual bias of the smallest heights to
++5 % / -1 % and lowered the per-chirp error. A stratum is only used if it
+holds at least ``4 * min_count`` validation chirps (fewer strata
+otherwise; 1 is the pooled curve). A tercile of ~700 chirps gets ~23 bins
+of 30 and a 7-knot smoothing window; on the plumbing decoder its decile
+biases stayed within about +-3 % (height and FWHM) while the per-chirp
+error fell below the pooled curve's.
 
 Uncertainty
 -----------
@@ -114,9 +135,13 @@ class CalibrationConfig:
     min_slope
         Smallest slope of the bias curve ``h`` (its inverse amplifies
         errors by at most ``1 / min_slope``).
-    smooth_knots
-        Knots in the local linear smoothing of the bin medians (odd; 1: no
-        smoothing). See "Fitting the curve".
+    smooth_fraction
+        Window of the local linear smoothing of the bin medians, as a
+        fraction of the knots (0: no smoothing). See "Fitting the curve".
+    sigma_strata
+        Quantile strata of the decoder's raw sigma with their own bias
+        curve (1: one pooled curve). See "Conditioning on the decoder's
+        sigma".
     flag_quantile
         Calibrated sigma above this quantile of the val sigmas flags a
         chirp as ``uncertain`` (`chirpdetector.params.inference`).
@@ -130,9 +155,10 @@ class CalibrationConfig:
 
     method: Method = "inverse-median"
     n_bins: int = 40
-    min_count: int = 50
+    min_count: int = 30
     min_slope: float = 0.5
-    smooth_knots: int = 11
+    smooth_fraction: float = 0.3
+    sigma_strata: int = 3
     flag_quantile: float = 0.995
     fit_from: Mapping[str, float] = field(
         default_factory=lambda: {"undershoot_hz": 1.0}
@@ -152,8 +178,11 @@ class CalibrationConfig:
         if self.n_bins < 2 or self.min_count < 2:
             msg = "calibration.n_bins and min_count must be >= 2"
             raise ValueError(msg)
-        if self.smooth_knots < 1 or self.smooth_knots % 2 != 1:
-            msg = f"calibration.smooth_knots must be an odd number >= 1, got {self.smooth_knots}"
+        if self.sigma_strata < 1:
+            msg = f"calibration.sigma_strata must be >= 1, got {self.sigma_strata}"
+            raise ValueError(msg)
+        if not 0 <= self.smooth_fraction <= 1:
+            msg = f"calibration.smooth_fraction must lie in [0, 1], got {self.smooth_fraction}"
             raise ValueError(msg)
         if not 0 < self.min_slope <= 1:
             msg = f"calibration.min_slope must lie in (0, 1], got {self.min_slope}"
@@ -255,9 +284,9 @@ def fit_bias_map(
     pred: npt.ArrayLike,
     *,
     n_bins: int = 40,
-    min_count: int = 50,
+    min_count: int = 30,
     min_slope: float = 0.5,
-    smooth_knots: int = 11,
+    smooth_fraction: float = 0.3,
 ) -> MonotoneMap:
     """Monotone bias curve ``h(y) = median(pred | true = y)`` (module docstring).
 
@@ -273,8 +302,9 @@ def fit_bias_map(
         See above.
     min_slope
         Smallest slope of the curve.
-    smooth_knots
-        Knots in the local linear smoothing of the bin medians (1: none).
+    smooth_fraction
+        Window of the local linear smoothing of the bin medians, as a
+        fraction of the knots (odd, at least 3; 0: none).
 
     Returns
     -------
@@ -297,8 +327,9 @@ def fit_bias_map(
     keep = np.concatenate([[True], np.diff(x) > 0])  # ties in x: merge
     if not keep.all():
         x, y, counts = x[keep], y[keep], counts[keep]
-    if smooth_knots > 1:
-        y = _local_linear(x, y, counts, smooth_knots)
+    if smooth_fraction > 0 and x.size >= 3:
+        window = max(3, 2 * round(0.5 * smooth_fraction * x.size) + 1)
+        y = _local_linear(x, y, counts, window)
     y = isotonic_regression(y, weights=counts, increasing=True).x
     for k in range(1, x.size):  # minimum slope, so that h can be inverted
         y[k] = max(y[k], y[k - 1] + min_slope * (x[k] - x[k - 1]))
@@ -314,7 +345,12 @@ class ParamCalibration:
     method
         How the maps were fitted.
     maps
-        Parameter -> bias curve ``h`` in model space.
+        Parameter -> bias curve ``h`` in model space, pooled over all
+        validation chirps (used where a parameter has no strata).
+    sigma_edges
+        Parameter -> inner edges of the raw-sigma strata (model space).
+    stratum_maps
+        Parameter -> one bias curve per raw-sigma stratum.
     sigma_scale
         Parameter -> factor on the propagated sigma.
     k95
@@ -325,6 +361,8 @@ class ParamCalibration:
 
     method: str = "none"
     maps: Mapping[str, MonotoneMap] = field(default_factory=dict)
+    sigma_edges: Mapping[str, tuple[float, ...]] = field(default_factory=dict)
+    stratum_maps: Mapping[str, tuple[MonotoneMap, ...]] = field(default_factory=dict)
     sigma_scale: Mapping[str, float] = field(default_factory=dict)
     k95: Mapping[str, float] = field(default_factory=dict)
     fitted_on: Mapping[str, Any] = field(default_factory=dict)
@@ -337,13 +375,19 @@ class ParamCalibration:
         sigma = np.asarray(sigma_log, dtype=np.float64).reshape(mean.shape)
         out_m, out_s = mean.copy(), sigma.copy()
         for j, name in enumerate(PARAMETERS):
-            h = self.maps.get(name, MonotoneMap())
-            out_m[:, j] = h.inverse(mean[:, j])
-            out_s[:, j] = (
-                sigma[:, j]
-                / h.slope(out_m[:, j])
-                * float(self.sigma_scale.get(name, 1.0))
-            )
+            curves = self.stratum_maps.get(name)
+            if curves:
+                stratum = np.digitize(sigma[:, j], self.sigma_edges[name])
+            else:
+                curves = (self.maps.get(name, MonotoneMap()),)
+                stratum = np.zeros(len(mean), dtype=np.int64)
+            for k, h in enumerate(curves):
+                rows = stratum == k
+                if not rows.any():
+                    continue
+                out_m[rows, j] = h.inverse(mean[rows, j])
+                out_s[rows, j] = sigma[rows, j] / h.slope(out_m[rows, j])
+            out_s[:, j] *= float(self.sigma_scale.get(name, 1.0))
         return out_m, out_s
 
     def to_dict(self) -> dict[str, Any]:
@@ -351,6 +395,10 @@ class ParamCalibration:
         return {
             "method": self.method,
             "maps": {k: v.to_dict() for k, v in self.maps.items()},
+            "sigma_edges": {k: list(v) for k, v in self.sigma_edges.items()},
+            "stratum_maps": {
+                k: [m.to_dict() for m in v] for k, v in self.stratum_maps.items()
+            },
             "sigma_scale": dict(self.sigma_scale),
             "k95": dict(self.k95),
             "fitted_on": dict(self.fitted_on),
@@ -362,6 +410,14 @@ class ParamCalibration:
         return cls(
             method=str(data.get("method", "none")),
             maps={k: MonotoneMap.from_dict(v) for k, v in data.get("maps", {}).items()},
+            sigma_edges={
+                k: tuple(float(e) for e in v)
+                for k, v in data.get("sigma_edges", {}).items()
+            },
+            stratum_maps={
+                k: tuple(MonotoneMap.from_dict(m) for m in v)
+                for k, v in data.get("stratum_maps", {}).items()
+            },
             sigma_scale={k: float(v) for k, v in data.get("sigma_scale", {}).items()},
             k95={k: float(v) for k, v in data.get("k95", {}).items()},
             fitted_on=dict(data.get("fitted_on", {})),
@@ -400,23 +456,42 @@ def fit_calibration(
     from chirpdetector.params.model import LOG_OFFSETS
 
     maps: dict[str, MonotoneMap] = {}
+    edges: dict[str, tuple[float, ...]] = {}
+    strata: dict[str, tuple[MonotoneMap, ...]] = {}
+
+    def curve(rows: npt.NDArray[np.bool_], j: int) -> MonotoneMap:
+        return fit_bias_map(
+            y[rows, j],
+            m[rows, j],
+            n_bins=config.n_bins,
+            min_count=config.min_count,
+            min_slope=config.min_slope,
+            smooth_fraction=config.smooth_fraction,
+        )
+
     for j, name in enumerate(PARAMETERS):
-        if config.method == "inverse-median":
-            lowest = config.fit_from.get(name)
-            use = np.ones(len(y), dtype=bool)
-            if lowest is not None:
-                use = y[:, j] >= np.log(lowest + LOG_OFFSETS[name])
-            maps[name] = fit_bias_map(
-                y[use, j],
-                m[use, j],
-                n_bins=config.n_bins,
-                min_count=config.min_count,
-                min_slope=config.min_slope,
-                smooth_knots=config.smooth_knots,
-            )
-        else:
+        if config.method != "inverse-median":
             maps[name] = MonotoneMap()
-    raw = ParamCalibration(method=config.method, maps=maps)
+            continue
+        lowest = config.fit_from.get(name)
+        finite = np.isfinite(y[:, j]) & np.isfinite(m[:, j]) & np.isfinite(s[:, j])
+        use = finite.copy()
+        if lowest is not None:
+            use &= y[:, j] >= np.log(lowest + LOG_OFFSETS[name])
+        maps[name] = curve(use, j)
+        k = config.sigma_strata
+        while k > 1:
+            inner = np.quantile(s[finite, j], np.arange(1, k) / k)
+            stratum = np.digitize(s[:, j], inner)
+            counts = [int(np.count_nonzero(use & (stratum == i))) for i in range(k)]
+            if min(counts) >= 4 * config.min_count and np.all(np.diff(inner) > 0):
+                edges[name] = tuple(float(e) for e in inner)
+                strata[name] = tuple(curve(use & (stratum == i), j) for i in range(k))
+                break
+            k -= 1
+    raw = ParamCalibration(
+        method=config.method, maps=maps, sigma_edges=edges, stratum_maps=strata
+    )
     cal_m, cal_s = raw.apply(m, s)
     scale, k95, counts = {}, {}, {}
     for j, name in enumerate(PARAMETERS):
@@ -428,10 +503,16 @@ def fit_calibration(
         z = np.abs(cal_m[ok, j] - y[ok, j]) / cal_s[ok, j]
         scale[name] = float(np.quantile(z, _COVERAGE_68))
         k95[name] = float(np.quantile(z / scale[name], 0.95))
-    provenance = {"n": counts, **dict(fitted_on or {})}
+    provenance = {
+        "n": counts,
+        "sigma_strata": {p: len(strata.get(p, ())) or 1 for p in PARAMETERS},
+        **dict(fitted_on or {}),
+    }
     return ParamCalibration(
         method=config.method,
         maps=maps,
+        sigma_edges=edges,
+        stratum_maps=strata,
         sigma_scale=scale,
         k95=k95,
         fitted_on=provenance,
