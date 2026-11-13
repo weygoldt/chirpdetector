@@ -47,6 +47,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from chirpdetector.bundle import Bundle
+from chirpdetector.pipeline.assign import ATTRIBUTED
 
 __all__ = [
     "COLUMN_DOCS",
@@ -73,18 +74,18 @@ COLUMN_DOCS: dict[str, str] = {
     "t_start_s": "box start, seconds from the recording's first sample",
     "t_end_s": "box end, seconds from the recording's first sample",
     "t_center_s": "box centre (t_start_s + t_end_s) / 2; the legacy chirp time",
-    "f_low_hz": "box lower edge (Hz)",
-    "f_high_hz": "box upper edge (Hz)",
+    "f_low_hz": "box lower edge (Hz; halved for re-attributed copies)",
+    "f_high_hz": "box upper edge (Hz; halved for re-attributed copies)",
     "score": "detector score (stored down to the store threshold)",
     "operating": "score >= the run's operating threshold",
     "kept": "not flagged by post-processing (pp_drop_reason == '')",
     "chirp": "operating and kept: counts as a chirp",
-    "emitter_hz": "emitter baseline EODf predicted by the dual-head (NaN for box-only models)",
+    "emitter_hz": "emitter baseline EODf predicted by the dual-head (NaN for box-only models; halved for re-attributed copies)",
     "track_id": "assigned wavetracker identity, ident_v value unchanged (float64; NaN = unassigned)",
     "track_hz": "assigned track's baseline before the onset (Hz; NaN if unassigned)",
     "emitter_track_df_hz": "|emitter_hz - track_hz| of the assigned track",
-    "assign_status": "assigned | beyond_tolerance | no_live_track | no_tracks | no_emitter",
-    "assign_confidence": "posterior that the nearest live track is the emitter (Student-t error model, see assign.py)",
+    "assign_status": "assigned | reattributed | beyond_tolerance | no_live_track | no_tracks | no_emitter",
+    "assign_confidence": "posterior that the nearest live track is the emitter (Student-t error model, see assign.py; NaN for re-attributed copies)",
     "nearest_track_id": "nearest live track to emitter_hz, regardless of the tolerance",
     "nearest_track_hz": "its baseline (Hz)",
     "nearest_df_hz": "|emitter_hz - nearest_track_hz|",
@@ -102,8 +103,8 @@ COLUMN_DOCS: dict[str, str] = {
     "width10_sd_s": "decoder: calibrated sd of width10_s",
     "undershoot_hz": "decoder: undershoot below baseline after the peak (Hz)",
     "undershoot_sd_hz": "decoder: calibrated sd of undershoot_hz",
-    "params_ok": "decoder: box inside the decoder's validated domain",
-    "params_flag": "decoder: why not (edge, band, size, uncertain; comma-separated)",
+    "params_ok": "decoder: box inside the decoder's validated domain (False for re-attributed copies)",
+    "params_flag": "decoder: why not (edge, band, size, uncertain; 'harmonic' for re-attributed copies, whose decoder values are NaN)",
     "height_raw_hz": "decoder: uncalibrated height (shrunk toward the training mix; for population spreads)",
     "fwhm_raw_s": "decoder: uncalibrated FWHM",
     "width10_raw_s": "decoder: uncalibrated 10 % width",
@@ -112,6 +113,10 @@ COLUMN_DOCS: dict[str, str] = {
     "pp_harmonic_of_track": "post-processing: track whose 2nd harmonic the box lies on",
     "pp_harmonic_pair_of": "post-processing (trackless pair rule): chirp_id of the detection at half the frequency",
     "pp_duplicate_of": "post-processing: chirp_id of the kept twin",
+    "pp_reattributed": "post-processing: 'harmonic' for a copy whose fundamental was not detected, kept and given to its fish (pp_harmonic_of_track) at half the frequency; evaluated at the operating threshold",
+    "pp_harmonic_emitter_hz": "re-attributed copies: the detected emitter_hz (at the harmonic)",
+    "pp_harmonic_f_low_hz": "re-attributed copies: the detected box's lower edge",
+    "pp_harmonic_f_high_hz": "re-attributed copies: the detected box's upper edge",
     "click_fraction_box": "fraction of the box's samples with a repaired click (any electrode; NaN: no click removal)",
     "span_click_fraction": "fraction of the span's samples with a repaired click",
     "span_n_click_runs": "repaired click runs in the span",
@@ -229,14 +234,16 @@ def legacy_arrays(chirps: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     detections with score >= 0.5 that had an assigned track (unassigned
     detections are not in the arrays; no NaN, no -1). Here: rows with
     ``chirp`` (score >= operating threshold and not flagged by
-    post-processing) and ``assign_status == "assigned"``, sorted by time
+    post-processing) and ``assign_status`` ``assigned`` or ``reattributed``
+    (a harmonic copy whose fundamental was missed counts for its fish),
+    sorted by time
     (v1 sorted by box start, so its times were only nearly sorted).
     """
     if not len(chirps):
         return np.zeros(0, dtype=LEGACY_DTYPE), np.zeros(0, dtype=LEGACY_DTYPE)
     sel = chirps.loc[
         chirps["chirp"].to_numpy(dtype=bool)
-        & (chirps["assign_status"].to_numpy(dtype=object) == "assigned")
+        & np.isin(chirps["assign_status"].to_numpy(dtype=object), ATTRIBUTED)
     ].sort_values("t_center_s", kind="stable")
     times = sel["t_center_s"].to_numpy(dtype=LEGACY_DTYPE)
     ids = sel["track_id"].to_numpy(dtype=LEGACY_DTYPE)

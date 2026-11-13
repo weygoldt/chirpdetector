@@ -73,6 +73,7 @@ from chirpdetector.pipeline.config import AssignmentConfig
 __all__ = [
     "ASSIGN_COLUMNS",
     "ASSIGN_STATUS",
+    "ATTRIBUTED",
     "SIM_V4_DUALHEAD",
     "ErrorModel",
     "assign_detections",
@@ -81,12 +82,21 @@ __all__ = [
 
 ASSIGN_STATUS = (
     "assigned",
+    "reattributed",
     "beyond_tolerance",
     "no_live_track",
     "no_tracks",
     "no_emitter",
 )
-"""Values of ``assign_status``."""
+"""Values of ``assign_status``.
+
+``reattributed``: a second-harmonic copy whose fundamental was not
+detected, given to the fish at half its frequency by post-processing
+(`chirpdetector.pipeline.run.reattributed_assignment`).
+"""
+
+ATTRIBUTED = ("assigned", "reattributed")
+"""Statuses with a track id: the detection belongs to that fish."""
 
 ASSIGN_COLUMNS = (
     "track_id",

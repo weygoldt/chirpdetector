@@ -63,8 +63,14 @@ BOX_FIELDS = (
     "operating",
     "kept",
     "chirp",
+    "reattributed",
+    "pp_harmonic_f_low_hz",
+    "pp_harmonic_f_high_hz",
+    "pp_harmonic_emitter_hz",
 )
-"""Fields of the ``boxes`` array of a window's npz."""
+"""Fields of the ``boxes`` array of a window's npz (``reattributed``: 1 for
+a re-attributed harmonic copy, whose detected box is in ``pp_harmonic_*``
+and whose ``f_*``/``emitter_hz`` are halved)."""
 
 
 class _Row:
@@ -134,7 +140,9 @@ def sample_windows(
     if len(table) and n_low:
         op = operating if operating is not None else 0.5
         uncertain = (
-            (table["assign_status"].to_numpy(dtype=object) != "assigned")
+            (
+                table["assign_status"].to_numpy(dtype=object) != "assigned"
+            )  # incl. re-attributed
             | ~(table["assign_confidence"].fillna(0).to_numpy(dtype=float) >= 0.8)
             | (np.abs(table["score"].to_numpy(dtype=float) - op) <= 0.15)
         ) & (table["score"].to_numpy(dtype=float) >= max(0.0, op - 0.15))
@@ -252,6 +260,14 @@ def render_window(
         )
         ax.text(tt[0], ff[0], f" {tid:g}", color=colours[tid], fontsize=7, va="bottom")
     for rec in in_win.to_dict("records"):
+        again = rec.get("pp_reattributed") == "harmonic"
+        if again:  # draw the detected box, at the harmonic
+            rec = {
+                **rec,
+                "f_low_hz": rec["pp_harmonic_f_low_hz"],
+                "f_high_hz": rec["pp_harmonic_f_high_hz"],
+                "emitter_hz": rec["pp_harmonic_emitter_hz"],
+            }
         row = _Row(rec)
         tid = getattr(row, "track_id", np.nan)
         assigned = np.isfinite(tid)
@@ -282,7 +298,9 @@ def render_window(
             )
         conf = getattr(row, "assign_confidence", np.nan)
         label = f"{row.score:.2f}"
-        if assigned:
+        if again:
+            label += f" 2nd harmonic of id {tid:g}"
+        elif assigned:
             label += f" id {tid:g}"
             if np.isfinite(conf):
                 label += f" p={conf:.2f}"
@@ -314,7 +332,9 @@ def render_window(
     plt.close(fig)
     boxes = np.zeros(len(in_win), dtype=[(f, "f8") for f in BOX_FIELDS])
     for f in BOX_FIELDS:
-        if f in in_win.columns:
+        if f == "reattributed" and "pp_reattributed" in in_win.columns:
+            boxes[f] = in_win["pp_reattributed"].to_numpy(dtype=object) == "harmonic"
+        elif f in in_win.columns:
             boxes[f] = in_win[f].to_numpy(dtype=np.float64, na_value=np.nan)
         else:
             boxes[f] = np.nan
