@@ -214,6 +214,41 @@ For population distributions, calibrated estimates are wider than the truth
 (blurred by the error) and uncalibrated ones are pulled toward the training
 mix; the report measures both against the truth.
 
+## Detecting chirps in recordings
+
+`chirpdetector run` runs a detector bundle (and optionally a chirp-parameter
+decoder) over whole recordings and assigns the detections to the recordings'
+wavetracker tracks:
+
+```sh
+chirpdetector run CONFIG.toml REC_DIR...            # some recordings
+chirpdetector run CONFIG.toml --dataset ROOT         # every recording in ROOT
+chirpdetector run CONFIG.toml REC_DIR --dry-run      # 300 s per recording
+chirpdetector run CONFIG.toml --dataset ROOT --list  # what is done / to do
+```
+
+The config names the bundles, the store threshold (every detection down to
+it is kept, so the operating threshold can change later), the operating
+threshold, the track source and tolerance, and the compute budget; see
+`chirpdetector.pipeline.config` for every key. Runs are resumable (finished
+recordings are skipped; each recording's directory appears only when
+complete), a failing recording is logged and skipped, and the GPU share is
+capped by the config and by `CHIRP_MAX_VRAM_FRACTION`. Outputs go to
+`OUT/<run>/<recording>/`: `chirps_<model>.parquet` (one row per detection:
+box, score, emitter frequency, track assignment with confidence, chirp
+parameters, post-processing flags, click statistics; `columns.md` in the run
+directory documents every column), `meta.json` (inputs, models, code, config,
+counts, timings), legacy `chirp_times_<model>.npy`/`chirp_ids_<model>.npy`
+(the semantics of v1's `_rcnn` arrays), a QC report and annotated sample
+windows; plus `run.json`, `run.log` and `candidates.csv` (validation sample
+for `label-emitters --candidates`) per run.
+
+Inference is chunked on the recording's global tile grid, so the result equals
+`predict_span` on the whole recording; `chirpdetector check-reference CONFIG
+REC_DIR` compares the two on a part of a recording. `chirpdetector render RUN
+RECORDING T0 T1` re-renders any window from a run's outputs (spectrogram
+recomputed from the raw data; PNG plus an NPZ with the data to redraw it).
+
 ## Development
 
 chirpdetector depends on [gridtools](https://github.com/weygoldt/gridtools),
