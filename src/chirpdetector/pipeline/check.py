@@ -11,7 +11,6 @@ comparison (they are deterministic functions of the detections).
 
 from __future__ import annotations
 
-import inspect
 import time
 from typing import Any
 
@@ -50,10 +49,6 @@ def compare_with_reference(
     a = round(start_s * fs)
     b = min(int(recording.n_samples), a + round(duration_s * fs))
     part = RecordingSlice(recording, a, b)
-    kwargs: dict[str, Any] = {}
-    params = inspect.signature(predict_span).parameters
-    if "postprocess" in params:  # post-processing is compared separately
-        kwargs["postprocess"] = False
     t = time.perf_counter()
     ref = predict_span(
         bundle,
@@ -65,7 +60,7 @@ def compare_with_reference(
         detector=detector,
         device=device,
         params=estimator,
-        **kwargs,
+        postprocess=False,  # no tracks: no assignment; filtering is not compared
     )
     ref_s = time.perf_counter() - t
     t = time.perf_counter()

@@ -104,6 +104,10 @@ COLUMN_DOCS: dict[str, str] = {
     "undershoot_sd_hz": "decoder: calibrated sd of undershoot_hz",
     "params_ok": "decoder: box inside the decoder's validated domain",
     "params_flag": "decoder: why not (edge, band, size, uncertain; comma-separated)",
+    "height_raw_hz": "decoder: uncalibrated height (shrunk toward the training mix; for population spreads)",
+    "fwhm_raw_s": "decoder: uncalibrated FWHM",
+    "width10_raw_s": "decoder: uncalibrated 10 % width",
+    "undershoot_raw_hz": "decoder: uncalibrated undershoot",
     "pp_drop_reason": "post-processing: '' (kept), 'harmonic' or 'duplicate'",
     "pp_harmonic_of_track": "post-processing: track whose 2nd harmonic the box lies on",
     "pp_harmonic_pair_of": "post-processing (trackless pair rule): chirp_id of the detection at half the frequency",
@@ -115,7 +119,7 @@ COLUMN_DOCS: dict[str, str] = {
     "span_id": "chunk (span) index; see chunks_<model>.parquet",
     "model_sha256": "sha256 of the detector weights",
 }
-"""Documentation of the chirp table's columns (raw decoder columns, if any, follow the calibrated ones)."""
+"""Documentation of the chirp table's columns, in table order."""
 
 
 def model_tag(bundle: Bundle) -> str:

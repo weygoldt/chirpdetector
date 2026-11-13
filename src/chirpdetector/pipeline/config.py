@@ -108,8 +108,10 @@ class DetectionConfig:
         the compatibility export and the QC use it). None: the detector
         bundle's threshold.
     postprocess
-        Flag harmonic copies and duplicates (`chirpdetector.postprocess`,
-        when available); flagged rows are kept and marked, never dropped.
+        Flag harmonic copies and duplicates (`chirpdetector.postprocess`
+        with its default rules, the assignment's ``max_gap_s`` and the
+        pipeline's assignment as ``emitter_id``); flagged rows are kept and
+        marked, never dropped.
     """
 
     store_threshold: float = 0.05

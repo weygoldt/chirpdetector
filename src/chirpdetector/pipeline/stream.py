@@ -840,9 +840,9 @@ def _detect_chunk(
 
 
 def _empty_params() -> pd.DataFrame:
-    from chirpdetector.params.inference import PARAM_COLUMNS
+    from chirpdetector.params.inference import ESTIMATE_COLUMNS
 
-    data: dict[str, Any] = {c: pd.Series(dtype=float) for c in PARAM_COLUMNS}
+    data: dict[str, Any] = {c: pd.Series(dtype=float) for c in ESTIMATE_COLUMNS}
     data["params_ok"] = pd.Series(dtype=bool)
     data["params_flag"] = pd.Series(dtype=object)
     return pd.DataFrame(data)

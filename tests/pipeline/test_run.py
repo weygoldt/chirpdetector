@@ -418,3 +418,67 @@ candidates_per_cell = 0
     assert meta["t_range_s"] == [0.0, 3.0]
     table, _ = read_chirps(rec / "chirps_rtdetr.parquet")
     assert table["t_center_s"].to_numpy().max() < 3.0 + 3.2
+
+
+def test_filter_uses_the_pipeline_assignment(
+    tmp_path: Path, stub_bundle: Bundle
+) -> None:
+    """One assignment: the filter sees track_id as emitter_id, flags, keeps rows."""
+    from gridtools.io import Tracks
+
+    from chirpdetector.pipeline.assign import assign_detections
+    from chirpdetector.pipeline.run import _postprocess, build_table, postprocess_config
+
+    times = np.round(np.arange(0.0, 60.0, 0.1), 6)
+    t1 = times[(times < 20) | (times > 25)]  # a 5-s gap: live for max_gap 10 s
+    t2 = times
+    tracks = Tracks(
+        times_s=times,
+        freqs_hz=np.r_[np.full(len(t1), 700.0), np.full(len(t2), 760.0)],
+        idents=np.r_[np.full(len(t1), 4.0), np.full(len(t2), 9.0)],
+        time_indices=np.r_[np.searchsorted(times, t1), np.searchsorted(times, t2)],
+    )
+    det = pd.DataFrame(
+        {
+            "recording": "r",
+            "t_start_s": [10.0, 10.01, 30.0, 22.0],
+            "t_end_s": [10.2, 10.2, 30.2, 22.2],
+            "f_low_hz": [690.0, 692.0, 1390.0, 690.0],
+            "f_high_hz": [800.0, 795.0, 1500.0, 800.0],
+            "score": [0.9, 0.6, 0.8, 0.7],
+            "emitter_hz": [701.0, 701.5, 1400.5, 700.5],
+            "tile": [1, 1, 2, 3],
+            "span_id": [0, 0, 0, 0],
+        }
+    )
+    cfg = _config(tmp_path, stub_bundle, assignment={"max_gap_s": 10.0})
+    assert postprocess_config(cfg).max_gap_s == cfg.assignment.max_gap_s
+    assignment = assign_detections(det, tracks, cfg.assignment)
+    flagged, info = _postprocess(det, assignment, tracks, "r", cfg)
+    assert info["status"] == "applied"
+    assert info["counts"]["duplicate"] == 1
+    assert info["counts"]["harmonic"] == 1
+    assert flagged["pp_drop_reason"].tolist() == ["", "duplicate", "harmonic", ""]
+    assert flagged["pp_duplicate_of"].tolist()[1] == 0
+    assert flagged["pp_harmonic_of_track"].tolist()[2] == 4.0
+    # the detection in track 4's 5-s gap is assigned and protected
+    assert assignment["track_id"].tolist()[3] == 4.0
+    chunks = pd.DataFrame(
+        {"span_id": [0], "click_fraction": [0.0], "n_click_runs": [0]}
+    )
+    table = build_table("r", flagged, assignment, chunks, 0.5)
+    assert table["kept"].tolist() == [True, False, True, False]  # sorted by time
+    assert table.loc[
+        table["pp_drop_reason"] == "duplicate", "pp_duplicate_of"
+    ].tolist() == [0]
+    _, ids_out = legacy_arrays(table)
+    np.testing.assert_array_equal(ids_out, [4.0, 4.0])  # neither copy nor duplicate
+    off, off_info = _postprocess(
+        det,
+        assignment,
+        tracks,
+        "r",
+        cfg.with_overrides(detection={"postprocess": False}),
+    )
+    assert off_info["status"] == "off"
+    assert (off["pp_drop_reason"].to_numpy() == "").all()

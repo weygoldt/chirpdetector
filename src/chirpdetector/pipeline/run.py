@@ -12,16 +12,16 @@ Per recording (`process_recording`):
 
 1. open the recording (memory-mapped) and its tracks;
 2. detect and decode chunk by chunk (`stream.detect_recording`);
-3. post-process (`chirpdetector.postprocess`, if available: harmonic copies
-   and duplicates are flagged, never removed);
-4. assign to tracks (`assign.assign_detections`);
+3. assign to tracks (`assign.assign_detections`), the one assignment of
+   the run;
+4. flag harmonic copies and duplicates (`chirpdetector.postprocess`, with
+   that assignment and the same track liveness); flagged rows are kept;
 5. write the chirp table, chunk table, legacy arrays, QC report, sample
    windows and ``meta.json`` (last).
 """
 
 from __future__ import annotations
 
-import importlib
 import json
 import logging
 import math
@@ -40,6 +40,7 @@ import pandas as pd
 from gridtools.io import Tracks, load_tracks, open_recording, read_fishgrid_config
 
 from chirpdetector.bundle import Bundle, load_bundle
+from chirpdetector.params.inference import RAW_COLUMNS
 from chirpdetector.pipeline.assign import (
     ASSIGN_COLUMNS,
     SIM_V4_DUALHEAD,
@@ -59,6 +60,7 @@ from chirpdetector.pipeline.outputs import (
     write_parquet,
 )
 from chirpdetector.pipeline.stream import detect_recording
+from chirpdetector.postprocess import PostprocessConfig, flag_detections, summarize
 from chirpdetector.prediction import load_detector
 from chirpdetector.resources import apply_vram_limit
 
@@ -241,43 +243,52 @@ def load_models(config: PipelineConfig) -> Models:
 # ------------------------------------------------------------- postprocess
 
 
-def _postprocess(
-    detections: pd.DataFrame, tracks: Tracks | None, name: str, enabled: bool
-) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Flag harmonic copies and duplicates, as `predict_span` does.
+def postprocess_config(config: PipelineConfig) -> PostprocessConfig:
+    """The filter's settings: its defaults, with the pipeline's liveness rule.
 
-    Uses `chirpdetector.postprocess` if this installation has it; then
-    emitters are first assigned with `assign_by_frequency` at the
-    post-processing's fundamental tolerance, as `predict_span` does, and
-    that provisional assignment is removed again (the pipeline's own
-    assignment follows). Without the module, nothing is flagged.
+    ``max_gap_s`` is the assignment's, so that a track that is live for the
+    assignment is live for the harmonic rule too.
+    """
+    return PostprocessConfig(max_gap_s=float(config.assignment.max_gap_s))
+
+
+def _postprocess(
+    detections: pd.DataFrame,
+    assignment: pd.DataFrame,
+    tracks: Tracks | None,
+    name: str,
+    config: PipelineConfig,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Flag harmonic copies and duplicates (`chirpdetector.postprocess`).
+
+    One assignment for everything: the pipeline's (`assign_detections`)
+    is passed to the filter as ``emitter_id``, instead of the provisional
+    one `predict_span` makes with ``tracks`` (box centre, 50 Hz). The
+    filter's fundamental interval (``emitter_hz`` +- 50 Hz with a live
+    track) protects every assigned detection anyway (tolerance 20 Hz), so
+    only the duplicate rule's "same emitter" test sees the difference.
+    Rows are flagged, never removed.
     """
     n = len(detections)
-    empty = {
-        "pp_drop_reason": np.full(n, "", dtype=object),
-        "pp_harmonic_of_track": np.full(n, np.nan),
-        "pp_harmonic_pair_of": pd.array([pd.NA] * n, dtype="Int64"),
-        "pp_duplicate_of": pd.array([pd.NA] * n, dtype="Int64"),
-    }
-    if not enabled:
+    if not config.detection.postprocess:
+        empty = {
+            "pp_drop_reason": np.full(n, "", dtype=object),
+            "pp_harmonic_of_track": np.full(n, np.nan),
+            "pp_harmonic_pair_of": pd.array([pd.NA] * n, dtype="Int64"),
+            "pp_duplicate_of": pd.array([pd.NA] * n, dtype="Int64"),
+        }
         return detections.assign(**empty), {"status": "off"}
-    try:
-        pp = importlib.import_module("chirpdetector.postprocess")
-    except ImportError:
-        log.warning("chirpdetector.postprocess is not available; nothing flagged")
-        return detections.assign(**empty), {"status": "unavailable"}
-    config = pp.PostprocessConfig()
+    pp_config = postprocess_config(config)
     table = detections.reset_index(drop=True)
-    provisional = False
-    if tracks is not None and "emitter_hz" in table.columns:
-        from chirpdetector.evaluation.assignment import assign_by_frequency
-
-        table = assign_by_frequency(
-            table, {name: tracks}, float(config.fundamental_tolerance_hz)
+    if "emitter_hz" in table.columns:
+        ids = assignment["track_id"].to_numpy(dtype=np.float64)
+        emitter_id = pd.array(
+            np.nan_to_num(ids, nan=-1).astype(np.int64), dtype="Int64"
         )
-        provisional = True
-    flagged = pp.flag_detections(
-        table, None if tracks is None else {name: tracks}, config
+        emitter_id[~np.isfinite(ids)] = pd.NA
+        table = table.assign(emitter_id=emitter_id)
+    flagged = flag_detections(
+        table, None if tracks is None else {name: tracks}, pp_config
     )
     out = detections.reset_index(drop=True).copy()
     out["pp_drop_reason"] = flagged["drop_reason"].astype(object).to_numpy()
@@ -286,28 +297,17 @@ def _postprocess(
         .astype("Float64")
         .to_numpy(dtype=np.float64, na_value=np.nan)
     )
-    out["pp_harmonic_pair_of"] = flagged["harmonic_pair_of"].astype("Int64").to_numpy()
-    out["pp_duplicate_of"] = flagged["duplicate_of"].astype("Int64").to_numpy()
-    for col in ("pp_harmonic_pair_of", "pp_duplicate_of"):
-        out[col] = out[col].astype("Int64")
+    out["pp_harmonic_pair_of"] = flagged["harmonic_pair_of"].astype("Int64")
+    out["pp_duplicate_of"] = flagged["duplicate_of"].astype("Int64")
     info = {
         "status": "applied",
-        "config": _asdict(config),
-        "provisional_assignment": (
-            f"assign_by_frequency at the box centre, tolerance "
-            f"{config.fundamental_tolerance_hz} Hz (as predict_span)"
-            if provisional
-            else None
-        ),
-        "counts": {k: int(v) for k, v in pp.summarize(flagged).items()},
+        "config": pp_config.to_dict(),
+        "emitter_id": "the pipeline's assignment (track_id)"
+        if "emitter_hz" in table.columns
+        else None,
+        "counts": {k: int(v) for k, v in summarize(flagged).items()},
     }
     return out, info
-
-
-def _asdict(obj: Any) -> dict[str, Any]:
-    from dataclasses import asdict, is_dataclass
-
-    return asdict(obj) if is_dataclass(obj) and not isinstance(obj, type) else {}
 
 
 # ------------------------------------------------------------------ table
@@ -357,7 +357,7 @@ def build_table(
         df["span_n_click_runs"] = 0
     df = df.rename(columns={"tile": "tile"})
     ordered = [c for c in COLUMN_DOCS if c in df.columns]
-    raw_decoder = [c for c in df.columns if c.endswith("_raw") or c.startswith("raw_")]
+    raw_decoder = [c for c in RAW_COLUMNS if c in df.columns]
     extra = [c for c in df.columns if c not in ordered and c not in raw_decoder]
     extra = [c for c in extra if c not in ("image_index",)]
     # raw decoder columns right after the calibrated ones
@@ -470,11 +470,7 @@ def process_recording(
         progress=progress,
     )
     t = time.perf_counter()
-    detections, pp_info = _postprocess(
-        result.detections, tracks, name, config.detection.postprocess
-    )
-    pp_s = time.perf_counter() - t
-    t = time.perf_counter()
+    detections = result.detections.reset_index(drop=True)
     assignment = assign_detections(
         detections,
         tracks if models.has_emitter else None,
@@ -484,6 +480,9 @@ def process_recording(
     if not models.has_emitter:
         assignment["assign_status"] = "no_emitter"
     assign_s = time.perf_counter() - t
+    t = time.perf_counter()
+    detections, pp_info = _postprocess(detections, assignment, tracks, name, config)
+    pp_s = time.perf_counter() - t
     table = build_table(name, detections, assignment, result.chunks, operating)
     times, ids = legacy_arrays(table)
     counts = _counts(table, result)
@@ -992,9 +991,6 @@ def _columns_md() -> str:
     ]
     lines += [f"| `{k}` | {v} |" for k, v in COLUMN_DOCS.items()]
     lines += [
-        "",
-        "Uncalibrated decoder columns (if the decoder provides them) follow",
-        "`params_flag`.",
         "",
         "Assignment columns: " + ", ".join(f"`{c}`" for c in ASSIGN_COLUMNS) + ".",
     ]

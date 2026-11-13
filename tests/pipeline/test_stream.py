@@ -46,17 +46,7 @@ def _reference(bundle: Bundle, rec, threshold: float = 0.05) -> pd.DataFrame:
         name="r",
         score_threshold=threshold,
         detector=load_detector(bundle),
-        **_no_postprocess(),
-    )
-
-
-def _no_postprocess() -> dict:
-    import inspect
-
-    return (
-        {"postprocess": False}
-        if "postprocess" in inspect.signature(predict_span).parameters
-        else {}
+        postprocess=False,
     )
 
 
