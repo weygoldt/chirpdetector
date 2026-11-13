@@ -186,6 +186,82 @@ provenance and attached metrics. Metrics are attached with
 by the bundle's own weights (`chirpdetector.prediction` records their
 hash).
 
+## Detecting chirps
+
+```python
+from gridtools.io import load_tracks, open_recording
+from chirpdetector.inference import predict_span
+
+trial = "/mnt/data2/2019_tube_competition/2019-12-09-10_00"
+detections = predict_span(
+    "/mnt/data1/chirp_v2/runs/dualhead_r18_sim_v4_r1/final/bundle",
+    open_recording(trial),
+    1140.0,
+    1420.0,
+    name="2019-12-09-10_00",
+    tracks=load_tracks(trial),
+    params="/mnt/data1/chirp_v2/params/runs/v4-dualhead-sim-v4/bundle",
+)
+```
+
+`predict_span` tiles the span as the detector datasets were tiled, runs the
+model, merges overlapping tiles, assigns each detection of an emitter-head
+model to the nearest live track (`emitter_id`, within 50 Hz of
+`emitter_hz`), adds the chirp parameters (with `params`) and post-processes
+the detections.
+
+**Post-processing** (`chirpdetector.postprocess`, on by default) removes
+two kinds of false positives:
+
+- *second-harmonic copies*: the second harmonic of a fish below 750 Hz lies
+  in the 500-1500 Hz band, and so does a copy of each of its chirps. A
+  detection is a copy if its emitter frequency (`emitter_hz`; for box-only
+  models a window above the box's lower edge) lies within 15 Hz of twice a
+  live track's frequency while no live track lies within 50 Hz of it (and it
+  has no assigned emitter). A fish at twice another fish's frequency keeps
+  its chirps. Without tracks, a detection at half the frequency of a
+  co-occurring, at least as confident one is only flagged
+  (`harmonic_pair_of`), unless `PostprocessConfig(trackless="drop")`.
+- *duplicates*: two boxes on one chirp, the higher score is kept. With an
+  emitter head: `emitter_hz` within 5 Hz, the same `emitter_id` and
+  temporal IoU >= 0.7; box-only: lower edges within 2 Hz, temporal and
+  frequency IoU >= 0.5. Two chirps of one fish in quick succession, and
+  simultaneous chirps of two fish, are not merged.
+
+`postprocess=False` switches it off, `keep_dropped=True` returns the dropped
+detections as well, with `drop_reason` (`harmonic`, `duplicate`),
+`harmonic_of_id` and `duplicate_of`, and `postprocess=PostprocessConfig(...)`
+changes the tolerances; settings and counts are in
+`detections.attrs["provenance"]`. Tracks count as alive across gaps of up
+to 10 s (`track_max_gap_s`, the production pipeline's rule). The defaults
+and the data behind them are documented in `chirpdetector.postprocess`. Effect on the final detectors
+(hand labels: v1 benchmark rule at score 0.5; sim_v4 test tiles):
+
+| detector | data | stage | TP | FP | FN | precision | recall | F1 | best F1 (threshold) |
+|---|---|---|---|---|---|---|---|---|---|
+| dual-head | real labels | before | 335 | 51 | 0 | 0.868 | 1.000 | 0.929 | 0.952 (0.85) |
+| dual-head | real labels | after | 335 | 51 | 0 | 0.868 | 1.000 | 0.929 | 0.952 (0.85) |
+| dual-head | sim_v4 test | before | 9,000 | 336 | 401 | 0.964 | 0.957 | 0.961 | 0.964 (0.65) |
+| dual-head | sim_v4 test | after | 8,999 | 225 | 402 | 0.976 | 0.957 | 0.966 | 0.967 (0.60) |
+| YOLO26s | real labels | before | 335 | 47 | 0 | 0.877 | 1.000 | 0.934 | 0.955 (0.85) |
+| YOLO26s | real labels | after | 335 | 44 | 0 | 0.884 | 1.000 | 0.938 | 0.957 (0.85) |
+| YOLO26s | sim_v4 test | before | 8,949 | 173 | 452 | 0.981 | 0.952 | 0.966 | 0.966 (0.55) |
+| YOLO26s | sim_v4 test | after | 8,948 | 101 | 453 | 0.989 | 0.952 | 0.970 | 0.971 (0.45) |
+
+On the real labels, the copies (dual-head: 27 at score >= 0.5, YOLO26s: 10,
+e.g. at about 1,280 Hz above a 641 Hz fish) lie above the labelled regions'
+frequency bands and so do not count; no real true positive is lost at any
+threshold. On sim_v4, one true positive per detector and threshold (0.5,
+best F1, 0.05) is lost. Dual-head: three different ones, each a correctly
+dropped box (two harmonic copies, one duplicate of a fish's chirp) that
+the frequency-overlap matching had credited to another fish's chirp.
+YOLO26s: the same one at every threshold, two identical boxes on
+simultaneous chirps of two fish 23 Hz apart. All 6,749 visible test chirps, as perfect detections, survive with
+an emitter head (1,491 of them within 0.5 s of another chirp of the same
+fish); box only, one is merged. Run:
+`/mnt/data1/chirp_v2/runs/scripts/eval_postprocess.py`, output in
+`RUN/eval_postprocess/`.
+
 ## Chirp parameters
 
 `chirpdetector.params` is a second-stage decoder that estimates, for every
@@ -260,7 +336,13 @@ and 0 otherwise), plus `params_ok`
 and `params_flag` (`edge`: the crop crosses the recording's edge; `band`: the
 box reaches the edge of the front end's band; `size`: a box larger or smaller than any
 in training; `uncertain`: a sd above the 99.5th percentile of the validation
-chirps).
+chirps), and the uncalibrated estimates `height_raw_hz, fwhm_raw_s,
+width10_raw_s, undershoot_raw_hz` (`chirpdetector.params.RAW_COLUMNS`: the
+decoder's own estimate, without the inverse bias curve; no sds). Use the
+calibrated columns per chirp; for population distributions, the raw ones
+are pulled toward the training mix and the calibrated ones blurred by the
+amplified error, so compare both (the evaluation report measures each
+against the truth).
 
 **Evaluation** (`chirpdetector evaluate params`, report in `BUNDLE/eval/`):
 errors by family, SNR, ΔF, overlap, template reuse and decile of the true

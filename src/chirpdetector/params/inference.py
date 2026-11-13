@@ -2,7 +2,7 @@
 
 `ParamsEstimator` loads a params bundle and estimates, for boxes on a
 spectrogram computed with the bundle's front end, the columns
-`PARAM_COLUMNS`:
+`ESTIMATE_COLUMNS` (`PARAM_COLUMNS`, then `RAW_COLUMNS`):
 
 ``height_hz, fwhm_s, width10_s, undershoot_hz``
     Calibrated estimates (`chirpdetector.params.calibration`): the
@@ -18,6 +18,18 @@ spectrogram computed with the bundle's front end, the columns
     narrow above and too wide below, and for undershoot (offset 1 Hz,
     sigma often > 0.3) it is not a usable interval. With
     ``sigma = sd / (value + offset)``, compute the interval in log space.
+``*_raw_*`` (`RAW_COLUMNS`: ``height_raw_hz, fwhm_raw_s, width10_raw_s,
+undershoot_raw_hz``)
+    Uncalibrated estimates: the decoder's model-space mean (`raw`) mapped
+    back to natural units, without the inverse bias curve. They shrink
+    toward the middle of the training population (small chirps
+    overestimated, large ones underestimated), so per chirp they are
+    biased, but their population spread is not widened by the inverse
+    curve's noise amplification. No standard deviations: the network's own
+    sigma is not coverage-calibrated. Use the calibrated columns for
+    per-chirp values and comparisons; for population distributions,
+    compare both (`chirpdetector.params.evaluation` reports each against
+    the truth).
 ``params_ok``, ``params_flag``
     Whether the box is inside the decoder's validated domain, and if not,
     why (comma-separated): ``edge`` (the crop window crosses the start or
@@ -54,8 +66,10 @@ from chirpdetector.spectrogram import Spectrogram
 
 __all__ = [
     "BOX_COLUMNS",
+    "ESTIMATE_COLUMNS",
     "FLAG_REASONS",
     "PARAM_COLUMNS",
+    "RAW_COLUMNS",
     "ParamsEstimator",
     "load_decoder",
 ]
@@ -75,7 +89,20 @@ PARAM_COLUMNS: tuple[str, ...] = (
     "params_ok",
     "params_flag",
 )
-"""Columns added by `ParamsEstimator.estimate`."""
+"""Calibrated estimates, their sds and the domain flags."""
+
+_RAW_NAMES = {
+    "height_hz": "height_raw_hz",
+    "fwhm_s": "fwhm_raw_s",
+    "width10_s": "width10_raw_s",
+    "undershoot_hz": "undershoot_raw_hz",
+}
+
+RAW_COLUMNS: tuple[str, ...] = tuple(_RAW_NAMES[p] for p in PARAMETERS)
+"""Uncalibrated estimates in natural units (module docstring)."""
+
+ESTIMATE_COLUMNS: tuple[str, ...] = (*PARAM_COLUMNS, *RAW_COLUMNS)
+"""Columns added by `ParamsEstimator.estimate`, in order."""
 
 FLAG_REASONS: tuple[str, ...] = ("edge", "band", "size", "uncertain")
 """Possible entries of ``params_flag``."""
@@ -224,22 +251,24 @@ class ParamsEstimator:
         )
 
     def estimate_inputs(self, inputs: DecoderInputs) -> pd.DataFrame:
-        """`PARAM_COLUMNS` for decoder inputs (one row per crop)."""
+        """`ESTIMATE_COLUMNS` for decoder inputs (one row per crop)."""
         mean, sigma = self.raw(inputs)
         cal_mean, cal_sigma = self.bundle.calibration.apply(mean, sigma)
         values = from_model_space(cal_mean)
+        raw_values = from_model_space(mean)
         sds = natural_sd(values, cal_sigma)
         ok, flag = self.flags(inputs, cal_sigma)
         data: dict[str, Any] = {}
         for j, name in enumerate(PARAMETERS):
             data[name] = values[:, j]
             data[_SD_NAMES[name]] = sds[:, j]
+            data[_RAW_NAMES[name]] = raw_values[:, j]
         data["params_ok"] = ok
         data["params_flag"] = pd.Series(flag, dtype=object)
-        return pd.DataFrame(data).loc[:, list(PARAM_COLUMNS)]
+        return pd.DataFrame(data).loc[:, list(ESTIMATE_COLUMNS)]
 
     def estimate(self, spec: Spectrogram, boxes: pd.DataFrame) -> pd.DataFrame:
-        """`PARAM_COLUMNS` for the boxes of a detection table.
+        """`ESTIMATE_COLUMNS` for the boxes of a detection table.
 
         Parameters
         ----------

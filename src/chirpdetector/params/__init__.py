@@ -44,12 +44,19 @@ from chirpdetector.params.bundle import (
 )
 from chirpdetector.params.calibration import CalibrationConfig, ParamCalibration
 from chirpdetector.params.crops import CropConfig, DecoderInputs, decoder_inputs
-from chirpdetector.params.inference import PARAM_COLUMNS, ParamsEstimator
+from chirpdetector.params.inference import (
+    ESTIMATE_COLUMNS,
+    PARAM_COLUMNS,
+    RAW_COLUMNS,
+    ParamsEstimator,
+)
 from chirpdetector.params.truth import PARAMETERS, ChirpParams, scene_truth
 
 __all__ = [
+    "ESTIMATE_COLUMNS",
     "PARAMETERS",
     "PARAM_COLUMNS",
+    "RAW_COLUMNS",
     "CalibrationConfig",
     "ChirpParams",
     "CropConfig",

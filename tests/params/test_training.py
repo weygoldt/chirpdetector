@@ -14,7 +14,14 @@ from typer.testing import CliRunner
 from chirpdetector.bundle import Bundle, BundleError
 from chirpdetector.cli import app
 from chirpdetector.inference import predict_span
-from chirpdetector.params import PARAM_COLUMNS, ParamsEstimator, load_params_bundle
+from chirpdetector.params import (
+    ESTIMATE_COLUMNS,
+    PARAM_COLUMNS,
+    PARAMETERS,
+    RAW_COLUMNS,
+    ParamsEstimator,
+    load_params_bundle,
+)
 from chirpdetector.params.bundle import ParamsBundle
 from chirpdetector.params.evaluation import agreement_summary
 from chirpdetector.params.report import real_section
@@ -111,9 +118,17 @@ def test_estimator_gives_calibrated_columns(footprint_run: Path) -> None:
     samples = load_samples(footprint_run / "samples")
     rows = samples.select("test", usable=True)
     estimator = ParamsEstimator(bundle, device="cpu")
-    out = estimator.estimate_inputs(samples.inputs(rows))
-    assert list(out.columns) == list(PARAM_COLUMNS)
+    inputs = samples.inputs(rows)
+    out = estimator.estimate_inputs(inputs)
+    assert list(out.columns) == list(ESTIMATE_COLUMNS)
     assert len(out) == len(rows)
+    # the raw columns are the uncalibrated model-space means, in natural units
+    from chirpdetector.params.model import from_model_space
+
+    raw = from_model_space(estimator.raw(inputs)[0])
+    np.testing.assert_array_equal(out.loc[:, list(RAW_COLUMNS)].to_numpy(float), raw)
+    calibrated = out.loc[:, list(PARAMETERS)].to_numpy(float)
+    assert not np.allclose(calibrated, raw)
     for name in ("height_hz", "fwhm_s", "width10_s"):
         assert (out[name].to_numpy(float) > 0).all()
     assert (out["undershoot_hz"].to_numpy(float) >= 0).all()
@@ -153,9 +168,11 @@ def test_predict_span_adds_parameter_columns(
         stub_detector, recording, 1.0, 7.0, name="s", device="cpu", params=params.path
     )
     pd.testing.assert_frame_equal(out.loc[:, list(plain.columns)], plain)
-    assert list(out.columns[len(plain.columns) :]) == list(PARAM_COLUMNS)
+    added = [c for c in out.columns if c not in plain.columns]
+    assert added == [*PARAM_COLUMNS, *RAW_COLUMNS]
     assert len(out) > 0
     assert np.isfinite(out["height_hz"]).all()
+    assert np.isfinite(out["height_raw_hz"]).all()
     # no detections: the columns are there, the table is empty
     none = predict_span(
         stub_detector,
@@ -168,7 +185,7 @@ def test_predict_span_adds_parameter_columns(
         score_threshold=0.99,
     )
     assert len(none) == 0
-    assert set(PARAM_COLUMNS) <= set(none.columns)
+    assert set(ESTIMATE_COLUMNS) <= set(none.columns)
 
 
 def test_predict_span_refuses_another_detectors_decoder(
@@ -435,7 +452,7 @@ def test_predict_span_gives_the_decoder_the_training_crop(
 
         def estimate(self, spec, boxes):  # type: ignore[no-untyped-def,override]
             captured["spec"], captured["boxes"] = spec, boxes
-            return pd.DataFrame(index=boxes.index, columns=list(PARAM_COLUMNS))
+            return pd.DataFrame(index=boxes.index, columns=list(ESTIMATE_COLUMNS))
 
     t0, t1 = 2.0, 5.5
     predict_span(
