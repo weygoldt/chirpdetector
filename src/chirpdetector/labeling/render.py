@@ -30,7 +30,15 @@ from scipy.signal.windows import hann
 
 from chirpdetector.labeling.queue import QueueItem
 
-__all__ = ["Cutout", "CutoutConfig", "live_baselines", "render_cutout", "zoom_baseband"]
+__all__ = [
+    "BandSpectrogram",
+    "Cutout",
+    "CutoutConfig",
+    "band_spectrogram",
+    "live_baselines",
+    "render_cutout",
+    "zoom_baseband",
+]
 
 
 @dataclass(frozen=True)
@@ -230,6 +238,77 @@ def live_baselines(
     )
 
 
+@dataclass(frozen=True)
+class BandSpectrogram:
+    """Electrode-summed power of one time-frequency window.
+
+    Parameters
+    ----------
+    db
+        Power in dB, shape ``(n_freq, n_time)``, row 0 the lowest frequency.
+    extent
+        ``(t0_s, t1_s, f0_hz, f1_hz)`` of the pixel *edges*: column ``j``
+        spans ``t0 + j dt`` to ``t0 + (j + 1) dt`` and row ``i`` spans
+        ``f0 + i df`` to ``f0 + (i + 1) df``.
+    """
+
+    db: npt.NDArray[np.float32]
+    extent: tuple[float, float, float, float]
+
+
+def band_spectrogram(
+    rec: Recording,
+    window: tuple[float, float, float, float],
+    *,
+    window_s: float,
+    hop_s: float,
+    fft_pad: int,
+) -> BandSpectrogram:
+    """Electrode-summed spectrogram of ``window = (t0_s, t1_s, f0_hz, f1_hz)``.
+
+    The spectra are those of the full-rate recording (same window in
+    seconds), computed on a decimated complex baseband of the band only
+    (:func:`zoom_baseband`). Frames whose centre lies in ``[t0, t1]`` and
+    bins whose centre lies in ``[f0, f1]`` are kept, so the extent matches
+    the requested window to within one pixel.
+    """
+    t0, t1, f0, f1 = window
+    fs = rec.samplerate_hz
+    # compute a slightly wider band so window leakage at the edges is intact
+    guard_hz = 4.0 * fs / max(2, round(window_s * fs))
+    band_lo, band_hi = max(0.0, f0 - guard_hz), min(0.5 * fs, f1 + guard_hz)
+    q, nwin, hop = _sampling(window_s, hop_s, fs, band_hi - band_lo)
+    half = nwin * q // 2
+    start = (round(t0 * fs) - half - hop * q) // q * q
+    stop = round(t1 * fs) + half + hop * q
+    x = _read_padded(rec, start, stop)
+    y, fs_d, fc = zoom_baseband(x, fs, band_lo, band_hi, q)
+
+    taper = hann(nwin, sym=False).astype(np.float32)
+    taper /= taper.sum()
+    frames = sliding_window_view(y, nwin, axis=0)[::hop]
+    t = start / fs + (np.arange(frames.shape[0]) * hop + nwin / 2) / fs_d
+    f = fc + sfft.fftshift(sfft.fftfreq(nwin * fft_pad)) * fs_d
+    tsel = np.flatnonzero((t >= t0) & (t <= t1))
+    fsel = np.flatnonzero((f >= f0) & (f <= f1))
+    # transform only the frames shown; sum channels before shifting
+    spectra = sfft.fft(
+        frames[tsel[0] : tsel[-1] + 1] * taper, n=nwin * fft_pad, axis=-1
+    )
+    spectra = np.asarray(spectra, dtype=np.complex64)
+    power = np.fft.fftshift((np.abs(spectra) ** 2).sum(axis=1), axes=-1)
+    summed = power[:, fsel[0] : fsel[-1] + 1].T
+    db = (10.0 * np.log10(summed + np.float32(1e-30))).astype(np.float32)
+    dt, df = hop / fs_d, fs_d / (nwin * fft_pad)
+    extent = (
+        float(t[tsel[0]] - dt / 2),
+        float(t[tsel[-1]] + dt / 2),
+        float(f[fsel[0]] - df / 2),
+        float(f[fsel[-1]] + df / 2),
+    )
+    return BandSpectrogram(db=db, extent=extent)
+
+
 def render_cutout(
     rec: Recording, tracks: Tracks, item: QueueItem, config: CutoutConfig
 ) -> Cutout:
@@ -261,44 +340,18 @@ def render_cutout(
     f1 = min(0.5 * fs, max([item.f_high_hz, *freqs]) + config.pad_hz)
     t0 = item.t_start_s - config.pad_s
     t1 = item.t_end_s + config.pad_s
-
-    # compute a slightly wider band so window leakage at the edges is intact
-    guard_hz = 4.0 * fs / max(2, round(config.window_s * fs))
-    band_lo, band_hi = max(0.0, f0 - guard_hz), min(0.5 * fs, f1 + guard_hz)
-    q, nwin, hop = _sampling(config.window_s, config.hop_s, fs, band_hi - band_lo)
-    half = nwin * q // 2
-    start = (round(t0 * fs) - half - hop * q) // q * q
-    stop = round(t1 * fs) + half + hop * q
-    x = _read_padded(rec, start, stop)
-    y, fs_d, fc = zoom_baseband(x, fs, band_lo, band_hi, q)
-
-    window = hann(nwin, sym=False).astype(np.float32)
-    window /= window.sum()
-    frames = sliding_window_view(y, nwin, axis=0)[::hop]
-    t = start / fs + (np.arange(frames.shape[0]) * hop + nwin / 2) / fs_d
-    f = fc + sfft.fftshift(sfft.fftfreq(nwin * config.fft_pad)) * fs_d
-    tsel = np.flatnonzero((t >= t0) & (t <= t1))
-    fsel = np.flatnonzero((f >= f0) & (f <= f1))
-    # transform only the frames shown; sum channels before shifting
-    spectra = sfft.fft(
-        frames[tsel[0] : tsel[-1] + 1] * window, n=nwin * config.fft_pad, axis=-1
+    spec = band_spectrogram(
+        rec,
+        (t0, t1, f0, f1),
+        window_s=config.window_s,
+        hop_s=config.hop_s,
+        fft_pad=config.fft_pad,
     )
-    spectra = np.asarray(spectra, dtype=np.complex64)
-    power = np.fft.fftshift((np.abs(spectra) ** 2).sum(axis=1), axes=-1)
-    summed = power[:, fsel[0] : fsel[-1] + 1].T
-    db = (10.0 * np.log10(summed + np.float32(1e-30))).astype(np.float32)
-    dt, df = hop / fs_d, fs_d / (nwin * config.fft_pad)
-    extent = (
-        float(t[tsel[0]] - dt / 2),
-        float(t[tsel[-1]] + dt / 2),
-        float(f[fsel[0]] - df / 2),
-        float(f[fsel[-1]] + df / 2),
-    )
-    vmax = float(db.max())
+    vmax = float(spec.db.max())
     return Cutout(
         item=item,
-        db=db,
-        extent=extent,
+        db=spec.db,
+        extent=spec.extent,
         window=(t0, t1, f0, f1),
         clim=(vmax - config.db_range, vmax),
         baselines=baselines,

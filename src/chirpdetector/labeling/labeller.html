@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>label-emitters</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1b1b;
+    color: #dcdcdc; font: 13px/18px ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+  #bar { position: fixed; left: 0; right: 0; top: 0; padding: 4px 8px; height: 54px; }
+  #bar div { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+  #msg.err { color: #ff8a80; }
+  #msg.ok { color: #9be89b; }
+  canvas { position: fixed; left: 0; top: 62px; display: block; cursor: crosshair; }
+  #help { position: fixed; inset: 0; margin: auto; width: max-content; height: max-content;
+    background: #f4f4f4; color: #111; padding: 16px 22px; border-radius: 6px;
+    white-space: pre; display: none; font-size: 14px; line-height: 20px; z-index: 2; }
+</style>
+</head>
+<body>
+<div id="bar"><div id="status">loading ...</div><div id="info"></div><div id="msg"></div></div>
+<canvas id="canvas"></canvas>
+<pre id="help"></pre>
+<script>
+"use strict";
+
+// BEGIN shared-math: mirrors chirpdetector.labeling.view (pixel_to_data,
+// data_to_pixel, TrackView.frequency_at, snap); tests run this block in node.
+function pixelToData(x, y, w, h, e) {
+  return [e[0] + x / w * (e[1] - e[0]), e[3] - y / h * (e[3] - e[2])];
+}
+function dataToPixel(t, f, w, h, e) {
+  return [(t - e[0]) / (e[1] - e[0]) * w, (e[3] - f) / (e[3] - e[2]) * h];
+}
+function interp(t, ts, fs) {  // numpy.interp: constant beyond the ends
+  const n = ts.length;
+  if (t <= ts[0]) return fs[0];
+  if (t >= ts[n - 1]) return fs[n - 1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ts[m] <= t) lo = m; else hi = m; }
+  return fs[lo] + (t - ts[lo]) / (ts[hi] - ts[lo]) * (fs[hi] - fs[lo]);
+}
+function snapTrack(tracks, t, f, tol) {
+  let best = null;
+  for (const tr of tracks) {
+    const ft = interp(t, tr.t, tr.f), off = f - ft;
+    if (best === null || Math.abs(off) < Math.abs(best.offset)) best = { track: tr, trackHz: ft, offset: off };
+  }
+  return best !== null && Math.abs(best.offset) <= tol ? best : null;
+}
+// END shared-math
+
+const PANELS = ["overview", "zoom"];
+const COLOURS = { chirp: "#2ecc40", not_chirp: "#ff4136", chirp_emitter_unclear: "#ff851b", skipped: "#aaaaaa", open: "#555" };
+const TRACK = "#d0d0d0", HIGHLIGHT = "#00e5ff", PREDICTION = "#ff4fd8";
+const cv = document.getElementById("canvas"), ctx = cv.getContext("2d");
+const S = { state: null, progress: null, view: null, index: 0, windowS: null, showPred: false,
+  hover: null, readout: "", mouse: null, cache: new Map(), busy: false, rects: null, drawQueued: false };
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let j;
+  try { j = await r.json(); } catch (e) { throw new Error(`${path}: HTTP ${r.status}`); }
+  if (!r.ok && !("ok" in j)) throw new Error(j.message || `HTTP ${r.status}`);
+  return j;
+}
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const im = new Image(); im.onload = () => resolve(im); im.onerror = () => reject(new Error("image " + src)); im.src = src;
+  });
+}
+function fetchView(i, w) {
+  const key = i + "|" + w;
+  if (!S.cache.has(key)) {
+    const p = (async () => {
+      const v = await api(`/api/view?index=${i}&window=${w}`);
+      if (v.error === undefined && v.ok === false) throw new Error(v.message);
+      v.images = {};
+      if (v.panels) await Promise.all(PANELS.map(async n => { v.images[n] = await loadImage(v.panels[n].src); }));
+      return v;
+    })();
+    S.cache.set(key, p);
+    p.catch(() => S.cache.delete(key));
+    while (S.cache.size > 40) S.cache.delete(S.cache.keys().next().value);
+  }
+  return S.cache.get(key);
+}
+function invalidate(i) { for (const k of [...S.cache.keys()]) if (k.startsWith(i + "|")) S.cache.delete(k); }
+
+function setMsg(text, err) {
+  const m = document.getElementById("msg");
+  m.textContent = text || ""; m.className = err ? "err" : (text ? "ok" : "");
+}
+function fmt(x, d) { return x === null || x === undefined ? "-" : Number(x).toFixed(d); }
+
+function renderBar() {
+  const p = S.progress, v = S.view, st = S.state;
+  if (!p || !st) return;
+  const bins = Object.entries(p.per_bin).filter(([, c]) => c[1] > 0).map(([b, c]) => `${b}:${c[0]}/${c[1]}`).join("  ");
+  document.getElementById("status").textContent =
+    `${S.index + 1}/${p.total}   labelled ${p.labelled}   skipped ${p.skipped}   open ${p.open}   ` +
+    `[ΔF Hz ${bins}]   ${st.labeler}   window ${(S.windowS * 1000).toFixed(1)} ms (zoom 204.8)   h: help`;
+  if (!v) return;
+  const it = v.item;
+  const tracks = v.tracks.map(t => `${t.key}: ${t.baseline_hz.toFixed(1)} Hz (id ${t.track_id}` +
+    (t.gap_s > 1 ? `, gap ${t.gap_s.toFixed(1)} s)` : ")")).join("   ") || "none";
+  const state = v.decision ? v.decision.text : v.status;
+  let info = `${it.trial}   ${it.t_start_s.toFixed(3)}-${it.t_end_s.toFixed(3)} s   ΔF ${fmt(it.delta_f_hz, 1)} Hz (${it.df_bin})   tracks ${tracks}   [${state}]`;
+  const pr = v.prediction;
+  if (pr && S.showPred) {
+    const parts = ["model:"];
+    if (pr.emitter_hz !== null) parts.push(`${pr.emitter_hz.toFixed(1)} Hz`);
+    if (pr.track_id !== null) parts.push(`id ${pr.track_id}`);
+    if (pr.score !== null) parts.push(`score ${pr.score.toFixed(2)}`);
+    if (pr.source) parts.push(pr.source);
+    info += "   " + parts.join(" ");
+  } else if (pr) info += "   (e: model's prediction)";
+  if (v.error) info += "   " + v.error;
+  document.getElementById("info").textContent = info;
+  document.title = `label-emitters ${p.labelled}/${p.total}`;
+}
+
+function layout() {
+  const top = document.getElementById("bar").getBoundingClientRect().bottom;
+  const W = window.innerWidth, H = Math.max(200, window.innerHeight - top);
+  cv.style.top = top + "px"; cv.style.width = W + "px"; cv.style.height = H + "px";
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const L = 66, R = 10, T = 4, gap = 26, B = 24;
+  const avail = H - T - gap - B, h1 = Math.round(avail * 0.4);
+  S.rects = { overview: { x: L, y: T, w: W - L - R, h: h1 }, zoom: { x: L, y: T + h1 + gap, w: W - L - R, h: avail - h1 } };
+}
+
+function niceStep(span, n) {
+  const raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * mag >= raw) return m * mag;
+  return 10 * mag;
+}
+function requestDraw() {
+  if (S.drawQueued) return;
+  S.drawQueued = true;
+  requestAnimationFrame(() => { S.drawQueued = false; draw(); });
+}
+function toPx(r, e, t, f) { const [x, y] = dataToPixel(t, f, r.w, r.h, e); return [r.x + x, r.y + y]; }
+function polyline(r, e, ts, fs) {
+  ctx.beginPath();
+  for (let k = 0; k < ts.length; k++) { const [x, y] = toPx(r, e, ts[k], fs[k]); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+  if (ts.length === 1) { const [x, y] = toPx(r, e, ts[0], fs[0]); ctx.moveTo(r.x, y); ctx.lineTo(r.x + r.w, y); }
+  ctx.stroke();
+}
+function label(x, y, text, bg) {
+  ctx.font = "12px ui-monospace, monospace";
+  const w = ctx.measureText(text).width + 8;
+  ctx.fillStyle = bg; ctx.globalAlpha = 0.88; ctx.fillRect(x, y - 8, w, 16); ctx.globalAlpha = 1;
+  ctx.fillStyle = "#000"; ctx.textBaseline = "middle"; ctx.fillText(text, x + 4, y);
+}
+
+function draw() {
+  const W = cv.clientWidth, H = cv.clientHeight, v = S.view;
+  ctx.clearRect(0, 0, W, H);
+  if (!v || !S.rects) return;
+  const status = v.decision ? v.decision.label : v.status;
+  for (const name of PANELS) {
+    const r = S.rects[name];
+    ctx.fillStyle = "#000"; ctx.fillRect(r.x, r.y, r.w, r.h);
+    if (!v.panels) {
+      ctx.fillStyle = "#ff8a80"; ctx.font = "14px monospace"; ctx.fillText(v.error || "no image", r.x + 10, r.y + 20);
+      continue;
+    }
+    const e = v.panels[name].extent, it = v.item;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(v.images[name], r.x, r.y, r.w, r.h);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+    // the box
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+    if (name === "overview") {
+      const [x0, y1] = toPx(r, e, it.t_start_s, it.f_high_hz), [x1, y0] = toPx(r, e, it.t_end_s, it.f_low_hz);
+      ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
+    } else {
+      ctx.setLineDash([2, 4]);
+      for (const t of [it.t_start_s, it.t_end_s]) { const [x] = toPx(r, e, t, e[2]); ctx.beginPath(); ctx.moveTo(x, r.y); ctx.lineTo(x, r.y + r.h); ctx.stroke(); }
+      ctx.setLineDash([]);
+    }
+    // tracks: dashed ticks at both edges and their numbers
+    const t0 = e[0], t1 = e[1], len = 0.1 * (t1 - t0);
+    ctx.strokeStyle = TRACK; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+    for (const tr of v.tracks) {
+      for (const [a, b] of [[t0, t0 + len], [t1 - len, t1]]) {
+        const [xa, ya] = toPx(r, e, a, interp(a, tr.t, tr.f)), [xb, yb] = toPx(r, e, b, interp(b, tr.t, tr.f));
+        ctx.beginPath(); ctx.moveTo(xa, ya); ctx.lineTo(xb, yb); ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
+    const hov = S.hover ? S.hover.track.key : null;
+    if (S.hover) {
+      ctx.strokeStyle = HIGHLIGHT; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+      polyline(r, e, S.hover.track.t, S.hover.track.f); ctx.setLineDash([]);
+    }
+    for (const tr of v.tracks) {
+      const [, y] = toPx(r, e, t0, interp(t0, tr.t, tr.f));
+      let text = `${tr.key}`;
+      if (name === "zoom") {
+        text += `  id ${tr.track_id}  ${tr.baseline_hz.toFixed(1)} Hz`;
+        if (tr.gap_s > 1) text += `  (gap ${tr.gap_s.toFixed(1)} s)`;
+      }
+      label(r.x + 6, y, text, tr.key === hov ? HIGHLIGHT : TRACK);
+    }
+    // the model's prediction (hidden by default)
+    const pr = v.prediction;
+    if (S.showPred && pr) {
+      let f = pr.emitter_hz;
+      if (f === null && pr.track_id !== null) { const tr = v.tracks.find(x => x.track_id === pr.track_id); f = tr ? tr.baseline_hz : null; }
+      if (f !== null) {
+        const [xa, y] = toPx(r, e, t1 - 0.06 * (t1 - t0), f), [xb] = toPx(r, e, t1, f);
+        ctx.strokeStyle = PREDICTION; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(xa, y); ctx.lineTo(xb, y); ctx.stroke();
+        ctx.fillStyle = PREDICTION; ctx.beginPath(); ctx.moveTo(xa, y); ctx.lineTo(xa + 10, y - 6); ctx.lineTo(xa + 10, y + 6); ctx.fill();
+      }
+    }
+    // the current decision
+    const d = v.decision;
+    if (d) {
+      let pt = null;
+      if (d.clicked_hz !== null) pt = [d.clicked_t_s, d.clicked_hz];
+      else if (d.emitter_baseline_hz !== null) pt = [it.t_start_s, d.emitter_baseline_hz];
+      if (pt) {
+        const [x, y] = toPx(r, e, pt[0], pt[1]);
+        ctx.strokeStyle = COLOURS[d.label]; ctx.lineWidth = 2.5; ctx.beginPath();
+        if (d.via === "mouse") ctx.arc(x, y, 7, 0, 2 * Math.PI);
+        else { ctx.moveTo(x, y - 8); ctx.lineTo(x + 8, y); ctx.lineTo(x, y + 8); ctx.lineTo(x - 8, y); ctx.closePath(); }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    // frame coloured by the decision
+    ctx.strokeStyle = COLOURS[status] || COLOURS.open; ctx.lineWidth = status === "open" ? 1 : 3;
+    ctx.strokeRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
+    // frequency axis
+    ctx.fillStyle = "#cfcfcf"; ctx.strokeStyle = "#cfcfcf"; ctx.lineWidth = 1; ctx.font = "11px ui-monospace, monospace";
+    ctx.textBaseline = "middle"; ctx.textAlign = "right";
+    const fstep = niceStep(e[3] - e[2], Math.max(3, r.h / 45));
+    const fdec = fstep < 1 ? 1 : 0;
+    for (let f = Math.ceil(e[2] / fstep) * fstep; f <= e[3]; f += fstep) {
+      const [, y] = toPx(r, e, t0, f);
+      ctx.beginPath(); ctx.moveTo(r.x - 5, y); ctx.lineTo(r.x - 1, y); ctx.stroke();
+      ctx.fillText(f.toFixed(fdec), r.x - 7, y);
+    }
+    ctx.textAlign = "left";
+  }
+  // time axis under the zoom panel
+  if (v.panels) {
+    const r = S.rects.zoom, e = v.panels.zoom.extent;
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const tstep = niceStep(e[1] - e[0], Math.max(3, r.w / 110));
+    const tdec = Math.max(0, -Math.floor(Math.log10(tstep) + 1e-9));
+    for (let t = Math.ceil(e[0] / tstep) * tstep; t <= e[1]; t += tstep) {
+      const [x] = toPx(r, e, t, e[2]);
+      ctx.beginPath(); ctx.moveTo(x, r.y + r.h + 1); ctx.lineTo(x, r.y + r.h + 5); ctx.stroke();
+      ctx.fillText(t.toFixed(tdec), x, r.y + r.h + 7);
+    }
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  }
+  // readout between the panels
+  if (S.readout) {
+    const r = S.rects.zoom;
+    ctx.fillStyle = S.hover ? HIGHLIGHT : "#cfcfcf"; ctx.font = "13px ui-monospace, monospace";
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(S.readout, r.x + r.w, r.y - 13);
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  }
+}
+
+function localPoint(ev) { const b = cv.getBoundingClientRect(); return { x: ev.clientX - b.left, y: ev.clientY - b.top }; }
+function panelAt(pt) {
+  for (const n of PANELS) {
+    const r = S.rects[n];
+    if (pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h) return n;
+  }
+  return null;
+}
+function updateHover() {
+  const v = S.view, pt = S.mouse;
+  const n = v && v.panels && pt ? panelAt(pt) : null;
+  let hov = null, read = "";
+  if (n) {
+    const r = S.rects[n];
+    const [t, f] = pixelToData(pt.x - r.x, pt.y - r.y, r.w, r.h, v.panels[n].extent);
+    hov = snapTrack(v.tracks, t, f, S.state.tolerance_hz);
+    read = `${f.toFixed(1)} Hz  ` + (hov
+      ? `-> ${hov.track.key} (id ${hov.track.track_id})  ${hov.offset >= 0 ? "+" : ""}${hov.offset.toFixed(1)} Hz`
+      : `no track within ${S.state.tolerance_hz} Hz`);
+  }
+  S.hover = hov; S.readout = read; requestDraw();
+}
+
+async function show(i) {
+  S.index = i;
+  const w = S.windowS;
+  let v;
+  try { v = await fetchView(i, w); } catch (err) { setMsg("error: " + err.message, true); return; }
+  if (S.index !== i || S.windowS !== w) return;  // superseded
+  S.view = v; S.hover = null; S.readout = "";
+  renderBar(); updateHover(); requestDraw();
+  if (v.next_index !== null && v.next_index !== undefined) fetchView(v.next_index, w).catch(() => {});
+}
+
+async function act(payload) {
+  if (S.busy || !S.view) return;
+  S.busy = true;
+  try {
+    const body = Object.assign({ index: S.index, window_s: S.windowS, prediction_shown: S.showPred && !!S.view.prediction }, payload);
+    const r = await api("/api/action", body);
+    if (r.progress) S.progress = r.progress;
+    if (!r.ok) { setMsg(r.message, true); renderBar(); return; }
+    invalidate(r.index);
+    if (r.next_index === null) { setMsg(r.message + "   -- all labelled (arrows to review)"); await show(S.index); }
+    else { setMsg(r.message + "   (u: undo)"); await show(r.next_index); }
+  } catch (err) { setMsg("error: " + err.message, true); }
+  finally { S.busy = false; }
+}
+async function undo() {
+  if (S.busy) return;
+  S.busy = true;
+  try {
+    const r = await api("/api/undo", {});
+    if (r.progress) S.progress = r.progress;
+    setMsg(r.message, !r.ok);
+    if (r.ok && r.index !== null) { invalidate(r.index); await show(r.index); } else renderBar();
+  } catch (err) { setMsg("error: " + err.message, true); }
+  finally { S.busy = false; }
+}
+function toggleHelp(force) {
+  const h = document.getElementById("help");
+  const on = force === undefined ? h.style.display !== "block" : force;
+  h.style.display = on ? "block" : "none";
+}
+
+cv.addEventListener("mousemove", ev => { S.mouse = localPoint(ev); updateHover(); });
+cv.addEventListener("mouseleave", () => { S.mouse = null; updateHover(); });
+cv.addEventListener("contextmenu", ev => ev.preventDefault());
+cv.addEventListener("mousedown", ev => {
+  ev.preventDefault();
+  const pt = localPoint(ev);
+  if (ev.button === 0) {
+    const n = panelAt(pt);
+    if (!n || !S.view || !S.view.panels) return;
+    const r = S.rects[n];
+    act({ action: "click", panel: n, x: pt.x - r.x, y: pt.y - r.y, width: r.w, height: r.h });
+  } else if (ev.button === 1) act({ action: "unclear", via: "mouse" });
+  else if (ev.button === 2) act({ action: "not_chirp", via: "mouse" });
+});
+window.addEventListener("keydown", ev => {
+  if (ev.ctrlKey && (ev.key === "z" || ev.key === "Z")) { ev.preventDefault(); undo(); return; }
+  if (ev.ctrlKey || ev.metaKey || ev.altKey || !S.state) return;
+  const k = ev.key, n = S.state.n;
+  if (/^[1-9]$/.test(k)) act({ action: "pick", key: Number(k) });
+  else if (k === "0") act({ action: "unclear" });
+  else if (k === "x" || k === "X") act({ action: "not_chirp" });
+  else if (k === "s" || k === " ") act({ action: "skip" });
+  else if (k === "u" || k === "Backspace") undo();
+  else if (k === "ArrowRight" || k === "n") { setMsg(""); show((S.index + 1) % n); }
+  else if (k === "ArrowLeft" || k === "p") { setMsg(""); show((S.index - 1 + n) % n); }
+  else if (k === "w") {
+    const ws = S.state.windows;
+    S.windowS = S.windowS === ws[0] ? ws[1] : ws[0];
+    setMsg(`window ${(S.windowS * 1000).toFixed(1)} ms`); show(S.index);
+  } else if (k === "e") { S.showPred = !S.showPred; renderBar(); requestDraw(); }
+  else if (k === "f") {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    else document.exitFullscreen();
+  } else if (k === "h" || k === "?") toggleHelp();
+  else if (k === "Escape") toggleHelp(false);
+  else return;
+  ev.preventDefault();
+});
+window.addEventListener("resize", () => { layout(); updateHover(); requestDraw(); });
+document.addEventListener("fullscreenchange", () => { layout(); requestDraw(); });
+
+(async () => {
+  try {
+    S.state = await api("/api/state");
+    S.windowS = S.state.window_s; S.progress = S.state.progress;
+    document.getElementById("help").textContent = S.state.help;
+    layout();
+    await show(S.state.start_index);
+  } catch (err) { setMsg("error: " + err.message, true); }
+})();
+</script>
+</body>
+</html>

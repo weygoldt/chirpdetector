@@ -65,34 +65,73 @@ def _parse_bins(bins: str) -> tuple[float, ...]:
 @app.command("label-emitters")
 def label_emitters(
     trial_dirs: Annotated[
-        list[Path],
+        list[Path] | None,
         typer.Argument(
             exists=True,
             file_okay=False,
-            help="Trial directories with chirpdetector_bboxes.csv, tracks and the recording.",
+            show_default=False,
+            help=(
+                "Trial directories with chirpdetector_bboxes.csv, tracks and the "
+                "recording (v1 detections are sampled per ΔF bin). Not with "
+                "--candidates."
+            ),
         ),
-    ],
+    ] = None,
+    candidates: Annotated[
+        Path | None,
+        typer.Option(
+            "--candidates",
+            exists=True,
+            dir_okay=False,
+            help=(
+                "CSV or Parquet of boxes to label instead of v1 detections. "
+                "Required columns: recording, t_start_s, t_end_s, f_low_hz, "
+                "f_high_hz; optional: candidate_id, score, emitter_hz, track_id, "
+                "source, tracks (see the README)."
+            ),
+        ),
+    ] = None,
     out: Annotated[
         Path, typer.Option(help="Output directory (queue, event log, label CSVs).")
     ] = DEFAULT_LABEL_DIR,
     per_bin: Annotated[
-        int, typer.Option(help="Detections sampled per trial and ΔF bin.")
+        int, typer.Option(help="Detections sampled per trial and ΔF bin (v1).")
     ] = 20,
-    seed: Annotated[int, typer.Option(help="Sampling seed.")] = 0,
+    seed: Annotated[int, typer.Option(help="Sampling and shuffling seed.")] = 0,
+    shuffle: Annotated[
+        bool,
+        typer.Option(
+            "--shuffle/--keep-order",
+            help="Shuffle the candidates with --seed, or keep the file's order.",
+        ),
+    ] = True,
     labeler: Annotated[
         str, typer.Option(help="Name stored with every label.")
     ] = getpass.getuser(),
-    grid: Annotated[str, typer.Option(help="Cutouts per page, ROWSxCOLS.")] = "4x6",
+    view: Annotated[
+        str,
+        typer.Option(
+            help=(
+                "single: one candidate per maximised window with a baseline "
+                "zoom; grid: pages of small cutouts (matplotlib only)."
+            )
+        ),
+    ] = "single",
+    grid: Annotated[
+        str, typer.Option(help="Cutouts per page with --view grid, ROWSxCOLS.")
+    ] = "4x6",
     bins: Annotated[
         str, typer.Option(help="Lower edges of the ΔF bins in Hz; the last is open.")
     ] = "0,10,25,50,100",
-    pad_s: Annotated[float, typer.Option(help="Time padding around the box.")] = 0.15,
+    pad_s: Annotated[float, typer.Option(help="Time padding around the box.")] = 0.25,
     pad_hz: Annotated[
         float, typer.Option(help="Frequency padding around tracks and box.")
     ] = 40.0,
     tolerance_hz: Annotated[
         float,
-        typer.Option(help="Max. distance of a left click from a track baseline."),
+        typer.Option(
+            help="Max. distance of a click from a track for it to snap to it."
+        ),
     ] = 15.0,
     window_s: Annotated[
         float,
@@ -100,53 +139,150 @@ def label_emitters(
             help=(
                 "Spectrogram window in seconds, at any sample rate: 0.2048 "
                 "(4.9 Hz resolution; 4096 samples at 20 kHz) separates close "
-                "baselines; 0.1024 or 0.0512 show the chirp's shape better."
+                "baselines; 0.0512 shows the chirp's shape (w toggles them in "
+                "the overview; the baseline zoom always uses 0.2048)."
             )
         ),
     ] = 0.2048,
+    track_gap_s: Annotated[
+        float,
+        typer.Option(
+            help=(
+                "Show a track if its detections around the box centre are at "
+                "most this far apart (wavetracker tracks often have gaps of "
+                "seconds; ΔF bins keep the evaluation's 1 s)."
+            )
+        ),
+    ] = 10.0,
+    serve: Annotated[
+        bool,
+        typer.Option(
+            "--serve",
+            help="Serve the browser labeller (for an SSH port-forward) instead "
+            "of opening a window.",
+        ),
+    ] = False,
+    host: Annotated[
+        str, typer.Option(help="Interface the browser labeller binds to.")
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port of the browser labeller.")] = 8765,
 ) -> None:
-    """Label chirp emitters on a grid of spectrogram cutouts.
+    """Label chirps and their emitters, one candidate at a time.
 
-    Left click on the emitter's baseline = chirp from that fish; right
-    click = not a chirp; middle click = chirp, emitter unclear. Space for
-    the next page, u to undo, h for help, q to quit. Every click is saved
-    immediately; running the same command again resumes the same queue.
+    Click on the baseline of the fish the chirp comes from (the click snaps
+    to the highlighted track) or press its number; 0 = chirp, emitter
+    unclear; x = not a chirp; s = skip; u = undo; w = window; e = model's
+    prediction; h = help. Every label is saved immediately; running the
+    same command again (either frontend) resumes the same queue.
     """
+    from chirpdetector.labeling.candidates import (
+        load_or_build_candidate_queue,
+        read_candidates,
+    )
     from chirpdetector.labeling.queue import QueueConfig, load_or_build_queue
-    from chirpdetector.labeling.render import CutoutConfig
     from chirpdetector.labeling.store import LabelStore
 
+    if (candidates is None) == (not trial_dirs):
+        msg = "give either trial directories or --candidates (not both)"
+        raise typer.BadParameter(msg)
+    if view not in ("single", "grid"):
+        raise typer.BadParameter(f"--view must be single or grid, got {view!r}")
+    if serve and view == "grid":
+        raise typer.BadParameter("--serve shows one candidate at a time (no grid)")
     out = out.resolve()
-    trials = [d.resolve() for d in trial_dirs]
-    for trial in trials:
-        if out.is_relative_to(trial):
-            msg = f"--out must not be inside a trial directory ({trial})"
-            raise typer.BadParameter(msg)
     rows_cols = _parse_grid(grid)
     config = QueueConfig(per_bin=per_bin, seed=seed, bin_edges_hz=_parse_bins(bins))
-    cutout_config = CutoutConfig(pad_s=pad_s, pad_hz=pad_hz, window_s=window_s)
+    if candidates is not None:
+        try:
+            table = read_candidates(candidates)
+        except (ValueError, FileNotFoundError) as err:
+            typer.echo(f"error: {err}", err=True)
+            raise typer.Exit(code=1) from err
+        protected = {Path(p) for p in table["recording"]} | {
+            Path(p) for p in table["tracks"]
+        }
+        overrides = None
+    else:
+        protected = {d.resolve() for d in trial_dirs or []}
+        overrides = {d.name: d for d in protected}
+    for directory in sorted(protected):
+        if out.is_relative_to(directory):
+            msg = f"--out must not be inside a trial directory ({directory})"
+            raise typer.BadParameter(msg)
     try:
         from chirpdetector.labeling.gui import run
+        from chirpdetector.labeling.session import LabelSession, TrialSources
+        from chirpdetector.labeling.single import run_single
     except ImportError as err:
         typer.echo(
             f"the labeller needs matplotlib (uv sync --extra label): {err}", err=True
         )
         raise typer.Exit(code=1) from err
 
-    queue = load_or_build_queue(trials, config, out)
+    if candidates is not None:
+        queue = load_or_build_candidate_queue(candidates, config, out, shuffle=shuffle)
+    else:
+        queue = load_or_build_queue(sorted(protected), config, out)
+    if len(queue) == 0:
+        typer.echo("nothing to label: the queue is empty")
+        raise typer.Exit(code=0)
+    sources = TrialSources.from_queue(queue, overrides)
     try:
         with LabelStore(out, labeler, chirpdetector.__version__) as store:
-            run(
+            if view == "grid":
+                from chirpdetector.labeling.render import CutoutConfig
+
+                run(
+                    queue,
+                    sources,
+                    store,
+                    config=CutoutConfig(pad_s=pad_s, pad_hz=pad_hz, window_s=window_s),
+                    grid=rows_cols,
+                    tolerance_hz=tolerance_hz,
+                )
+                return
+            from chirpdetector.labeling.view import ViewConfig
+
+            session = LabelSession(
                 queue,
-                {t.name: t for t in trials},
                 store,
-                config=cutout_config,
-                grid=rows_cols,
+                config=ViewConfig(
+                    pad_s=pad_s, pad_hz=pad_hz, window_s=window_s, max_gap_s=track_gap_s
+                ),
                 tolerance_hz=tolerance_hz,
+                frontend="browser" if serve else "mpl",
+                sources=sources,
             )
-    except RuntimeError as err:  # no display, or another session on --out
+            if serve:
+                from chirpdetector.labeling.server import serve_until_interrupted
+
+                serve_until_interrupted(session, host, port, out, typer.echo)
+            else:
+                run_single(session)
+    except (RuntimeError, ValueError) as err:  # no display, busy --out, bad ids
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
+
+
+@app.command("label-summary")
+def label_summary(
+    out: Annotated[
+        Path, typer.Argument(help="Output directory of label-emitters.")
+    ] = DEFAULT_LABEL_DIR,
+    labeler: Annotated[
+        str | None, typer.Option(help="Only this labeller's labels.")
+    ] = None,
+    queue: Annotated[
+        str | None,
+        typer.Option(
+            help="Only labels of this queue (id or JSON file); counts open items."
+        ),
+    ] = None,
+) -> None:
+    """Count emitter labels by decision, by candidate source and by ΔF bin."""
+    from chirpdetector.labeling.summary import summarize
+
+    typer.echo(summarize(out, labeler=labeler, queue=queue).to_text())
 
 
 _TRACK_FILES = ("times.npy", "fund_v.npy", "ident_v.npy", "idx_v.npy")
