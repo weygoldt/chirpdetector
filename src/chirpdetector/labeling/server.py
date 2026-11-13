@@ -75,6 +75,7 @@ from chirpdetector.labeling.view import (
     CandidateView,
     colour_lut,
     colourize,
+    hint_box,
     pixel_to_data,
     prediction_of,
 )
@@ -282,6 +283,8 @@ class LabelServer:
             "delta_f_hz": _num(item.delta_f_hz),
             "n_candidates": item.n_candidates,
         }
+        if s.blind and s.config.blind_hint:  # fixed-size, never the box itself
+            described["hint_box"] = list(hint_box(item, s.config))
         if not s.blind:  # blind: the page never learns the box
             described.update(
                 t_start_s=item.t_start_s,

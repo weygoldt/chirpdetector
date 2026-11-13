@@ -32,6 +32,7 @@ from chirpdetector.labeling.view import (
     Snap,
     colour_lut,
     colourize,
+    hint_box,
     prediction_of,
     snap,
 )
@@ -128,6 +129,11 @@ class SingleLabeller:
         (self.box_lines,) = self.axes["zoom"].plot(
             [], [], color="white", lw=0.6, ls=":"
         )
+        # blind mode: a faint fixed-size hint box (where to look, not the shape)
+        self.hint = Rectangle(
+            (0, 0), 0, 0, fill=False, edgecolor="white", lw=0.8, ls="--", alpha=0.45
+        )
+        self.axes["overview"].add_patch(self.hint)
         # blind mode: a short tick at the box centre on the top and bottom edges
         self.centre_marks = {
             name: ax.plot([], [], color="white", lw=2.0, solid_capstyle="butt")[0]
@@ -236,6 +242,11 @@ class SingleLabeller:
             (ticks,) = ax.plot(xs, ys, color=TRACK_COLOUR, lw=1.0, ls="--")
             self._overlays.append(ticks)
         blind = self.session.blind
+        show_hint = blind and self.session.config.blind_hint
+        self.hint.set_visible(show_hint)
+        if show_hint:
+            h0, h1, g0, g1 = hint_box(item, self.session.config)
+            self.hint.set_bounds(h0, g0, h1 - h0, g1 - g0)
         self.box.set_visible(not blind)
         self.box_lines.set_visible(not blind)
         self.box.set_bounds(
