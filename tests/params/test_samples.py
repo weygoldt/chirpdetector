@@ -60,6 +60,33 @@ def test_matching_is_one_to_one_by_time_and_frequency() -> None:
     assert (empty == -1).all()
 
 
+def test_long_chirps_match_at_their_box_midpoint() -> None:
+    """A long chirp's template centre lies early (fast rise, slow decay); a
+    prediction covering the chirp is matched by the footprint box midpoint."""
+    chirps = pd.DataFrame(
+        {
+            "t_center_s": [10.05, 20.0],  # chirp 0: centre near its onset
+            "box_t0_s": [10.0, 19.98],
+            "box_t1_s": [10.5, np.nan],  # chirp 1: no box, falls back
+            "f_low_hz": [600.0, 700.0],
+            "f_high_hz": [1000.0, 800.0],
+        }
+    )
+    preds = _preds(
+        [
+            (10.01, 10.49, 610.0, 990.0, 0.9),  # midpoint 10.25: 200 ms after 10.05
+            (19.95, 20.05, 705.0, 795.0, 0.8),
+        ]
+    )
+    index, dt = match_predictions(preds, chirps, 0.1)
+    np.testing.assert_array_equal(index, [0, 1])
+    assert dt[0] == pytest.approx(0.0, abs=1e-9)
+    old_rule, _ = match_predictions(
+        preds, chirps.drop(columns=["box_t0_s", "box_t1_s"]), 0.1
+    )
+    assert old_rule[0] == -1  # on the template centre the chirp would be missed
+
+
 def test_scenes_are_split_by_directory_and_filtered_by_background(
     params_scenes: Path, tmp_path: Path
 ) -> None:

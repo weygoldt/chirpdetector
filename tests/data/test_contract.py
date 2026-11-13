@@ -120,6 +120,22 @@ def test_ground_truth_scores_perfect_predictions(synthetic_dir: Path) -> None:
     assert pooled["labels"] == len(chirps)
 
 
+def test_ground_truth_centres_are_box_midpoints(synthetic_dir: Path) -> None:
+    """Labels are matched at their box midpoint (as predictions are); the
+    chirp's own centre time stays available as ``chirp_t_center_s``."""
+    dataset = load_dataset(synthetic_dir)
+    labels = dataset_ground_truth(dataset).labels
+    mid = 0.5 * (labels["t_start_s"] + labels["t_end_s"])
+    np.testing.assert_allclose(labels["t_center_s"], mid, rtol=0, atol=1e-12)
+    boxes = dataset.boxes
+    np.testing.assert_allclose(
+        np.sort(labels["chirp_t_center_s"].to_numpy(dtype=np.float64)),
+        np.sort(boxes["t_center_s"].to_numpy(dtype=np.float64)),
+        rtol=0,
+        atol=1e-12,
+    )
+
+
 # --------------------------------------------------------------- the validator
 
 

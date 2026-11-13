@@ -1484,6 +1484,13 @@ def dataset_ground_truth(
     stratified evaluation. Images may overlap in time, so they are not
     merged into their source recording here.
 
+    A label's ``t_center_s`` (the centre the matching rule compares with a
+    prediction's box midpoint) is its box midpoint, as for audian labels.
+    The chirp's own centre time (``t_center_s`` of the box table: the
+    template's centre, early in long chirps with a slow decay) is kept as
+    ``chirp_t_center_s``. Matching on the chirp centre would compare two
+    different points of long chirps and miss them (median offset 91 ms for
+    chirps of 300 ms or more).
     """
     from chirpdetector.evaluation import GroundTruth
 
@@ -1512,7 +1519,9 @@ def dataset_ground_truth(
                     {
                         "recording": image_id,
                         "dataset": kind,
-                        **{c: row[c] for c in (*_BOX_EDGES, "t_center_s")},
+                        **{c: row[c] for c in _BOX_EDGES},
+                        "t_center_s": 0.5 * (row["t_start_s"] + row["t_end_s"]),
+                        "chirp_t_center_s": row["t_center_s"],
                         "label": box_kind,
                         "emitter_id": row["emitter_id"],
                         "emitter_hz": row["emitter_hz"],
@@ -1540,6 +1549,7 @@ def dataset_ground_truth(
         "f_low_hz",
         "f_high_hz",
         "t_center_s",
+        "chirp_t_center_s",
         "label",
         "emitter_id",
         "emitter_hz",
