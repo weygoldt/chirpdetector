@@ -51,8 +51,9 @@ from gridtools.io import load_tracks, open_recording
 from chirpdetector.inference.spans import predict_span
 
 recording, tracks = open_recording(path), load_tracks(path)
-chirps = predict_span("default", recording, 0.0, 60.0, name="rec",
-                      tracks=tracks, params="default")
+chirps = predict_span(
+    "default", recording, 0.0, 60.0, name="rec", tracks=tracks, params="default"
+)
 ```
 
 ## How well it works
