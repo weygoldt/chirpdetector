@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 import pytest
 
@@ -139,3 +141,45 @@ def test_a_point_mass_is_not_spread_into_a_mode() -> None:
         assert bool(iqr_cal == pytest.approx(iqr_raw, rel=0.05)) is spread_kept
     with pytest.raises(ValueError, match="unknown parameters"):
         CalibrationConfig(fit_from={"depth_hz": 1.0})
+
+
+def test_bias_curve_ignores_the_noise_of_small_bins() -> None:
+    """2,000 val chirps in 40 bins: the curve must follow the shrinkage, not
+    the noise of each ~50-chirp median (its inverse would amplify it)."""
+    rng = np.random.default_rng(5)
+    n = 2000
+    y = rng.uniform(3.0, 6.0, n)
+    # shrinkage toward 4.5 that saturates at the ends (as a posterior mean)
+    mean = 4.5 + 1.9 * np.tanh((y - 4.5) / 2.0)
+    sigma = rng.uniform(0.05, 0.25, n)  # heteroscedastic, known per chirp
+    pred = mean + sigma * rng.normal(size=n)
+    noisy = fit_bias_map(
+        y, pred, n_bins=40, min_count=50, min_slope=0.2, smooth_knots=1
+    )
+    smooth = fit_bias_map(y, pred)  # defaults: smoothed, slope >= 0.5
+    slopes = np.diff(smooth.y) / np.diff(smooth.x)
+    true_slopes = np.diff(4.5 + 1.9 * np.tanh((np.asarray(smooth.x) - 4.5) / 2.0))
+    true_slopes /= np.diff(smooth.x)
+    assert np.max(np.abs(slopes - true_slopes)) < 0.3
+    noisy_slopes = np.diff(noisy.y) / np.diff(noisy.x)
+    assert np.ptp(noisy_slopes) > 2 * np.ptp(slopes)
+    # median-unbiased per decile on fresh chirps, also at the ends
+    y2 = rng.uniform(3.0, 6.0, 40_000)
+    s2 = rng.uniform(0.05, 0.25, y2.size)
+    p2 = 4.5 + 1.9 * np.tanh((y2 - 4.5) / 2.0) + s2 * rng.normal(size=y2.size)
+    cal = smooth.inverse(p2)
+    edges = np.quantile(y2, np.linspace(0, 1, 11))
+    for lo, hi in itertools.pairwise(edges):
+        sel = (y2 >= lo) & (y2 <= hi)
+        assert abs(np.median(cal[sel] - y2[sel])) < 0.03
+    # the propagated sigma keeps its rank agreement with the error
+    from scipy.stats import spearmanr
+
+    def rank(h: MonotoneMap) -> float:
+        c = h.inverse(p2)
+        return float(np.asarray(spearmanr(s2 / h.slope(c), np.abs(c - y2))[0]))
+
+    raw_error = np.abs(p2 - (4.5 + 1.9 * np.tanh((y2 - 4.5) / 2.0)))
+    raw_rank = float(np.asarray(spearmanr(s2, raw_error)[0]))
+    assert rank(smooth) > rank(noisy) + 0.05
+    assert rank(smooth) > 0.8 * raw_rank

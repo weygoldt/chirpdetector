@@ -28,9 +28,8 @@ regressor already approximates.
 `fit_calibration` fits the opposite direction, per parameter in model
 space (logs): ``h(y) = median(yhat | y)``, the bias curve, as a monotone
 increasing, piecewise-linear map through the medians of quantile bins of
-the true value (pooled-adjacent-violators to make it monotone, a minimum
-slope so that it can be inverted stably, slope 1 beyond the outermost bins).
-The calibrated estimate is ``h^-1(yhat)``, so that
+the true value, slope 1 beyond the outermost bins. The calibrated
+estimate is ``h^-1(yhat)``, so that
 ``median(h^-1(yhat) | y) = y`` for every ``y``: the estimate is
 conditionally median-unbiased. ``h`` is a property of the measurement
 given the true value; it does not depend on how often each true value
@@ -40,6 +39,30 @@ with a different parameter distribution, such as the natural one. Its
 distribution over a population is the true distribution blurred by the
 measurement error (slightly *wider*, by a few per cent of the parameter),
 not compressed toward the training population.
+
+Fitting the curve
+-----------------
+1. Quantile bins of the true value (``n_bins``, at least ``min_count``
+   chirps each); knots at the bins' median true value and median estimate.
+2. **Smoothing**: each knot's estimate is replaced by a weighted local
+   linear fit through it and its neighbours (``smooth_knots`` knots,
+   weights = bin sizes; the window is cut at the ends, where a local
+   linear fit, unlike a running mean, has no boundary bias, so the
+   strongest shrinkage at the smallest and largest values is kept).
+3. Pooled-adjacent-violators makes it monotone, and every slope is at least
+   ``min_slope`` (0.5: the inverse amplifies an error at most twofold).
+
+Without step 2 the curve follows the sampling noise of ~50-chirp bin
+medians: on the first plumbing decoder (2,087 val chirps, 40 bins) the
+slopes between adjacent knots ranged from the 0.2 floor to 3. Its inverse
+then stretched some intervals fivefold and compressed others, which
+widened per-chirp errors, put ripples into the calibrated distributions,
+and, through the slope in the sigma propagation, made the calibrated sigma
+far less informative about the error than the raw one (Spearman of sigma
+and |error| 0.42 -> 0.22 for height, 0.35 -> 0.07 for undershoot) and its
+coverage uneven across sigma quintiles. With the smoothing the same
+decoder keeps the decile-wise bias at most ~2 % (height) while those
+side effects largely disappear.
 
 Uncertainty
 -----------
@@ -91,6 +114,9 @@ class CalibrationConfig:
     min_slope
         Smallest slope of the bias curve ``h`` (its inverse amplifies
         errors by at most ``1 / min_slope``).
+    smooth_knots
+        Knots in the local linear smoothing of the bin medians (odd; 1: no
+        smoothing). See "Fitting the curve".
     flag_quantile
         Calibrated sigma above this quantile of the val sigmas flags a
         chirp as ``uncertain`` (`chirpdetector.params.inference`).
@@ -105,7 +131,8 @@ class CalibrationConfig:
     method: Method = "inverse-median"
     n_bins: int = 40
     min_count: int = 50
-    min_slope: float = 0.2
+    min_slope: float = 0.5
+    smooth_knots: int = 11
     flag_quantile: float = 0.995
     fit_from: Mapping[str, float] = field(
         default_factory=lambda: {"undershoot_hz": 1.0}
@@ -124,6 +151,9 @@ class CalibrationConfig:
             raise ValueError(msg)
         if self.n_bins < 2 or self.min_count < 2:
             msg = "calibration.n_bins and min_count must be >= 2"
+            raise ValueError(msg)
+        if self.smooth_knots < 1 or self.smooth_knots % 2 != 1:
+            msg = f"calibration.smooth_knots must be an odd number >= 1, got {self.smooth_knots}"
             raise ValueError(msg)
         if not 0 < self.min_slope <= 1:
             msg = f"calibration.min_slope must lie in (0, 1], got {self.min_slope}"
@@ -201,13 +231,33 @@ class MonotoneMap:
         )
 
 
+def _local_linear(
+    x: FloatArray, y: FloatArray, weights: FloatArray, window: int
+) -> FloatArray:
+    """Each ``y[k]`` replaced by a weighted linear fit through ``window`` knots
+    around ``k`` (cut at the ends), evaluated at ``x[k]``."""
+    half = window // 2
+    out = y.copy()
+    for k in range(x.size):
+        lo, hi = max(0, k - half), min(x.size, k + half + 1)
+        if hi - lo < 3:
+            continue
+        dx = x[lo:hi] - x[k]
+        w = weights[lo:hi]
+        design = np.stack([np.ones_like(dx), dx], axis=1) * np.sqrt(w)[:, None]
+        coef = np.linalg.lstsq(design, y[lo:hi] * np.sqrt(w), rcond=None)[0]
+        out[k] = coef[0]
+    return out
+
+
 def fit_bias_map(
     true: npt.ArrayLike,
     pred: npt.ArrayLike,
     *,
     n_bins: int = 40,
     min_count: int = 50,
-    min_slope: float = 0.2,
+    min_slope: float = 0.5,
+    smooth_knots: int = 11,
 ) -> MonotoneMap:
     """Monotone bias curve ``h(y) = median(pred | true = y)`` (module docstring).
 
@@ -223,6 +273,8 @@ def fit_bias_map(
         See above.
     min_slope
         Smallest slope of the curve.
+    smooth_knots
+        Knots in the local linear smoothing of the bin medians (1: none).
 
     Returns
     -------
@@ -245,6 +297,8 @@ def fit_bias_map(
     keep = np.concatenate([[True], np.diff(x) > 0])  # ties in x: merge
     if not keep.all():
         x, y, counts = x[keep], y[keep], counts[keep]
+    if smooth_knots > 1:
+        y = _local_linear(x, y, counts, smooth_knots)
     y = isotonic_regression(y, weights=counts, increasing=True).x
     for k in range(1, x.size):  # minimum slope, so that h can be inverted
         y[k] = max(y[k], y[k - 1] + min_slope * (x[k] - x[k - 1]))
@@ -358,6 +412,7 @@ def fit_calibration(
                 n_bins=config.n_bins,
                 min_count=config.min_count,
                 min_slope=config.min_slope,
+                smooth_knots=config.smooth_knots,
             )
         else:
             maps[name] = MonotoneMap()

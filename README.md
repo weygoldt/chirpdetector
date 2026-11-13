@@ -169,9 +169,12 @@ toward the middle of its training population (small chirps overestimated,
 large ones underestimated), and how much depends on that population. The
 bundle stores, per parameter, the monotone bias curve
 `h(y) = median(estimate | true = y)` fitted on the validation scenes at the
-detector's threshold, and reports `h⁻¹(estimate)`: median-unbiased at every
-true value, so its meaning does not depend on the mix of chirps in a
-recording. Standard deviations are propagated through `h⁻¹` and rescaled so
+detector's threshold (bin medians smoothed by a local linear fit, slopes at
+least 0.5), and reports `h⁻¹(estimate)`: median-unbiased at every true
+value, so its meaning does not depend on the mix of chirps in a recording.
+The price is a wider per-chirp error than the raw estimate (the inverse of a
+curve with slope < 1 amplifies the noise) and a population distribution that
+is the true one blurred by that error; the evaluation report shows both. Standard deviations are propagated through `h⁻¹` and rescaled so
 that ±1 sd covers 68 % of the validation chirps (`k95` sd cover 95 %).
 
 **Inference.** `predict_span(..., params=BUNDLE)` (and `chirpdetector
