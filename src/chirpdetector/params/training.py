@@ -674,6 +674,9 @@ def train_params(
             "samples_sha256": dict(samples.manifest["files"]),
             "sample_counts": samples.manifest["counts"],
             "n_train": len(train_rows),
+            "train_template_ids": sorted(
+                {int(t) for t in train_rows["template_id"].to_numpy(np.int64)}
+            ),
             "n_val": len(val_rows),
             "n_calibration": len(cal_rows),
             "best_epoch": best_epoch,

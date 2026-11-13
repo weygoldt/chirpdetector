@@ -16,6 +16,7 @@ from chirpdetector.cli import app
 from chirpdetector.inference import predict_span
 from chirpdetector.params import PARAM_COLUMNS, ParamsEstimator, load_params_bundle
 from chirpdetector.params.bundle import ParamsBundle
+from chirpdetector.params.evaluation import agreement_summary
 from chirpdetector.params.samples import discover_scenes
 from chirpdetector.params.training import ParamsTrainingConfig, train_params
 
@@ -232,10 +233,19 @@ def test_evaluation_writes_report_and_metrics(
         "## Cluster structure",
     ):
         assert heading in text
+    assert "## Error vs the chirp's own parameters" in text
+    assert "**Template reuse**" in text
     metrics = json.loads((tmp_path / "eval" / "metrics.json").read_text())
     assert metrics["split"] == "test"
     assert set(metrics["accuracy"]) == {"raw", "cal"}
     assert metrics["natural_prior"]["pool_size"] > 0
+    # the bundle records its training templates; test chirps are checked against them
+    bundle = load_params_bundle(bundle_dir)
+    assert len(bundle.training["train_template_ids"]) > 0
+    reuse = metrics["template_reuse"]
+    assert reuse["known"]
+    assert 0 <= reuse["fraction_template_seen"] <= reuse["fraction_group_seen"] <= 1
+    assert (tmp_path / "eval" / "coupling_bins.csv").is_file()
     for name in ("fig_pred_vs_true.png", "fig_marginals.png", "fig_joint.png"):
         assert (tmp_path / "eval" / name).is_file()
     bundle: ParamsBundle = load_params_bundle(bundle_dir)  # metrics attached
@@ -337,3 +347,41 @@ def test_real_agreement_compares_with_the_trace(
     summary = agreement_summary(real)
     assert summary["detected"] == len(chirps)
     assert summary["height_hz"]["n"] == len(chirps)
+    assert "individual" in real.columns
+
+
+def test_agreement_summary_gives_the_simulated_correlation_over_the_same_range() -> (
+    None
+):
+    """A narrow reference range caps r; the summary says what simulation predicts."""
+    rng = np.random.default_rng(0)
+    truth = rng.uniform(40, 500, 4000)  # simulated test chirps, wide range
+    sim = pd.DataFrame(
+        {
+            "true_height_hz": truth,
+            "cal_height_hz": truth * np.exp(rng.normal(0, 0.1, truth.size)),
+            "family": np.where(truth > 200, "big", "small"),
+            "f_high_hz": 800 + truth + 25,
+            "baseline_hz": 800.0,
+        }
+    )
+    ref = rng.uniform(380, 460, 300)  # harvested chirps: narrow range
+    real = pd.DataFrame(
+        {
+            "detected": True,
+            "individual": ["a"] * 250 + ["b"] * 50,
+            "ref_height_hz": ref,
+            "height_hz": ref * np.exp(rng.normal(0, 0.1, ref.size)),
+            "f_high_hz": 800 + ref + 60,
+            "baseline_hz": 800.0,
+        }
+    )
+    summary = agreement_summary(real, sim=sim)
+    h = summary["height_hz"]
+    assert np.corrcoef(sim["true_height_hz"], sim["cal_height_hz"])[0, 1] > 0.9
+    assert h["sim_pearson_r"] < 0.6  # the same error over the narrow range
+    assert h["pearson_r"] == pytest.approx(h["sim_pearson_r"], abs=0.15)
+    assert h["sim_n"] < 1000
+    assert summary["largest_individual_share"] == pytest.approx(250 / 300)
+    assert summary["box_top_offset_hz"]["real"] == pytest.approx(60.0)
+    assert summary["box_top_offset_hz"]["sim_big"] == pytest.approx(25.0)

@@ -14,6 +14,17 @@ Accuracy (`accuracy`, `breakdown`)
     1 for an estimate that is unbiased at every true value, below 1 for one
     that regresses to the mean (also as the slope through the medians of
     the deciles, which outliers do not move).
+Coupling of the error to the chirp's own parameters (`coupling`)
+    Within SNR strata (all, <= -10 dB, -10 to 10 dB, > 10 dB): the median
+    signed and absolute model-space error in quintiles of each parameter's
+    true value, and the rank correlation of every parameter's signed and
+    absolute error with every true parameter. Answers whether, at equal
+    SNR, small (or short, or long) chirps are measured worse.
+Template reuse (`template_reuse`)
+    The simulator draws chirps from one template library for all splits,
+    so most test chirps reuse a template (and every one an individual) that
+    the decoder was trained on, in another scene. The fractions are
+    reported and the breakdowns separate chirps on unseen templates.
 Uncertainty (`coverage`)
     Fraction of chirps whose error is within ±1 sd and ±k95 sd, and the
     rank correlation of sd and |error|; calibration by sd quintile.
@@ -30,11 +41,14 @@ Prior sensitivity (`natural_prior_weights`)
     The simulator drew templates from an equalised mix (many big and long
     chirps, `gridtools.templates.TemplateLibrary.cycler`); real recordings
     are dominated by small chirps. Each test chirp is weighted by
-    ``p_natural / p_equalised`` of its template's excursion x duration
-    equalisation bin (natural = uniform over the eligible pool, as
+    ``p_library / p_equalised`` of its template's excursion x duration
+    equalisation bin (library mix = uniform over the eligible pool, as
     ``TemplateLibrary.sample(..., equalize=False)``), turning the test
-    population into one with the natural mix of chirp sizes, and the
-    distribution fidelity is recomputed with these weights.
+    population into one with the library's mix of chirp sizes, and the
+    distribution fidelity is recomputed with these weights. The library
+    mix (mostly chirp-chamber small chirps) is a stand-in for a
+    small-chirp-dominated population, not the measured composition of the
+    competition recordings; it tests sensitivity to the prior.
 Cluster structure (`cluster_tests`)
     Populations resampled from the test chirps by their true parameters:
     two well-separated types (small/short vs big/short, and big/short vs
@@ -49,7 +63,11 @@ Real-data agreement (`real_agreement`)
     run on the real recording around each chirp, and the decoder's
     estimates are compared with the per-period parameters of the chirp's
     independently extracted frequency trace. This is agreement with
-    another estimate, not an error against ground truth.
+    another estimate, not an error against ground truth. These chirps span
+    a narrow range (big, long chirps, mostly of one fish), so a correlation
+    over them is small even for an accurate estimate; the summary gives the
+    correlation the simulation predicts over the same range of true values
+    (`agreement_summary` with ``sim``).
 """
 
 from __future__ import annotations
@@ -94,6 +112,7 @@ __all__ = [
     "accuracy",
     "breakdown",
     "cluster_tests",
+    "coupling",
     "coverage",
     "distribution_fidelity",
     "joint_histograms",
@@ -101,6 +120,7 @@ __all__ = [
     "predict_samples",
     "real_agreement",
     "run_evaluation",
+    "template_reuse",
 ]
 
 log = logging.getLogger(__name__)
@@ -112,6 +132,12 @@ ESTIMATES = ("raw", "cal")
 SNR_BINS = (-np.inf, -10.0, 0.0, 10.0, 20.0, np.inf)
 DF_BINS = (0.0, 5.0, 20.0, 50.0, 150.0, np.inf)
 SCORE_BINS = (0.0, 0.5, 0.7, 0.85, 1.0)
+SNR_STRATA: tuple[tuple[str, float, float], ...] = (
+    ("SNR <= -10 dB", -np.inf, -10.0),
+    ("-10 < SNR <= 10 dB", -10.0, 10.0),
+    ("SNR > 10 dB", 10.0, np.inf),
+)
+"""SNR strata ``(label, lo, hi]`` of `coupling` (besides all chirps)."""
 JOINT_BINS = {"height_hz": (10.0, 1000.0, 30), "fwhm_s": (0.002, 0.5, 30)}
 """Log-spaced bins ``(lo, hi, n)`` of the joint height x FWHM histograms."""
 
@@ -297,6 +323,11 @@ def _groups(pred: pd.DataFrame) -> dict[str, npt.NDArray[np.str_]]:
         "scene_set": np.asarray(scene_set, dtype=str),
         "score": _bin_labels(pred["score"], SCORE_BINS, "no score"),
         "params_ok": flag("params_ok", "ok", "flagged"),
+        **(
+            {"template": flag("template_in_train", "seen in training", "new template")}
+            if "template_in_train" in pred.columns
+            else {}
+        ),
     }
 
 
@@ -340,6 +371,160 @@ def breakdown(pred: pd.DataFrame, estimate: str = "cal") -> pd.DataFrame:
                     }
                 )
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------- coupling
+
+
+def _strata(pred: pd.DataFrame) -> list[tuple[str, npt.NDArray[np.bool_]]]:
+    snr = pred["snr_db"].to_numpy(float)
+    out = [("all", np.ones(len(pred), dtype=bool))]
+    for label, lo, hi in SNR_STRATA:
+        out.append((label, (snr > lo) & (snr <= hi)))
+    return out
+
+
+def coupling(
+    pred: pd.DataFrame, *, n_bins: int = 5, min_n: int = 30
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Error vs the chirp's own true parameters, within SNR strata.
+
+    Errors are in model space (``log(p + offset)``; x100 about the relative
+    error in % for height and widths), for both estimates.
+
+    Parameters
+    ----------
+    pred
+        `predict_samples` output.
+    n_bins
+        Quantile bins of the true value within each stratum.
+    min_n
+        Strata with fewer chirps are skipped.
+
+    Returns
+    -------
+    bins, ranks
+        ``bins``: one row per parameter, estimate, stratum and bin of the
+        parameter's own true value (``n``, true range and median,
+        ``bias`` = median signed error, ``abs_error`` = median |error|).
+        ``ranks``: Spearman correlation of the signed (``rho_signed``) and
+        absolute (``rho_abs``) error of ``error_of`` with the true value
+        of ``true_of``, per estimate and stratum.
+    """
+    true_log = _true_log(pred)
+    bins_rows: list[dict[str, Any]] = []
+    rank_rows: list[dict[str, Any]] = []
+    for stratum, mask in _strata(pred):
+        if mask.sum() < min_n:
+            continue
+        for estimate in ESTIMATES:
+            err = _est_log(pred, estimate) - true_log
+            for j, p in enumerate(PARAMETERS):
+                ok = mask & np.isfinite(err[:, j]) & np.isfinite(true_log[:, j])
+                t = true_log[ok, j]
+                e = err[ok, j]
+                order = np.argsort(t, kind="stable")
+                for k, index in enumerate(np.array_split(order, n_bins)):
+                    if index.size == 0:
+                        continue
+                    natural = np.exp(t[index]) - LOG_OFFSETS[p]
+                    bins_rows.append(
+                        {
+                            "parameter": p,
+                            "estimate": estimate,
+                            "stratum": stratum,
+                            "bin": k + 1,
+                            "n": int(index.size),
+                            "true_lo": float(natural.min()),
+                            "true_hi": float(natural.max()),
+                            "true_median": float(np.median(natural)),
+                            "bias": float(np.median(e[index])),
+                            "abs_error": float(np.median(np.abs(e[index]))),
+                        }
+                    )
+                for q_index, q in enumerate(PARAMETERS):
+                    both = ok & np.isfinite(true_log[:, q_index])
+                    if both.sum() < min_n:
+                        continue
+                    tq = true_log[both, q_index]
+                    ep = err[both, j]
+                    rank_rows.append(
+                        {
+                            "error_of": p,
+                            "true_of": q,
+                            "estimate": estimate,
+                            "stratum": stratum,
+                            "n": int(both.sum()),
+                            "rho_signed": float(np.asarray(stats.spearmanr(tq, ep)[0])),
+                            "rho_abs": float(
+                                np.asarray(stats.spearmanr(tq, np.abs(ep))[0])
+                            ),
+                        }
+                    )
+    return pd.DataFrame(bins_rows), pd.DataFrame(rank_rows)
+
+
+# ---------------------------------------------------------------- template reuse
+
+
+def training_templates(bundle: ParamsBundle) -> npt.NDArray[np.int64] | None:
+    """Template ids of the decoder's training chirps.
+
+    From the bundle (``training.train_template_ids``) or, for bundles made
+    before it was recorded, from its training sample set if still present.
+    """
+    ids = bundle.training.get("train_template_ids")
+    if ids is not None:
+        return np.asarray(ids, dtype=np.int64)
+    path = bundle.training.get("samples_path")
+    if not path or not (Path(path) / "manifest.json").is_file():
+        return None
+    samples = load_samples(path)
+    min_score = bundle.training.get("config", {}).get("optim", {}).get("min_score")
+    rows = samples.select("train", usable=True, min_score=min_score)
+    return np.unique(rows["template_id"].to_numpy(np.int64))
+
+
+def template_reuse(
+    template_ids: npt.ArrayLike,
+    train_ids: npt.ArrayLike,
+    library_dir: str | Path,
+) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.bool_], dict[str, Any]]:
+    """Which chirps reuse a training template, or a training individual.
+
+    Individuals are the library's best proxies
+    (`gridtools.templates.library.individual_labels`: the harvested chirps'
+    fish, the chirp chamber's inferred recording groups).
+
+    Returns
+    -------
+    template_seen, group_seen, info
+        Per chirp, and the fractions and counts.
+    """
+    from gridtools.templates.library import individual_labels, load_library
+
+    meta = load_library(library_dir, mmap=True).metadata
+    label_of = dict(
+        zip(
+            meta["template_id"].to_numpy(np.int64).tolist(),
+            individual_labels(meta).tolist(),
+            strict=True,
+        )
+    )
+    ids = np.asarray(template_ids, dtype=np.int64)
+    train = {int(t) for t in np.asarray(train_ids, dtype=np.int64)}
+    train_groups = {label_of.get(t) for t in train}
+    template_seen = np.array([int(t) in train for t in ids], dtype=bool)
+    group_seen = np.array([label_of.get(int(t)) in train_groups for t in ids])
+    info = {
+        "n": int(ids.size),
+        "n_train_templates": len(train),
+        "n_train_groups": len(train_groups),
+        "fraction_template_seen": float(template_seen.mean()) if ids.size else None,
+        "fraction_group_seen": float(group_seen.mean()) if ids.size else None,
+        "n_test_groups": len({label_of.get(int(t)) for t in ids}),
+    }
+    return template_seen, group_seen.astype(bool), info
 
 
 # ---------------------------------------------------------------- uncertainty
@@ -877,6 +1062,11 @@ def real_agreement(
     ids = harvested["template_id"].to_numpy(np.int64)
     rows_of = library.rows_of(ids)
     recordings = harvested["recording"].astype(str).to_numpy()
+    individuals = (
+        harvested["individual"].fillna("").astype(str).to_numpy()
+        if "individual" in harvested.columns
+        else np.full(len(harvested), "")
+    )
     baselines = harvested["baseline_hz"].to_numpy(np.float64)
     centres = harvested["align_abs_s"].to_numpy(np.float64)
     snrs = (
@@ -896,6 +1086,7 @@ def real_agreement(
             row: dict[str, Any] = {
                 "template_id": int(ids[k]),
                 "recording": name,
+                "individual": str(individuals[k]),
                 "t_center_s": centre,
                 "baseline_hz": float(baselines[k]),
                 "band_snr_db": float(snrs[k]),
@@ -944,8 +1135,21 @@ def estimator_columns() -> tuple[str, ...]:
     return PARAM_COLUMNS
 
 
-def agreement_summary(real: pd.DataFrame) -> dict[str, Any]:
-    """Median |difference|, relative difference, bias and correlations."""
+def agreement_summary(
+    real: pd.DataFrame, sim: pd.DataFrame | None = None
+) -> dict[str, Any]:
+    """Median |difference|, relative difference, bias and correlations.
+
+    With ``sim`` (`predict_samples` output of the test chirps), each
+    parameter also gets what the simulation predicts for the same range of
+    true values (the reference's 5-95 % range): the correlation of the
+    calibrated estimate with the truth there (``sim_pearson_r``) and its
+    median |error|. A correlation is bounded by the spread of the values
+    against the error; over the narrow range of the harvested chirps it is
+    small even in simulation. ``box_top_offset_hz`` compares how far the
+    detector box reaches above the chirp's top: real (above the trace
+    estimate) vs simulated big chirps (above the truth).
+    """
     detected = (
         real["detected"].to_numpy(bool)
         if "detected" in real.columns
@@ -953,6 +1157,26 @@ def agreement_summary(real: pd.DataFrame) -> dict[str, Any]:
     )
     found = real.loc[detected]
     out: dict[str, Any] = {"n": len(real), "detected": len(found)}
+    if "individual" in found.columns and len(found):
+        counts = found["individual"].replace("", "unknown").value_counts()
+        out["individuals"] = {str(k): int(v) for k, v in counts.items()}
+        out["largest_individual_share"] = float(counts.iloc[0] / counts.sum())
+    if sim is not None and len(found) and "f_high_hz" in found.columns:
+        big = sim.loc[sim["family"].astype(str).to_numpy() == "big"]
+        out["box_top_offset_hz"] = {
+            "real": float(
+                np.nanmedian(
+                    found["f_high_hz"] - found["baseline_hz"] - found["ref_height_hz"]
+                )
+            ),
+            "sim_big": float(
+                np.nanmedian(
+                    big["f_high_hz"] - big["baseline_hz"] - big["true_height_hz"]
+                )
+            )
+            if len(big)
+            else None,
+        }
     for p in PARAMETERS:
         if p not in found.columns:
             continue
@@ -973,7 +1197,25 @@ def agreement_summary(real: pd.DataFrame) -> dict[str, Any]:
             "spearman_r": float(np.asarray(stats.spearmanr(ref[ok], est[ok])[0])),
             "ref_median": float(np.median(ref[ok])),
             "ref_iqr": [float(v) for v in np.quantile(ref[ok], [0.25, 0.75])],
+            "ref_sd": float(np.std(ref[ok], ddof=1)),
+            "difference_sd": float(np.std(diff, ddof=1)),
         }
+        if sim is not None:
+            lo, hi = np.quantile(ref[ok], [0.05, 0.95])
+            t = sim[f"true_{p}"].to_numpy(float)
+            e = sim[f"cal_{p}"].to_numpy(float)
+            inside = np.isfinite(t) & np.isfinite(e) & (t >= lo) & (t <= hi)
+            if inside.sum() >= 3:
+                out[p].update(
+                    {
+                        "sim_n": int(inside.sum()),
+                        "sim_pearson_r": float(np.corrcoef(t[inside], e[inside])[0, 1]),
+                        "sim_median_abs_error": float(
+                            np.median(np.abs(e[inside] - t[inside]))
+                        ),
+                        "sim_error_sd": float(np.std(e[inside] - t[inside], ddof=1)),
+                    }
+                )
     return out
 
 
@@ -1101,7 +1343,24 @@ def evaluate_params(
         pred["template_id"].to_numpy(np.int64), pred["scene_dir"].unique().tolist()
     )
     pred["natural_weight"] = weights
+    reuse: dict[str, Any] = {"known": False}
+    train_ids = training_templates(bundle)
+    if train_ids is not None:
+        scene_info = json.loads(
+            (Path(str(pred["scene_dir"].iloc[0])) / "scene.json").read_text()
+        )
+        seen, group_seen, info = template_reuse(
+            pred["template_id"].to_numpy(np.int64),
+            train_ids,
+            scene_info["templates"]["path"],
+        )
+        pred["template_in_train"] = seen
+        pred["individual_in_train"] = group_seen
+        reuse = {"known": True, **info}
+    coupling_bins, coupling_ranks = coupling(pred)
     tables = {
+        "coupling_bins": coupling_bins,
+        "coupling_ranks": coupling_ranks,
         "breakdown": breakdown(pred),
         "coverage": coverage(pred, bundle),
         "fidelity": distribution_fidelity(pred, seed=seed),
@@ -1139,6 +1398,7 @@ def evaluate_params(
         "fidelity": tables["fidelity"].to_dict("records"),
         "fidelity_natural": tables["fidelity_natural"].to_dict("records"),
         "natural_prior": prior,
+        "template_reuse": reuse,
         "natural_conditional_bias": {
             e: {
                 p: float(
@@ -1230,7 +1490,9 @@ def run_evaluation(
                 device=torch_device,
             )
             result.real = real
-            result.metrics["real_agreement"] = _jsonable(agreement_summary(real))
+            result.metrics["real_agreement"] = _jsonable(
+                agreement_summary(real, sim=result.predictions)
+            )
     report = write_report(result, out_dir)
     if attach:
         attach_params_metrics(

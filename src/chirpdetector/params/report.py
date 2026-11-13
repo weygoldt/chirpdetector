@@ -5,7 +5,8 @@
     report.md                  the report (tables inline, figures linked)
     metrics.json               all metrics (`chirpdetector.params.evaluation`)
     predictions.parquet        per test sample: truth, raw and calibrated estimates
-    breakdown.csv, coverage.csv, fidelity.csv, fidelity_natural.csv, clusters.csv
+    breakdown.csv, coverage.csv, fidelity.csv, fidelity_natural.csv, clusters.csv,
+    coupling_bins.csv, coupling_ranks.csv
     real_agreement.csv         if the real-data check ran
     fig_*.png                  figures (needs matplotlib)
 """
@@ -141,6 +142,135 @@ def _fig_bias(pred: pd.DataFrame, path: Path) -> Path:
     return path
 
 
+_STRATUM_STYLE = {
+    "all": ("k", 1.6),
+    "SNR <= -10 dB": ("tab:red", 1.0),
+    "-10 < SNR <= 10 dB": ("tab:orange", 1.0),
+    "SNR > 10 dB": ("tab:green", 1.0),
+}
+
+
+def _fig_coupling(bins: pd.DataFrame, path: Path) -> Path | None:
+    from matplotlib.ticker import NullFormatter
+
+    if bins.empty:
+        return None
+    fig, axes = _figure(2, 4, (14, 6.2))
+    for c, p in enumerate(PARAMETERS):
+        for r, column in enumerate(("bias", "abs_error")):
+            ax = axes[r, c]
+            for stratum, (colour, lw) in _STRATUM_STYLE.items():
+                for estimate, ls in (("cal", "-"), ("raw", ":")):
+                    sub = bins.loc[
+                        (bins["parameter"] == p)
+                        & (bins["stratum"] == stratum)
+                        & (bins["estimate"] == estimate)
+                    ]
+                    if sub.empty or (estimate == "raw" and stratum != "all"):
+                        continue
+                    ax.plot(
+                        _SCALE[p] * sub["true_median"].to_numpy(float),
+                        100 * sub[column].to_numpy(float),
+                        ls=ls,
+                        marker="o",
+                        ms=3,
+                        color=colour,
+                        lw=lw,
+                        label=f"{stratum} ({_NAMES[estimate]})",
+                    )
+            if column == "bias":
+                ax.axhline(0, color="0.5", lw=0.6)
+            _axis_scale(ax, p, "x")
+            ax.xaxis.set_minor_formatter(NullFormatter())
+            ax.set_xlabel(f"true {_LABELS[p]} (quintile median)")
+            ax.set_ylabel(
+                "median signed error (log x100)"
+                if column == "bias"
+                else "median |error| (log x100)"
+            )
+    axes[0, 0].legend(fontsize=6)
+    fig.suptitle(
+        "Error vs the chirp's own value, within SNR strata (test chirps; "
+        "log x100 = % for height and widths)"
+    )
+    fig.savefig(path, dpi=130)
+    return path
+
+
+def _coupling_section(bins: pd.DataFrame, ranks: pd.DataFrame) -> list[str]:
+    if bins.empty:
+        return []
+    out = [
+        "## Error vs the chirp's own parameters",
+        "",
+        "Is the error systematically coupled to the chirp's own size, at equal "
+        "SNR? Test chirps per SNR stratum, in quintiles of the parameter's true "
+        "value (smallest -> largest); errors in model space x100 (about % for "
+        "height and widths; log(undershoot + 1 Hz) for undershoot). rho: Spearman "
+        "correlation of the error with the true value over the stratum.",
+        "",
+    ]
+    for estimate in ("cal", "raw"):
+        rows = []
+        for p in PARAMETERS:
+            for stratum in _STRATUM_STYLE:
+                sub = bins.loc[
+                    (bins["parameter"] == p)
+                    & (bins["stratum"] == stratum)
+                    & (bins["estimate"] == estimate)
+                ].sort_values("bin")
+                if sub.empty:
+                    continue
+                rank = ranks.loc[
+                    (ranks["error_of"] == p)
+                    & (ranks["true_of"] == p)
+                    & (ranks["stratum"] == stratum)
+                    & (ranks["estimate"] == estimate)
+                ]
+                rows.append(
+                    {
+                        "parameter": p,
+                        "SNR": stratum,
+                        "n": int(sub["n"].sum()),
+                        "true range": f"{_SCALE[p] * sub['true_lo'].min():.3g}-"
+                        f"{_SCALE[p] * sub['true_hi'].max():.3g}",
+                        "bias by quintile": " / ".join(
+                            f"{100 * v:+.1f}" for v in sub["bias"]
+                        ),
+                        "abs. error by quintile": " / ".join(
+                            f"{100 * v:.1f}" for v in sub["abs_error"]
+                        ),
+                        "rho(error, true)": f"{float(rank['rho_signed'].iloc[0]):+.2f}"
+                        if len(rank)
+                        else "-",
+                        "rho(abs. error, true)": f"{float(rank['rho_abs'].iloc[0]):+.2f}"
+                        if len(rank)
+                        else "-",
+                    }
+                )
+        out += [
+            f"**{_NAMES[estimate].capitalize()} estimate**",
+            "",
+            _table(pd.DataFrame(rows)),
+            "",
+        ]
+    cross = ranks.loc[(ranks["stratum"] == "all") & (ranks["estimate"] == "cal")]
+    if len(cross):
+        matrix = cross.pivot(index="error_of", columns="true_of", values="rho_abs")
+        matrix = matrix.loc[list(PARAMETERS), list(PARAMETERS)].reset_index()
+        matrix.columns = ["abs. error of \\ true", *PARAMETERS]
+        out += [
+            "Cross-coupling (calibrated, all chirps): Spearman correlation of each "
+            "parameter's absolute error (rows) with each true parameter (columns); "
+            "per stratum in `coupling_ranks.csv`.",
+            "",
+            _table(matrix),
+            "",
+        ]
+    out += ["![coupling](fig_coupling.png)", ""]
+    return out
+
+
 def _log_bins(values: np.ndarray, p: str, n: int = 50) -> np.ndarray:
     v = values[np.isfinite(values)]
     if p == "undershoot_hz":
@@ -154,7 +284,7 @@ def _fig_marginals(pred: pd.DataFrame, weights: np.ndarray, path: Path) -> Path:
     for r, (w, title) in enumerate(
         (
             (None, "test population (equalised templates)"),
-            (weights, "re-weighted to the natural template mix"),
+            (weights, "re-weighted to the library template mix"),
         )
     ):
         for c, p in enumerate(PARAMETERS):
@@ -194,7 +324,7 @@ def _fig_joint(result: ParamsEvaluation, path: Path) -> Path:
     for r, (joint, title) in enumerate(
         (
             (result.joint, "test population"),
-            (result.joint_natural, "natural template mix"),
+            (result.joint_natural, "library template mix"),
         )
     ):
         h_edges, f_edges = joint["height_edges_hz"], 1e3 * joint["fwhm_edges_s"]
@@ -220,7 +350,7 @@ def _fig_joint(result: ParamsEvaluation, path: Path) -> Path:
             fig.colorbar(mesh, ax=axes[r, 2], label="fraction of chirps")
     fig.suptitle(
         f"Joint height x FWHM; TV between random halves of the truth: "
-        f"{result.joint['tv_halves']:.3f} (test), {result.joint_natural['tv_halves']:.3f} (natural)"
+        f"{result.joint['tv_halves']:.3f} (test), {result.joint_natural['tv_halves']:.3f} (library mix)"
     )
     fig.savefig(path, dpi=130)
     return path
@@ -461,6 +591,50 @@ def _fidelity_table(table: pd.DataFrame) -> str:
     return _table(pd.DataFrame(rows))
 
 
+def _real_context(real: dict[str, Any]) -> list[str]:
+    lines = [
+        "How to read r: the harvested chirps cover a narrow range of values, so a "
+        "correlation over them is small unless the error is much smaller than that "
+        "spread. 'sim r, same range' is the correlation of the calibrated estimate "
+        "with the truth for the simulated test chirps inside the reference's 5-95 % "
+        "range: a real r near it is what the simulation predicts; a real r well "
+        "below it, or a real |difference| well above the simulated error, points to "
+        "a gap between simulation and recordings (or to the trace reference)."
+    ]
+    share = real.get("largest_individual_share")
+    if share is not None:
+        lines.append(
+            f"The detected chirps come from {len(real.get('individuals', {}))} "
+            f"individuals; the largest contributes {100 * share:.0f} %."
+        )
+    offset = real.get("box_top_offset_hz")
+    if offset and offset.get("sim_big") is not None:
+        lines.append(
+            f"The detector's box top lies a median {offset['real']:.0f} Hz above the "
+            "top of the trace reference on real chirps, and "
+            f"{offset['sim_big']:.0f} Hz above the true top on simulated big chirps; "
+            "a larger real offset means looser real boxes or a trace reference that "
+            "sits below the chirp's true top."
+        )
+    return [" ".join(lines), ""]
+
+
+def _reuse_lines(reuse: dict[str, Any]) -> list[str]:
+    if not reuse.get("known"):
+        return [
+            "- Template reuse between training and test chirps: unknown (the "
+            "training sample set is gone and the bundle predates recording it)."
+        ]
+    return [
+        f"- **Template reuse**: {100 * reuse['fraction_template_seen']:.1f} % of the "
+        "test chirps use a chirp template that also occurs among the decoder's "
+        f"training chirps, {100 * reuse['fraction_group_seen']:.1f} % a template of an "
+        "individual (template group) that does. The simulator draws all splits from "
+        "one library, so these numbers measure known chirp shapes in new scenes, not "
+        "new fish; the breakdown 'by template' compares seen and new templates."
+    ]
+
+
 def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
     """Write tables, figures, ``metrics.json`` and ``report.md`` (module docstring)."""
     out = Path(out_dir)
@@ -483,6 +657,10 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         "joint": _fig_joint(result, out / "fig_joint.png"),
         "clusters": _fig_clusters(result, out / "fig_clusters.png"),
         "coverage": _fig_coverage(result, out / "fig_coverage.png"),
+        "coupling": _fig_coupling(
+            result.tables.get("coupling_bins", pd.DataFrame()),
+            out / "fig_coupling.png",
+        ),
         "real": None
         if result.real is None
         else _fig_real(result.real, out / "fig_real.png"),
@@ -515,6 +693,7 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         f"- Flagged outside the validated domain: {100 * metrics['flags']['fraction_flagged']:.1f} % "
         f"of matched test boxes, {100 * (metrics['flags']['fraction_flagged_unmatched'] or 0):.1f} % "
         "of unmatched ones.",
+        *_reuse_lines(metrics.get("template_reuse", {})),
         "",
         "## Accuracy before and after calibration",
         "",
@@ -534,6 +713,10 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         "",
         "![bias by decile](fig_bias_vs_true.png)",
         "",
+        *_coupling_section(
+            result.tables.get("coupling_bins", pd.DataFrame()),
+            result.tables.get("coupling_ranks", pd.DataFrame()),
+        ),
         "## Breakdowns",
         "",
         *_breakdown_section(result.tables["breakdown"]),
@@ -559,13 +742,16 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         "",
         _fidelity_table(result.tables["fidelity"]),
         "",
-        f"**Natural template mix** (importance weights p_natural / p_equalised of each "
+        f"**Library template mix** (importance weights p_library / p_equalised of each "
         f"template's excursion x duration bin; effective sample size {metrics['natural_prior'].get('ess', float('nan')):.0f} "
-        f"of {metrics['natural_prior'].get('n')})",
+        f"of {metrics['natural_prior'].get('n')}). The library mix (uniform over the "
+        "template pool, mostly chirp-chamber small chirps) stands in for a "
+        "small-chirp-dominated population; it is not the measured composition of the "
+        "competition recordings.",
         "",
         _fidelity_table(result.tables["fidelity_natural"]),
         "",
-        "Weighted median signed error under the natural mix: "
+        "Weighted median signed error under the library mix: "
         + "; ".join(
             f"{p} {_err(metrics['natural_conditional_bias']['raw'][p], p)} raw -> "
             f"{_err(metrics['natural_conditional_bias']['cal'][p], p)} calibrated"
@@ -576,7 +762,7 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         "",
         f"Joint height x FWHM (30 x 30 log bins): total variation distance to the "
         f"truth {metrics['joint']['tv_raw']:.3f} raw, {metrics['joint']['tv_cal']:.3f} "
-        f"calibrated (halves of the truth: {metrics['joint']['tv_halves']:.3f}); natural "
+        f"calibrated (halves of the truth: {metrics['joint']['tv_halves']:.3f}); library "
         f"mix {metrics['joint_natural']['tv_raw']:.3f} / {metrics['joint_natural']['tv_cal']:.3f} "
         f"(halves {metrics['joint_natural']['tv_halves']:.3f}). Spearman(height, FWHM): "
         f"true {metrics['joint']['spearman_true']:.3f}, raw {metrics['joint']['spearman_raw']:.3f}, "
@@ -621,6 +807,13 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
                 "Pearson r": f"{v['pearson_r']:.2f}",
                 "Spearman r": f"{v['spearman_r']:.2f}",
                 "reference median": _err(v["ref_median"], p),
+                "reference sd": _err(v["ref_sd"], p) if "ref_sd" in v else "-",
+                "sim r, same range": f"{v['sim_pearson_r']:.2f} (n {v['sim_n']})"
+                if "sim_pearson_r" in v
+                else "-",
+                "sim median abs. error, same range": _err(v["sim_median_abs_error"], p)
+                if "sim_median_abs_error" in v
+                else "-",
             }
             for p, v in real.items()
             if isinstance(v, dict)
@@ -632,23 +825,35 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
             "competition recordings were detected (and matched) by the detector. The "
             "reference is the per-period parameters of each chirp's extracted "
             "frequency trace; differences are agreement, not error. These chirps are "
-            "also templates of the simulation library, and all are big chirps: real "
-            "small chirps are not checked here.",
+            "also templates of the simulation library (the decoder trained on them in "
+            "simulated scenes), and all are big chirps: real small chirps are not "
+            "checked here.",
             "",
             _table(pd.DataFrame(rows)) if rows else "(too few detected)",
             "",
+            *_real_context(real),
             "![real](fig_real.png)" if figures["real"] else "",
             "",
         ]
+    background = bundle.training.get("config", {}).get("scene_background", "any")
+    scenes_used = {
+        "hybrid": "real background segments (hybrid scenes) only",
+        "synthetic": "synthetic noise only",
+    }.get(str(background), "synthetic noise and real background segments")
     lines += [
         "## Caveats",
         "",
-        "- Validated on simulations (template chirps on simulated and hybrid "
-        "backgrounds); on real data only the big harvested chirps are checked.",
+        f"- Validated on simulations (template chirps on {scenes_used}); on real data "
+        "only the big harvested chirps are checked.",
+        "- Test chirps reuse the training templates (see the summary): the error on "
+        "chirps of new fish is not measured.",
         "- The decoder is only valid with the detector whose boxes it was trained on "
         "(weight hash recorded in the bundle).",
         "- Estimates are calibrated to be median-unbiased at every true value; their "
-        "population distribution is the true one blurred by the measurement error.",
+        "population distribution is the true one blurred by the measurement error "
+        "(wider than the truth), while the uncalibrated estimates shrink toward the "
+        "training mix (narrower). Neither is the true distribution; see 'Distribution "
+        "fidelity'.",
         "",
     ]
     path = out / "report.md"
