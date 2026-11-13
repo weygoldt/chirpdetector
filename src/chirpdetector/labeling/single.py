@@ -49,7 +49,8 @@ left click on a baseline  chirp from that fish: snaps to the highlighted
 x / right click           not a chirp
 s / space                 skip (comes back after the open items)
 u / backspace             undo the last action (jumps to its item)
-left / right arrow        previous / next item
+left / right arrow        previous / next item (labelled or not)
+o / end                   next open item (skips everything labelled)
 w                         overview window 204.8 / 51.2 ms (zoom: 204.8)
 e                         show / hide the model's prediction
 f                         full screen
@@ -485,6 +486,14 @@ class SingleLabeller:
         elif key in ("left", "p"):
             self.message = ""
             self.show((self.index - 1) % len(self.session))
+        elif key in ("o", "end"):
+            nxt = self.session.next_index(self.index)
+            if nxt is None:
+                self.message = "no open items left"
+                self.show(self.index)
+            else:
+                self.message = ""
+                self.show(nxt)
         elif key == "w":
             self.window_s = self.session.toggle_window(self.window_s)
             self.message = f"window {1e3 * self.window_s:.1f} ms"

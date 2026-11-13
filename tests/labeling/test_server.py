@@ -105,6 +105,35 @@ def test_view_payload_matches_the_session(served) -> None:
     assert view["decision"] is None
     assert view["next_index"] == 1
     assert view["item"]["item_id"] == "2000-01-01-10_00#chirp"
+    # a tab left open across a server restart compares these with its state
+    assert view["queue_id"] == server.session.queue.queue_id
+    assert view["n"] == 4
+
+
+def test_action_results_name_their_queue(served) -> None:
+    server, client = served
+    _, result = client.json(
+        "/api/action", {"index": 0, "window_s": 0.2048, "action": "not_chirp"}
+    )
+    assert result["ok"]
+    assert result["queue_id"] == server.session.queue.queue_id
+    _, undone = client.json("/api/undo", {})
+    assert undone["queue_id"] == server.session.queue.queue_id
+
+
+def test_page_reloads_on_another_queue_and_jumps_to_open_items() -> None:
+    from importlib import resources
+
+    html = (
+        resources.files("chirpdetector.labeling").joinpath("labeller.html").read_text()
+    )
+    assert "r.queue_id !== S.state.queue_id" in html
+    assert "location.reload()" in html
+    assert html.count("staleQueue(") >= 4  # defined, view, action, undo
+    assert "(S.progress && S.progress.total) || S.state.n" in html  # live length
+    assert 'k === "o" || k === "End"' in html
+    assert '"LABELLED"' in html
+    assert '"OPEN"' in html
 
 
 def test_image_is_the_colour_mapped_panel(served) -> None:

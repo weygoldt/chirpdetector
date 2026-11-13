@@ -124,6 +124,11 @@ def test_keys(labeller: SingleLabeller) -> None:
     assert labeller.index == 1
     key(labeller, "right")
     assert labeller.index == 2
+    key(labeller, "left")  # back to labelled item 1 ...
+    key(labeller, "o")  # ... then the next open item: 2 (undone above)
+    assert labeller.index == 2
+    key(labeller, "end")
+    assert labeller.index == 3  # after 2 (itself last), the next open one
     key(labeller, "9")
     assert "no track 9" in labeller.note.get_text()
     key(labeller, "h")
