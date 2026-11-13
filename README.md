@@ -114,6 +114,106 @@ provenance and attached metrics. Metrics are attached with
 by the bundle's own weights (`chirpdetector.prediction` records their
 hash).
 
+## Chirp parameters
+
+`chirpdetector.params` is a second-stage decoder that estimates, for every
+detected chirp, its **height** (largest frequency excursion above the
+emitter's baseline, Hz), its **duration** as full width at half height
+(`fwhm_s`) and width at 10 % of the height (`width10_s`), and its
+**undershoot** (deepest drop below the baseline after the peak, Hz), each with
+a calibrated standard deviation.
+
+**Ground truth** (`chirpdetector.params.truth`) is the simulator's
+noise-free instantaneous frequency of the emitter, one value per EOD period:
+cycle boundaries are the 2π crossings of the emitter's phase with only that
+chirp (its other chirps left out, so that a neighbour in a burst cannot lend
+its peak or undershoot), and each period gets `1/T_k` minus
+the period mean of the chirp-free baseline (with drift). Height is the
+largest of these excursions; the widths are the times between the crossings
+of 50 % and 10 % of the height that bracket the peak (interpolated between
+period midpoints); undershoot is the deepest excursion below zero after the
+peak. Nothing is read from a spectrogram.
+
+**Input** (`chirpdetector.params.crops.decoder_inputs`): the detector's own
+3-window spectrogram, normalised like a detector tile on a 3.2 s canvas
+centred on the box, resampled to 96 x 96 over the box plus 15 % margins,
+plus the log box duration and height. Training, evaluation and inference
+make it with this one function.
+
+**Training** (`chirpdetector train params`) runs the detector bundle over the
+simulated scenes, matches its boxes one-to-one to the true chirps (centre
+within 100 ms, overlapping frequency ranges) and trains on those *predicted*
+boxes: a params bundle is only valid with the detector it was trained with,
+whose weight hash it records (`predict_span` refuses another detector).
+A scene's split is the `train`/`val`/`test` directory it lies in (as
+`gridtools sim run` writes them, and as the detector datasets use them with
+`--split-dir`); `split = "train=0:1600,..."` assigns by seed instead. Only
+scenes on real background segments are used (`scene_background = "hybrid"`).
+
+```sh
+scripts/guarded --name params --mem 12G --vram 0.1 -- \
+    uv run chirpdetector train params params.toml \
+        --scenes /mnt/data1/chirp_v2/scenes/train_v4 \
+        --detector /mnt/data1/chirp_v2/runs/<detector run>/final/bundle \
+        --run-dir /mnt/data1/chirp_v2/params/runs/p1
+uv run chirpdetector evaluate params /mnt/data1/chirp_v2/params/runs/p1/bundle \
+    --scenes /mnt/data1/chirp_v2/scenes/train_v4
+```
+
+The config keys and their defaults are listed in `chirpdetector.params.training`
+(every key is optional); the sample set (crops, truth, matched boxes) lands in
+`RUN/samples` unless `--samples` points to one made with the same settings.
+
+**Calibration** (`chirpdetector.params.calibration`). A regressor shrinks
+toward the middle of its training population (small chirps overestimated,
+large ones underestimated), and how much depends on that population. The
+bundle stores, per parameter, the monotone bias curve
+`h(y) = median(estimate | true = y)` fitted on the validation scenes at the
+detector's threshold (bin medians smoothed by a local linear fit, slopes at
+least 0.5; one curve per tercile of the decoder's own sigma, because poorly
+seen chirps shrink more), and reports `h⁻¹(estimate)`: median-unbiased at
+every true value, so its meaning does not depend on the mix of chirps in a
+recording.
+The price is a wider per-chirp error than the raw estimate (the inverse of a
+curve with slope < 1 amplifies the noise) and a population distribution that
+is the true one blurred by that error; the evaluation report shows both. Standard deviations are propagated through `h⁻¹` and rescaled so
+that ±1 sd covers 68 % of the validation chirps (`k95` sd cover 95 %).
+
+**Inference.** `predict_span(..., params=BUNDLE)` (and `chirpdetector
+showcase --params BUNDLE`) adds `height_hz, height_sd_hz, fwhm_s, fwhm_sd_s,
+width10_s, width10_sd_s, undershoot_hz, undershoot_sd_hz` (sds are first
+order; the calibrated intervals are multiplicative, `(value + offset) *
+exp(±k95 * sd / (value + offset)) - offset` with offset 1 Hz for undershoot
+and 0 otherwise), plus `params_ok`
+and `params_flag` (`edge`: the crop crosses the recording's edge; `band`: the
+box reaches the edge of the front end's band; `size`: a box larger or smaller than any
+in training; `uncertain`: a sd above the 99.5th percentile of the validation
+chirps).
+
+**Evaluation** (`chirpdetector evaluate params`, report in `BUNDLE/eval/`):
+errors by family, SNR, ΔF, overlap, template reuse and decile of the true
+value, before and after calibration (shrinkage slopes); whether the error is
+coupled to the chirp's own parameters *within* SNR strata (quintiles of each
+true parameter, rank correlations of every error with every true parameter);
+coverage of the sds; whether the *distribution* of estimates over a
+population matches the true one (KS/Wasserstein distances, quantiles, joint
+height x FWHM histograms), also after re-weighting the test chirps to the
+library's template mix (training scenes over-sample big and long chirps);
+whether separated chirp types stay separated and a continuum stays a
+continuum; and agreement with the independently extracted frequency traces of
+533 harvested real chirps, next to the correlation the simulation predicts
+over the same narrow range.
+
+**Caveats.** Accuracy is measured on simulations (real chirp templates on
+real background segments); on real recordings only the agreement on big,
+long harvested chirps is checked, not small chirps. The simulator draws every
+split from one template library, so test chirps reuse training templates
+(and individuals): the error on chirps of new fish is not measured. The
+parameters are only valid for boxes of the detector recorded in the bundle.
+For population distributions, calibrated estimates are wider than the truth
+(blurred by the error) and uncalibrated ones are pulled toward the training
+mix; the report measures both against the truth.
+
 ## Development
 
 chirpdetector depends on [gridtools](https://github.com/weygoldt/gridtools),

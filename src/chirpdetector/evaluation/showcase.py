@@ -17,7 +17,10 @@ Each panel shows
 * the emitter's EOD frequency at the chirp centre as a marker, when the
   model predicts it (``emitter_hz``; matched to the nearest live track with
   `assign_by_frequency`) or, for v1, its assigned emitter;
-* hand labels (dashed, white) where the snippet lies in a labelled region.
+* hand labels (dashed, white) where the snippet lies in a labelled region;
+* with a params bundle (`bundle_column(..., params=...)`), each box's
+  decoded height and FWHM (``chirpdetector.params``), flagged boxes
+  marked with ``?``.
 
 The output directory keeps ``showcase.json`` (snippets and columns so far)
 and one PNG per panel; running again with more bundles adds columns and
@@ -130,6 +133,7 @@ class Column:
     label: str
     threshold: float
     bundle: str | None = None
+    params: str | None = None
 
 
 def v1_column(threshold: float = 0.5) -> Column:
@@ -137,18 +141,36 @@ def v1_column(threshold: float = 0.5) -> Column:
     return Column(id="v1", label="v1 production (YOLOv8l)", threshold=threshold)
 
 
-def bundle_column(bundle: Any, threshold: float | None = None) -> Column:
-    """A bundle; its id is the first 12 hex digits of its weight hash."""
+def bundle_column(
+    bundle: Any, threshold: float | None = None, *, params: Any = None
+) -> Column:
+    """A bundle; its id is the first 12 hex digits of its weight hash.
+
+    ``params`` (a params bundle or its directory) adds the decoded chirp
+    parameters to the boxes; the id then also carries the first 6 hex
+    digits of the decoder's weight hash.
+    """
     from chirpdetector.bundle import Bundle, load_bundle
 
     bundle = bundle if isinstance(bundle, Bundle) else load_bundle(bundle)
     arch = bundle.model.get("architecture", bundle.model_type)
     run = bundle.training.get("run_id", "?")
+    column_id, label, params_path = bundle.weights_sha256[:12], "", None
+    if params is not None:
+        from chirpdetector.params.bundle import ParamsBundle, load_params_bundle
+
+        decoder = (
+            params if isinstance(params, ParamsBundle) else load_params_bundle(params)
+        )
+        column_id += f"-p{decoder.weights_sha256[:6]}"
+        label = f" + params {decoder.weights_sha256[:8]}"
+        params_path = str(decoder.path)
     return Column(
-        id=bundle.weights_sha256[:12],
-        label=f"{arch} {bundle.weights_sha256[:8]} (run {run})",
+        id=column_id,
+        label=f"{arch} {bundle.weights_sha256[:8]} (run {run}){label}",
         threshold=bundle.score_threshold if threshold is None else float(threshold),
         bundle=str(bundle.path),
+        params=params_path,
     )
 
 
@@ -278,6 +300,7 @@ def _detections(
             score_threshold=column.threshold,
             detector=detectors[column.id],
             device=device,
+            params=column.params,
         )
         if "emitter_hz" in preds.columns and ctx.tracks is not None:
             preds = assign_by_frequency(
@@ -361,10 +384,15 @@ def _render_panel(
         ax.add_patch(
             Rectangle((t0, f0), t1 - t0, f1 - f0, fill=False, ec=colour, lw=1.1)
         )
+        text = f"{scores[k]:.2f}"
+        if "height_hz" in preds.columns:
+            row = preds.iloc[k]
+            mark = "" if bool(row["params_ok"]) else "?"
+            text += f" {row['height_hz']:.0f} Hz {1e3 * row['fwhm_s']:.0f} ms{mark}"
         ax.text(
             t0,
             f1 + 4,
-            f"{scores[k]:.2f}",
+            text,
             color=colour,
             fontsize=5.5,
             va="bottom",
@@ -414,7 +442,9 @@ def _write_index(out: Path, snippets: list[Snippet], columns: list[Column]) -> N
         "snippet. Tracks: thin lines, one colour per fish. Boxes: detections at the "
         "column's threshold, coloured by the assigned fish (grey: no emitter). "
         "Dots: the emitter's EOD frequency at the chirp centre. Dashed white: hand "
-        "labels (only inside labelled regions).",
+        "labels (only inside labelled regions). With a params bundle, each box "
+        "also shows the decoded height and FWHM ('?': outside the decoder's "
+        "validated domain).",
         "",
         "![contact sheet](contact_sheet.png)",
         "",

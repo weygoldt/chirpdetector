@@ -36,6 +36,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -58,13 +59,19 @@ from chirpdetector.spectrogram import (
     to_three_channels,
 )
 
+if TYPE_CHECKING:
+    from chirpdetector.params.inference import ParamsEstimator
+
 __all__ = [
     "DUPLICATE_TOLERANCE_S",
     "TiledSpan",
+    "detect_in_spectrogram",
     "merge_tiles",
     "predict_span",
     "render_span",
     "render_tiles",
+    "span_bounds",
+    "span_spectrogram",
     "tile_starts",
 ]
 
@@ -224,6 +231,69 @@ class _Channels:
         return self._recording.read(start, stop, self._channels)  # type: ignore[attr-defined]
 
 
+def span_bounds(
+    bundle: Bundle,
+    samplerate_hz: float,
+    n_samples: int,
+    t_start_s: float,
+    t_end_s: float,
+) -> tuple[int, int]:
+    """Samples ``[start, stop)`` whose frames `render_span` tiles.
+
+    The frames centred in ``[t_start_s, t_end_s]`` (inclusive), as the real
+    test set was cut; widened symmetrically to one tile (within the
+    recording) if fewer.
+    """
+    config, tiling = bundle.spectrogram, bundle.tiling
+    width, _ = tile_frames(tiling, config)
+    hop = config.layout(samplerate_hz).hop_samples
+    first = max(0, math.ceil(t_start_s * samplerate_hz / hop - 1e-9))
+    last = math.floor(t_end_s * samplerate_hz / hop + 1e-9)
+    start = first * hop
+    stop = min(n_samples, last * hop + 1)
+    needed = width * hop
+    if stop - start < needed:
+        centre = (start + stop) // 2
+        start = max(0, min(centre - needed // 2, n_samples - needed))
+        stop = min(n_samples, start + needed)
+    return start, stop
+
+
+def span_spectrogram(
+    bundle: Bundle,
+    recording: object,
+    start: int,
+    stop: int,
+    *,
+    channels: Sequence[int] | None = None,
+    device: str | None = None,
+) -> Spectrogram:
+    """Spectrogram of the frames centred in samples ``[start, stop)``.
+
+    With the bundle's preprocessing (click removal where the electrode count
+    allows it) and front end; frames are those of the whole recording
+    (`chirpdetector.spectrogram.framing`), whatever the span.
+    """
+    source = _Channels(recording, channels)
+    config = bundle.spectrogram
+    fs, total = source.samplerate_hz, source.n_samples
+    plan = plan_span(start, stop, total, fs, config)
+    click = bundle.preprocessing.get("click_removal")
+    if click is not None and can_remove_clicks(
+        source.n_channels, ClickRemoval.from_dict(dict(click)), samplerate_hz=fs
+    ):
+        samples, _ = read_clean(
+            source, plan.read_start, plan.read_stop, ClickRemoval.from_dict(dict(click))
+        )
+    else:
+        if click is not None:
+            log.warning("too few electrodes for click removal; skipped")
+        samples = source.read(plan.read_start, plan.read_stop)
+    if device is not None and device != "cpu":
+        apply_vram_limit(None, device)
+    return compute_spectrogram_span(samples, plan, config, device=device)
+
+
 def render_span(
     bundle: Bundle,
     recording: object,
@@ -239,36 +309,43 @@ def render_span(
     are tiled (widened to one tile if the span is shorter).
     """
     source = _Channels(recording, channels)
-    config, tiling = bundle.spectrogram, bundle.tiling
-    fs, total = source.samplerate_hz, source.n_samples
-    width, _ = tile_frames(tiling, config)
-    hop = config.layout(fs).hop_samples
-    # frames centred in [t_start_s, t_end_s], as the real test set was cut
-    first = max(0, math.ceil(t_start_s * fs / hop - 1e-9))
-    last = math.floor(t_end_s * fs / hop + 1e-9)
-    start = first * hop
-    stop = min(total, last * hop + 1)
-    needed = width * hop
-    if stop - start < needed:
-        centre = (start + stop) // 2
-        start = max(0, min(centre - needed // 2, total - needed))
-        stop = min(total, start + needed)
-    plan = plan_span(start, stop, total, fs, config)
-    click = bundle.preprocessing.get("click_removal")
-    if click is not None and can_remove_clicks(
-        source.n_channels, ClickRemoval.from_dict(dict(click)), samplerate_hz=fs
-    ):
-        samples, _ = read_clean(
-            source, plan.read_start, plan.read_stop, ClickRemoval.from_dict(dict(click))
-        )
-    else:
-        if click is not None:
-            log.warning("too few electrodes for click removal; skipped")
-        samples = source.read(plan.read_start, plan.read_stop)
-    if device is not None and device != "cpu":
-        apply_vram_limit(None, device)
-    spec = compute_spectrogram_span(samples, plan, config, device=device)
-    return render_tiles(spec, tiling)
+    start, stop = span_bounds(
+        bundle, source.samplerate_hz, source.n_samples, t_start_s, t_end_s
+    )
+    spec = span_spectrogram(
+        bundle, recording, start, stop, channels=channels, device=device
+    )
+    return render_tiles(spec, bundle.tiling)
+
+
+def detect_in_spectrogram(
+    bundle: Bundle,
+    spec: Spectrogram,
+    *,
+    name: str,
+    score_threshold: float | None = None,
+    detector: Detector | None = None,
+    device: str | None = None,
+    tolerance_s: float = DUPLICATE_TOLERANCE_S,
+) -> pd.DataFrame:
+    """Detect chirps in all frames of a spectrogram, tile by tile.
+
+    The spectrogram is tiled (`render_tiles`), every tile is run through the
+    model and the tiles' detections are merged (`merge_tiles`). This is
+    `predict_span` after its spectrogram; the parameter decoder's training
+    data are made with it, on whole scenes.
+    """
+    tiles = render_tiles(spec, bundle.tiling)
+    detector = detector or load_detector(bundle, device=device)
+    predictions = predict_images(
+        bundle,
+        tiles.images,
+        tiles.geometries,
+        recordings=[name] * len(tiles.images),
+        score_threshold=score_threshold,
+        detector=detector,
+    )
+    return merge_tiles(predictions, tiles.owned_s, tolerance_s)
 
 
 def predict_span(
@@ -283,6 +360,8 @@ def predict_span(
     detector: Detector | None = None,
     device: str | None = None,
     tolerance_s: float = DUPLICATE_TOLERANCE_S,
+    params: ParamsEstimator | str | Path | None = None,
+    allow_detector_mismatch: bool = False,
 ) -> pd.DataFrame:
     """Detect chirps in ``[t_start_s, t_end_s]`` of a recording.
 
@@ -309,24 +388,61 @@ def predict_span(
         Torch device for the spectrogram and the model.
     tolerance_s
         See `merge_tiles`.
+    params
+        Optional chirp-parameter decoder (a params bundle, its directory,
+        or a loaded `chirpdetector.params.ParamsEstimator`): adds its
+        columns (`chirpdetector.params.PARAM_COLUMNS`) to every detection.
+        The spectrogram is then computed over the span widened by the
+        decoder's context (half a canvas), so that every crop is the one
+        the decoder was trained on; detection uses the span's own frames,
+        which do not depend on the widening.
+    allow_detector_mismatch
+        Use a params bundle trained on another detector's boxes (its
+        parameters are not validated for these boxes).
 
     Returns
     -------
     DataFrame
         Detections in absolute time and frequency (`predict_images`
-        columns, ``tile`` instead of ``image_index``), de-duplicated.
+        columns, ``tile`` instead of ``image_index``), de-duplicated, plus
+        the parameter columns if ``params`` is given.
     """
     bundle = bundle if isinstance(bundle, Bundle) else load_bundle(bundle)
-    tiles = render_span(
-        bundle, recording, t_start_s, t_end_s, channels=channels, device=device
+    source = _Channels(recording, channels)
+    fs, total = source.samplerate_hz, source.n_samples
+    start, stop = span_bounds(bundle, fs, total, t_start_s, t_end_s)
+    detect = {
+        "name": name,
+        "score_threshold": score_threshold,
+        "detector": detector,
+        "device": device,
+        "tolerance_s": tolerance_s,
+    }
+    if params is None:
+        spec = span_spectrogram(
+            bundle, recording, start, stop, channels=channels, device=device
+        )
+        return detect_in_spectrogram(bundle, spec, **detect)
+    from chirpdetector.params.inference import ParamsEstimator
+
+    estimator = (
+        params
+        if isinstance(params, ParamsEstimator)
+        else ParamsEstimator(params, device=device)
     )
-    detector = detector or load_detector(bundle, device=device)
-    predictions = predict_images(
+    estimator.check_detector(bundle, allow_mismatch=allow_detector_mismatch)
+    hop = bundle.spectrogram.layout(fs).hop_samples
+    context = math.ceil(estimator.context_s * fs / hop) * hop
+    wide = span_spectrogram(
         bundle,
-        tiles.images,
-        tiles.geometries,
-        recordings=[name] * len(tiles.images),
-        score_threshold=score_threshold,
-        detector=detector,
+        recording,
+        max(0, start - context),
+        min(total, stop + context),
+        channels=channels,
+        device=device,
     )
-    return merge_tiles(predictions, tiles.owned_s, tolerance_s)
+    first = math.ceil(start / hop) - wide.frame_start
+    last = math.ceil(stop / hop) - wide.frame_start
+    detections = detect_in_spectrogram(bundle, _slice(wide, first, last), **detect)
+    values = estimator.estimate(wide, detections)
+    return pd.concat([detections, values], axis=1)

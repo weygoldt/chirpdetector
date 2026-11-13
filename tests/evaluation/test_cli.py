@@ -18,6 +18,11 @@ runner = CliRunner()
 def test_help_lists_the_options() -> None:
     result = runner.invoke(app, ["evaluate", "--help"])
     assert result.exit_code == 0
+    assert "detections" in result.output
+    assert "params" in result.output
+    # `evaluate PREDICTIONS ...` is `evaluate detections PREDICTIONS ...`
+    result = runner.invoke(app, ["evaluate", "detections", "--help"])
+    assert result.exit_code == 0
     for option in (
         "--labels",
         "--out",
@@ -114,3 +119,30 @@ def test_reports_bad_input_without_a_traceback(
     assert result.exit_code == 1
     assert "error: thresholds must look like" in result.output
     assert not (tmp_path / "out").exists()
+
+
+def test_options_before_the_predictions_still_select_detections(
+    make_ramp_trial: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    """`evaluate` became a group: `evaluate --labels L PRED` (options first)
+    and `evaluate PRED ...` must both reach the detection evaluation."""
+    trial = make_ramp_trial(tmp_path / "ramp")
+    labels = _hand_labels(trial)
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--labels",
+            str(labels),
+            "--out",
+            str(tmp_path / "out"),
+            "--thresholds",
+            "high",
+            str(trial),
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "error: thresholds must look like" in result.output
+    result = runner.invoke(app, ["evaluate", "params", "--help"])
+    assert result.exit_code == 0
+    assert "--scenes" in result.output

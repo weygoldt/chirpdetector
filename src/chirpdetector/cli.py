@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 import typer
+from typer.core import TyperGroup
 
 import chirpdetector
 from chirpdetector.cli_data import data_app
@@ -163,7 +164,34 @@ def _is_simulation(path: Path) -> bool:
     return "t_onset_s" in pd.read_csv(path, nrows=0).columns
 
 
-@app.command("evaluate")
+class _DefaultCommandGroup(TyperGroup):
+    """A group whose first argument, if not a subcommand, selects ``detections``.
+
+    ``chirpdetector evaluate PREDICTIONS --labels ...`` (the original
+    command) therefore keeps working next to ``chirpdetector evaluate
+    params BUNDLE ...``.
+    """
+
+    default_command = "detections"
+
+    def parse_args(self, ctx: typer.Context, args: list[str]) -> list[str]:  # type: ignore[override]
+        if args and args[0] not in self.commands and args[0] not in ("--help", "-h"):
+            args = [self.default_command, *args]
+        return super().parse_args(ctx, args)
+
+
+evaluate_app = typer.Typer(
+    cls=_DefaultCommandGroup,
+    no_args_is_help=True,
+    help=(
+        "Evaluate detections (default: chirpdetector evaluate PREDICTIONS "
+        "--labels ...) or a chirp-parameter decoder (evaluate params)."
+    ),
+)
+app.add_typer(evaluate_app, name="evaluate")
+
+
+@evaluate_app.command("detections")
 def evaluate_command(
     predictions: Annotated[
         list[Path],
@@ -399,6 +427,66 @@ def train_detector_command(
     typer.echo(f"run {result.run_id} in {result.run_dir}")
 
 
+@train_app.command("params")
+def train_params_command(
+    config: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, help="Training config (TOML)."),
+    ],
+    scenes: Annotated[
+        list[Path],
+        typer.Option(
+            "--scenes",
+            exists=True,
+            file_okay=False,
+            help=(
+                "Simulated scenes, repeatable: a scene, a directory of scenes, or "
+                "a directory of train/val/test scene directories."
+            ),
+        ),
+    ],
+    run_dir: Annotated[Path, typer.Option(help="Run directory (created).")],
+    detector: Annotated[
+        Path | None,
+        typer.Option(
+            exists=True,
+            help=(
+                "Detector bundle whose boxes the decoder learns on (required for "
+                "boxes.mode = 'detector', the default)."
+            ),
+        ),
+    ] = None,
+    samples: Annotated[
+        Path | None,
+        typer.Option(
+            help="Sample-set directory (default RUN/samples; reused if it matches)."
+        ),
+    ] = None,
+) -> None:
+    """Train a chirp-parameter decoder (height, widths, undershoot) and its bundle.
+
+    Run it through scripts/guarded on a shared GPU (caps RAM and sets
+    CHIRP_MAX_VRAM_FRACTION).
+    """
+    from chirpdetector.bundle import BundleError
+    from chirpdetector.params.training import train_params
+
+    try:
+        result = train_params(
+            config, scenes, run_dir, detector=detector, samples_dir=samples
+        )
+    except (BundleError, ValueError, FileExistsError, FileNotFoundError) as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+    for name, values in result.validation.items():
+        typer.echo(
+            f"{name}: median |log error| {values['median_abs_log_error_raw']:.3f} raw, "
+            f"{values['median_abs_log_error_calibrated']:.3f} calibrated (val)"
+        )
+    typer.echo(f"best epoch {result.best_epoch} of {result.epochs_run}")
+    typer.echo(f"bundle: {result.bundle}")
+
+
 # ------------------------------------------------------------------ bundles
 
 bundle_app = typer.Typer(no_args_is_help=True, help="Model bundles.")
@@ -411,15 +499,110 @@ def bundle_inspect(
         Path, typer.Argument(exists=True, help="Bundle directory or its bundle.json.")
     ],
 ) -> None:
-    """Verify a bundle's weight hash and print what it holds."""
+    """Verify a bundle's weight hash and print what it holds.
+
+    Works for detector bundles and chirp-parameter (params) bundles.
+    """
     from chirpdetector.bundle import BundleError, describe_bundle, load_bundle
+    from chirpdetector.params.bundle import (
+        describe_params_bundle,
+        is_params_bundle,
+        load_params_bundle,
+    )
 
     try:
-        bundle = load_bundle(path)
+        if is_params_bundle(path):
+            text = describe_params_bundle(load_params_bundle(path))
+        else:
+            text = describe_bundle(load_bundle(path))
     except (BundleError, FileNotFoundError) as err:
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
-    typer.echo(describe_bundle(bundle))
+    typer.echo(text)
+
+
+@evaluate_app.command("params")
+def evaluate_params_command(
+    bundle: Annotated[
+        Path, typer.Argument(exists=True, help="Params bundle (directory).")
+    ],
+    scenes: Annotated[
+        list[Path],
+        typer.Option(
+            "--scenes",
+            exists=True,
+            file_okay=False,
+            help="Simulated scenes, repeatable (their test split is evaluated).",
+        ),
+    ],
+    out: Annotated[
+        Path | None, typer.Option(help="Output directory (default BUNDLE/eval).")
+    ] = None,
+    samples: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Sample-set directory holding the test scenes (default: the "
+                "training sample set if it matches, else OUT/samples)."
+            )
+        ),
+    ] = None,
+    detector: Annotated[
+        Path | None,
+        typer.Option(
+            exists=True,
+            help="Detector bundle (default: the one recorded in the params bundle).",
+        ),
+    ] = None,
+    split: Annotated[str, typer.Option(help="Split to evaluate.")] = "test",
+    real: Annotated[
+        bool,
+        typer.Option(
+            help="Also check agreement on the harvested real long chirps (library v4)."
+        ),
+    ] = True,
+    library: Annotated[
+        Path, typer.Option(help="Template library with the harvested chirps.")
+    ] = Path("/mnt/data1/chirp_v2/templates/v4"),
+    recordings: Annotated[
+        Path, typer.Option(help="Directory of the competition recordings.")
+    ] = Path("/mnt/data2/2019_tube_competition"),
+    workers: Annotated[int, typer.Option(help="Extraction processes.")] = 4,
+    device: Annotated[
+        str, typer.Option(help="Torch device (auto, cpu, cuda).")
+    ] = "auto",
+    attach: Annotated[
+        bool, typer.Option(help="Write metrics.json into the bundle.")
+    ] = True,
+) -> None:
+    """Evaluate a chirp-parameter decoder against the simulated ground truth.
+
+    Accuracy by family, SNR, ΔF, overlap and decile; uncertainty
+    calibration; distribution fidelity (marginals, joint, natural template
+    prior, cluster structure); real-data agreement. Writes figures, tables,
+    metrics.json and report.md.
+    """
+    from chirpdetector.bundle import BundleError
+    from chirpdetector.params.evaluation import run_evaluation
+
+    try:
+        report = run_evaluation(
+            bundle,
+            scenes,
+            out=out,
+            samples_dir=samples,
+            detector=detector,
+            split=split,
+            real_library=library if real else None,
+            real_recordings=recordings,
+            workers=workers,
+            device=device,
+            attach=attach,
+        )
+    except (BundleError, ValueError, FileNotFoundError) as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+    typer.echo(f"report: {report}")
 
 
 @app.command("showcase")
@@ -443,12 +626,23 @@ def showcase_command(
         str | None, typer.Option(help="Torch device (e.g. cpu, cuda).")
     ] = None,
     force: Annotated[bool, typer.Option(help="Re-render existing panels.")] = False,
+    params: Annotated[
+        Path | None,
+        typer.Option(
+            exists=True,
+            help=(
+                "Params bundle: label every box of the --bundle columns with its "
+                "decoded height and FWHM (the bundles must be its detector)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Render models side by side on hard snippets of real recordings.
 
     One panel per snippet and model (tracks, boxes, scores, predicted emitter
-    EODf, hand labels), collected in a contact sheet. Columns already in
-    ``--out`` are kept, so the sheet grows with every model tried.
+    EODf, hand labels, optionally decoded chirp parameters), collected in a
+    contact sheet. Columns already in ``--out`` are kept, so the sheet grows
+    with every model tried.
     """
     from chirpdetector.evaluation.showcase import (
         bundle_column,
@@ -458,7 +652,7 @@ def showcase_command(
     )
 
     columns = [v1_column()] if v1 else []
-    columns += [bundle_column(path, threshold) for path in bundle or []]
+    columns += [bundle_column(path, threshold, params=params) for path in bundle or []]
     sheet = render_showcase(
         columns, read_snippets(snippets), out, device=device, force=force
     )
