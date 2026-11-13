@@ -40,7 +40,6 @@ import pandas as pd
 from gridtools.io import Tracks, load_tracks, open_recording, read_fishgrid_config
 
 from chirpdetector.bundle import Bundle, load_bundle
-from chirpdetector.params.inference import RAW_COLUMNS
 from chirpdetector.pipeline.assign import (
     ASSIGN_COLUMNS,
     SIM_V4_DUALHEAD,
@@ -356,13 +355,11 @@ def build_table(
         df["span_click_fraction"] = np.nan
         df["span_n_click_runs"] = 0
     df = df.rename(columns={"tile": "tile"})
+    # documented columns in their documented order (raw decoder columns
+    # follow params_flag), then anything else the detector or decoder added
     ordered = [c for c in COLUMN_DOCS if c in df.columns]
-    raw_decoder = [c for c in RAW_COLUMNS if c in df.columns]
-    extra = [c for c in df.columns if c not in ordered and c not in raw_decoder]
-    extra = [c for c in extra if c not in ("image_index",)]
-    # raw decoder columns right after the calibrated ones
-    pos = ordered.index("params_flag") + 1 if "params_flag" in ordered else len(ordered)
-    columns = ordered[:pos] + raw_decoder + ordered[pos:] + extra
+    extra = [c for c in df.columns if c not in ordered and c != "image_index"]
+    columns = ordered + extra
     return df.loc[:, columns]
 
 

@@ -113,9 +113,16 @@ def compare_with_reference(
         np.array_equal(r["tile"].to_numpy(), o["tile"].to_numpy())
     )
     if "params_flag" in r.columns:
-        report["params_flag_equal"] = bool(
-            (r["params_flag"].astype(str) == o["params_flag"].astype(str)).all()
-        )
+        ref_flag = r["params_flag"].astype(str).to_numpy()
+        our_flag = o["params_flag"].astype(str).to_numpy()
+        differ = ref_flag != our_flag
+        report["params_flag_equal"] = not differ.any()
+        # the decoder runs in other GPU batches (TF32): a sigma at the
+        # "uncertain" threshold can flip
+        report["params_flag_differences"] = [
+            {"row": int(i), "reference": str(ref_flag[i]), "pipeline": str(our_flag[i])}
+            for i in np.flatnonzero(differ)
+        ]
     report["identical"] = exact and report["tiles_equal"]
     return report
 

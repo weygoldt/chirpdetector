@@ -482,3 +482,23 @@ def test_filter_uses_the_pipeline_assignment(
     )
     assert off_info["status"] == "off"
     assert (off["pp_drop_reason"].to_numpy() == "").all()
+
+
+def test_decoder_columns_appear_once_in_order(
+    tmp_path: Path, stub_bundle: Bundle, trial_dirs: list[Path]
+) -> None:
+    from chirpdetector.params.inference import ESTIMATE_COLUMNS, RAW_COLUMNS
+
+    cfg = _config(tmp_path, stub_bundle, validation={"windows": 0, "qc": True})
+    run_pipeline(cfg, trial_dirs[:1], models=make_models(stub_bundle, decoder=True))
+    table, _ = read_chirps(cfg.run_dir / trial_dirs[0].name / "chirps_rtdetr.parquet")
+    assert len(table)
+    assert table.columns.is_unique
+    assert set(ESTIMATE_COLUMNS) <= set(table.columns)
+    columns = table.columns.tolist()
+    flag = columns.index("params_flag")
+    assert columns[flag + 1 : flag + 1 + len(RAW_COLUMNS)] == list(RAW_COLUMNS)
+    assert columns[: len(COLUMN_DOCS)] == list(COLUMN_DOCS)
+    np.testing.assert_allclose(
+        table["height_raw_hz"], table["f_high_hz"] - table["f_low_hz"]
+    )

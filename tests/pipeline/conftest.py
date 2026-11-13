@@ -122,7 +122,30 @@ def box_only_bundle(tmp_path_factory: pytest.TempPathFactory) -> Bundle:
     return _bundle(tmp_path_factory.mktemp("pipeline_box_bundle"), emitter=False)
 
 
-def make_models(bundle: Bundle) -> Models:
+class FakeDecoder:
+    """Stands in for a `ParamsEstimator`: `ESTIMATE_COLUMNS` from the boxes."""
+
+    context_s = 1.6
+
+    def estimate(self, spec: Any, boxes: pd.DataFrame) -> pd.DataFrame:
+        from chirpdetector.params.inference import ESTIMATE_COLUMNS
+
+        height = (boxes["f_high_hz"] - boxes["f_low_hz"]).to_numpy(dtype=float)
+        width = (boxes["t_end_s"] - boxes["t_start_s"]).to_numpy(dtype=float)
+        data: dict[str, Any] = {}
+        for column in ESTIMATE_COLUMNS:
+            if column == "params_ok":
+                data[column] = np.ones(len(boxes), dtype=bool)
+            elif column == "params_flag":
+                data[column] = pd.Series([""] * len(boxes), dtype=object)
+            elif column.endswith("_hz"):
+                data[column] = height
+            else:
+                data[column] = width
+        return pd.DataFrame(data, index=boxes.index).loc[:, list(ESTIMATE_COLUMNS)]
+
+
+def make_models(bundle: Bundle, *, decoder: bool = False) -> Models:
     """`Models` for a stub bundle (as `load_models` would build them)."""
     emitter = bool(bundle.model.get("emitter", True))
     from chirpdetector.pipeline.outputs import model_tag
@@ -131,7 +154,7 @@ def make_models(bundle: Bundle) -> Models:
     return Models(
         bundle=bundle,
         detector=load_detector(bundle),
-        estimator=None,
+        estimator=FakeDecoder() if decoder else None,
         tag=model_tag(bundle),
         has_emitter=emitter,
         error_model=SIM_V4_DUALHEAD if emitter else None,
