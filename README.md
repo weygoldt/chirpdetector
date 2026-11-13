@@ -21,17 +21,89 @@ uv add "chirpdetector @ git+https://github.com/weygoldt/chirpdetector@v2"
 
 ## Labelling chirp emitters
 
-A matplotlib window shows pages of spectrogram cutouts of chirpdetector v1
-detections. Left click on the baseline the chirp rises from (chirp, emitter
-= nearest live track), right click if it is not a chirp, middle click if the
-emitter is unclear; space for the next page, `u` to undo, `h` for help.
-Every click is saved at once; the same command resumes where you stopped.
+`chirpdetector label-emitters` shows one candidate box at a time: an
+overview of the whole chirp on top and, below it, a zoom on the baselines of
+the fish near the box (204.8 ms window; a few Hz span many pixels). Every
+live EOD frequency track is marked at both edges with its number (1, 2, ...
+from the lowest baseline); tracks are bridged across wavetracker gaps of up
+to `--track-gap-s` (10 s), and the gap is shown. Click on the baseline the chirp comes from: the click snaps to
+the highlighted track (the nearest one within `--tolerance-hz`, at the time
+you click); a click farther from every track is rejected, not guessed.
+
+| input | label |
+|---|---|
+| left click on a baseline, or `1`-`9` | chirp from that track |
+| `0` or middle click | chirp, emitter unclear |
+| `x` or right click | not a chirp |
+| `s` or space | skip (comes back after the open items) |
+| `u`, backspace, ctrl+z | undo the last action |
+| left / right arrow | previous / next candidate |
+| `w` | overview window 204.8 ms / 51.2 ms (chirp shape); the zoom stays at 204.8 ms |
+| `e` | show / hide the model's predicted emitter (hidden by default) |
+| `f`, `h` | full screen, help |
+
+Every action is saved at once (`<out>/events.jsonl`); running the same
+command again resumes the same queue, in either frontend.
 
 ```sh
 uv sync --extra label
-uv run chirpdetector label-emitters /mnt/data2/2019_tube_competition/2019-12-09-10_00 \
-    --out /mnt/data1/chirp_v2/labels/emitters --per-bin 20 --seed 0 --labeler pw
+# matplotlib window (maximised) on this machine
+uv run chirpdetector label-emitters --candidates candidates.parquet \
+    --out /mnt/data1/chirp_v2/labels/emitters --labeler pw
+# the same in a browser, e.g. from home
+uv run chirpdetector label-emitters --candidates candidates.parquet \
+    --out /mnt/data1/chirp_v2/labels/emitters --labeler pw --serve --port 8765
+#   on the laptop: ssh -N -L 8765:localhost:8765 USER@HOST, then open
+#   http://localhost:8765/ (the server only listens on 127.0.0.1)
+# counts by decision, source and ΔF bin
+uv run chirpdetector label-summary /mnt/data1/chirp_v2/labels/emitters
 ```
+
+Instead of `--candidates`, trial directories sample v1 detections
+(`chirpdetector_bboxes.csv`) stratified by ΔF (`--per-bin`, `--seed`).
+`--view grid` shows the former grid of small cutouts (matplotlib only).
+
+### Candidates file
+
+A CSV or Parquet table, one row per box. This format is stable; the
+production pipeline writes its validation samples in it.
+
+| column | | meaning |
+|---|---|---|
+| `recording` | required | recording directory (relative paths: relative to the file) |
+| `t_start_s`, `t_end_s` | required | box in seconds from the recording start |
+| `f_low_hz`, `f_high_hz` | required | box in Hz |
+| `candidate_id` | optional | id of the box within its recording (no `#`); the same id in another file is the same item. Default: a hash of recording name and box |
+| `score` | optional | detector score |
+| `emitter_hz` | optional | the model's predicted emitter EODf |
+| `track_id` | optional | the model's predicted emitter track |
+| `source` | optional | free text: model, run, sample |
+| `tracks` | optional | wavetracker directory, if not the recording directory |
+
+Other columns are kept and stored with each label as `candidate_<name>`.
+The queue keeps every row (shuffled with `--seed`; `--keep-order` keeps the
+file order).
+
+### Label files
+
+`<out>/labels/<recording>.csv`, one row per labelled box and labeller,
+readable by `chirpdetector evaluate --labels`: the audian columns with the
+box, then `label` (`chirp`, `not_chirp`, `chirp_emitter_unclear`),
+`emitter_id` (track id), `clicked_hz`, `clicked_t_s`, `labeler`,
+`labeled_at`, `tool_version`, `queue_id`, `item_id`
+(`<recording>#<candidate_id>`), `det_index`, `df_bin`, then
+
+| column | meaning |
+|---|---|
+| `emitter_baseline_hz` | emitter track's frequency at the box start, from the track (not the click) |
+| `click_offset_hz` | click minus the emitter track's frequency at the click time |
+| `via` | `mouse` or `key` |
+| `frontend` | `mpl`, `mpl-grid` or `browser` |
+| `window_s` | spectrogram window shown |
+| `prediction_shown` | whether the model's prediction was visible |
+| `n_candidates`, `delta_f_hz` | live tracks at the box centre, ΔF of the closest two |
+| `recording_dir`, `tracks_dir` | where recording and tracks were read |
+| `candidate_id`, `candidate_score`, `candidate_emitter_hz`, `candidate_track_id`, `candidate_source`, `candidate_*` | the candidates-file columns |
 
 ## Evaluating detections
 

@@ -7,14 +7,50 @@ call returns, so killing the labeller loses nothing. Undo appends an
 current label of an item is the latest click that has not been undone, per
 labeller.
 
-From the log, one audian label file per trial is derived,
+A *skip* (the labeller moved on without deciding) is logged as a ``skip``
+event, can be undone like a click, and never appears in the label files.
+
+From the log, one audian label file per trial (recording) is derived,
 ``<out>/labels/<trial>.csv`` (rewritten atomically after every event and
-rebuilt on start). Columns: the audian columns with the v1 box, then
-``label`` (``chirp``, ``not_chirp``, ``chirp_emitter_unclear``),
-``emitter_id`` (Int64 track id; NA unless a left click landed within the
-tolerance of a live track), ``clicked_hz``, ``clicked_t_s``, ``labeler``,
-``labeled_at`` (UTC, ISO 8601), ``tool_version``, ``queue_id``, ``item_id``,
-``det_index`` and ``df_bin``.
+rebuilt on start), one row per labelled item and labeller. Columns: the
+audian columns with the box, then :data:`LABEL_COLUMNS`:
+
+``label``
+    ``chirp``, ``not_chirp`` or ``chirp_emitter_unclear``.
+``emitter_id``
+    Track id of the emitter (Int64; NA unless a track was picked).
+``clicked_hz``, ``clicked_t_s``
+    Where the labeller clicked (NA for keyboard picks).
+``labeler``, ``labeled_at`` (UTC, ISO 8601), ``tool_version``, ``queue_id``,
+``item_id``, ``det_index``, ``df_bin``
+    Provenance (``det_index``: row of the v1 detection or candidate).
+
+then :data:`EXTRA_COLUMNS`:
+
+``emitter_baseline_hz``
+    The emitter track's frequency at the box start (the baseline before
+    the chirp), interpolated from the track, not from the click.
+``click_offset_hz``
+    ``clicked_hz`` minus the emitter track's frequency at ``clicked_t_s``
+    (how far from the track the click landed).
+``via``
+    ``mouse`` or ``key`` (how the label was given).
+``frontend``
+    ``mpl``, ``mpl-grid`` or ``browser``.
+``window_s``
+    Spectrogram window shown when labelling.
+``prediction_shown``
+    Whether the model's predicted emitter was visible (boolean; NA for
+    older labels).
+``n_candidates``, ``delta_f_hz``
+    Live tracks at the box centre and the frequency difference of the two
+    closest of them.
+``recording_dir``, ``tracks_dir``
+    Where the recording and its tracks were read from.
+``candidate_id``, ``candidate_score``, ``candidate_emitter_hz``,
+``candidate_track_id``, ``candidate_source``
+    The candidates-file columns (NA for v1 detections), followed by any
+    extra ``candidate_<column>``.
 
 One labelling session per output directory at a time (enforced with a lock
 on the log).
@@ -27,7 +63,7 @@ import json
 import logging
 import os
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -35,9 +71,18 @@ from typing import Any
 import pandas as pd
 from gridtools.io import write_labels
 
-from chirpdetector.labeling.queue import QueueItem
+from chirpdetector.labeling.queue import CandidateValue, QueueItem
 
-__all__ = ["LABELS", "LABEL_COLUMNS", "Decision", "LabelStore"]
+__all__ = [
+    "EXTRA_COLUMNS",
+    "FRONTENDS",
+    "LABELS",
+    "LABEL_COLUMNS",
+    "SKIP",
+    "Decision",
+    "LabelStore",
+    "decision_table",
+]
 
 log = logging.getLogger(__name__)
 
@@ -57,12 +102,47 @@ LABEL_COLUMNS = (
     "det_index",
     "df_bin",
 )
-"""Columns written after the audian columns, in order."""
+"""Columns written after the audian columns, in order (since the first version)."""
+
+EXTRA_COLUMNS = (
+    "emitter_baseline_hz",
+    "click_offset_hz",
+    "via",
+    "frontend",
+    "window_s",
+    "prediction_shown",
+    "n_candidates",
+    "delta_f_hz",
+    "recording_dir",
+    "tracks_dir",
+    "candidate_id",
+    "candidate_score",
+    "candidate_emitter_hz",
+    "candidate_track_id",
+    "candidate_source",
+)
+"""Columns written after :data:`LABEL_COLUMNS` (extra ``candidate_*`` follow)."""
+
+SKIP = "skip"
+"""Pseudo-label of a skip event (never written to the label files)."""
+
+FRONTENDS = ("mpl", "mpl-grid", "browser")
+"""Values of ``frontend``."""
+
+_CANDIDATE_DTYPES = {
+    "candidate_score": "Float64",
+    "candidate_emitter_hz": "Float64",
+    "candidate_track_id": "Int64",
+}
 
 
 @dataclass(frozen=True)
 class Decision:
-    """One click, as stored in the event log."""
+    """One click (or skip), as stored in the event log.
+
+    Fields after ``candidates`` were added with the single-candidate
+    frontends; events written before have their defaults.
+    """
 
     seq: int
     labeler: str
@@ -79,16 +159,33 @@ class Decision:
     clicked_hz: float | None
     clicked_t_s: float | None
     candidates: tuple[tuple[int, float], ...]
+    emitter_baseline_hz: float | None = None
+    click_offset_hz: float | None = None
+    via: str = ""
+    frontend: str = ""
+    window_s: float | None = None
+    prediction_shown: bool | None = None
+    n_candidates: int | None = None
+    delta_f_hz: float | None = None
+    recording_dir: str = ""
+    tracks_dir: str = ""
+    candidate: tuple[tuple[str, CandidateValue], ...] = ()
 
     @classmethod
     def from_event(cls, event: dict[str, Any]) -> Decision:
-        """Parse a ``click`` event."""
-        fields = {k: event[k] for k in cls.__dataclass_fields__}
-        fields["box"] = tuple(fields["box"])
-        fields["candidates"] = tuple(
-            (int(i), float(f)) for i, f in fields["candidates"]
+        """Parse a ``click`` or ``skip`` event."""
+        values = {f.name: event[f.name] for f in fields(cls) if f.name in event}
+        values["box"] = tuple(values["box"])
+        values["candidates"] = tuple(
+            (int(i), float(f)) for i, f in values["candidates"]
         )
-        return cls(**fields)
+        values["candidate"] = tuple((str(k), v) for k, v in values.get("candidate", ()))
+        return cls(**values)
+
+    @property
+    def is_skip(self) -> bool:
+        """True for a skip (no label)."""
+        return self.label == SKIP
 
 
 class LabelStore:
@@ -166,7 +263,7 @@ class LabelStore:
             self._next_seq = max(self._next_seq, int(event["seq"]) + 1)
 
     def _apply(self, event: dict[str, Any]) -> Decision | None:
-        if event["type"] == "click":
+        if event["type"] in ("click", SKIP):
             decision = Decision.from_event(event)
             self._stacks.setdefault((decision.labeler, decision.item_id), []).append(
                 decision
@@ -202,6 +299,14 @@ class LabelStore:
         clicked_hz: float | None = None,
         clicked_t_s: float | None = None,
         candidates: Sequence[tuple[int, float]] = (),
+        emitter_baseline_hz: float | None = None,
+        click_offset_hz: float | None = None,
+        via: str = "",
+        frontend: str = "",
+        window_s: float | None = None,
+        prediction_shown: bool | None = None,
+        recording_dir: str | Path = "",
+        tracks_dir: str | Path = "",
     ) -> Decision:
         """Store a click on ``item`` (overrides earlier clicks on it).
 
@@ -212,21 +317,43 @@ class LabelStore:
         queue_id
             Queue the item was shown from.
         label
-            One of :data:`LABELS`.
+            One of :data:`LABELS`, or :data:`SKIP`.
         emitter_id
             Track id of the emitter, if known.
         clicked_hz, clicked_t_s
             Where the labeller clicked.
         candidates
             ``(track_id, baseline_hz)`` of the live tracks shown.
+        emitter_baseline_hz
+            The emitter track's frequency at the box start.
+        click_offset_hz
+            Click frequency minus the emitter track's frequency at the
+            click time.
+        via
+            ``mouse`` or ``key``.
+        frontend
+            One of :data:`FRONTENDS`.
+        window_s
+            Spectrogram window shown.
+        prediction_shown
+            Whether the model's predicted emitter was visible.
+        recording_dir, tracks_dir
+            Where the item's recording and tracks were read from.
 
         Returns
         -------
         The stored decision.
         """
-        if label not in LABELS:
-            msg = f"label must be one of {LABELS}, got {label!r}"
+        if label not in (*LABELS, SKIP):
+            msg = f"label must be one of {LABELS} or {SKIP!r}, got {label!r}"
             raise ValueError(msg)
+        if frontend and frontend not in FRONTENDS:
+            msg = f"frontend must be one of {FRONTENDS}, got {frontend!r}"
+            raise ValueError(msg)
+
+        def opt(value: float | None) -> float | None:
+            return None if value is None else float(value)
+
         decision = Decision(
             seq=self._next_seq,
             labeler=self.labeler,
@@ -240,13 +367,28 @@ class LabelStore:
             box=item.box,
             label=label,
             emitter_id=None if emitter_id is None else int(emitter_id),
-            clicked_hz=None if clicked_hz is None else float(clicked_hz),
-            clicked_t_s=None if clicked_t_s is None else float(clicked_t_s),
+            clicked_hz=opt(clicked_hz),
+            clicked_t_s=opt(clicked_t_s),
             candidates=tuple((int(i), float(f)) for i, f in candidates),
+            emitter_baseline_hz=opt(emitter_baseline_hz),
+            click_offset_hz=opt(click_offset_hz),
+            via=via,
+            frontend=frontend,
+            window_s=opt(window_s),
+            prediction_shown=None
+            if prediction_shown is None
+            else bool(prediction_shown),
+            n_candidates=int(item.n_candidates),
+            delta_f_hz=opt(item.delta_f_hz),
+            recording_dir=str(recording_dir),
+            tracks_dir=str(tracks_dir),
+            candidate=item.candidate,
         )
-        self._append({"type": "click", **asdict(decision)})
-        self._apply({"type": "click", **asdict(decision)})
-        self._write_csv(item.trial)
+        event_type = SKIP if label == SKIP else "click"
+        self._append({"type": event_type, **asdict(decision)})
+        self._apply({"type": event_type, **asdict(decision)})
+        if label != SKIP:
+            self._write_csv(item.trial)
         return decision
 
     def undo(self) -> Decision | None:
@@ -269,47 +411,104 @@ class LabelStore:
         }
         self._append(event)
         decision = self._apply(event)
-        if decision is not None:
+        if decision is not None and not decision.is_skip:
             self._write_csv(decision.trial)
         return decision
 
     def current(self, item_id: str) -> Decision | None:
-        """This labeller's current decision on an item."""
+        """This labeller's current label on an item (None if open or skipped)."""
         stack = self._stacks.get((self.labeler, item_id))
-        return stack[-1] if stack else None
+        return stack[-1] if stack and not stack[-1].is_skip else None
+
+    def skipped(self, item_id: str) -> bool:
+        """True if this labeller's latest action on the item was a skip."""
+        stack = self._stacks.get((self.labeler, item_id))
+        return bool(stack) and stack[-1].is_skip
+
+    def latest(self, item_id: str) -> Decision | None:
+        """Latest decision on an item by any labeller (skips included)."""
+        return self.latest_by_item().get(item_id)
+
+    def latest_by_item(self) -> dict[str, Decision]:
+        """Latest decision on every item by any labeller (skips included)."""
+        out: dict[str, Decision] = {}
+        for (_, item_id), stack in self._stacks.items():
+            if stack and (item_id not in out or stack[-1].seq > out[item_id].seq):
+                out[item_id] = stack[-1]
+        return out
+
+    def decisions(self) -> list[Decision]:
+        """Every current label of every labeller (no skips), in log order."""
+        return sorted(
+            (s[-1] for s in self._stacks.values() if s and not s[-1].is_skip),
+            key=lambda d: d.seq,
+        )
 
     def _write_csv(self, trial: str) -> None:
         rows = sorted(
             (
                 stack[-1]
                 for stack in self._stacks.values()
-                if stack and stack[-1].trial == trial
+                if stack and stack[-1].trial == trial and not stack[-1].is_skip
             ),
             key=lambda d: (d.box[0], d.item_id, d.labeler),
         )
-        df = pd.DataFrame(
-            {
-                "category": [
-                    "not_chirp" if d.label == "not_chirp" else "chirp" for d in rows
-                ],
-                "kind": ["span"] * len(rows),
-                "channel": pd.array([pd.NA] * len(rows), dtype="Int64"),
-                "t_start_s": [d.box[0] for d in rows],
-                "t_end_s": [d.box[1] for d in rows],
-                "f_low_hz": [d.box[2] for d in rows],
-                "f_high_hz": [d.box[3] for d in rows],
-                "note": [""] * len(rows),
-                "label": [d.label for d in rows],
-                "emitter_id": pd.array([d.emitter_id for d in rows], dtype="Int64"),
-                "clicked_hz": pd.array([d.clicked_hz for d in rows], dtype="Float64"),
-                "clicked_t_s": pd.array([d.clicked_t_s for d in rows], dtype="Float64"),
-                "labeler": [d.labeler for d in rows],
-                "labeled_at": [d.labeled_at for d in rows],
-                "tool_version": [d.tool_version for d in rows],
-                "queue_id": [d.queue_id for d in rows],
-                "item_id": [d.item_id for d in rows],
-                "det_index": pd.array([d.det_index for d in rows], dtype="Int64"),
-                "df_bin": [d.df_bin for d in rows],
-            }
-        )
-        write_labels(df, self.labels_dir / f"{trial}.csv")
+        write_labels(decision_table(rows), self.labels_dir / f"{trial}.csv")
+
+
+def decision_table(rows: Sequence[Decision]) -> pd.DataFrame:
+    """Label-file table of decisions (audian columns first)."""
+    n = len(rows)
+    candidate = [dict(d.candidate) for d in rows]
+    extra_keys: list[str] = []
+    for c in candidate:
+        for k in c:
+            if k not in EXTRA_COLUMNS and k not in extra_keys:
+                extra_keys.append(k)
+
+    def floats(values: Sequence[float | None]) -> Any:
+        return pd.array(list(values), dtype="Float64")
+
+    table: dict[str, Any] = {
+        "category": ["not_chirp" if d.label == "not_chirp" else "chirp" for d in rows],
+        "kind": ["span"] * n,
+        "channel": pd.array([pd.NA] * n, dtype="Int64"),
+        "t_start_s": [d.box[0] for d in rows],
+        "t_end_s": [d.box[1] for d in rows],
+        "f_low_hz": [d.box[2] for d in rows],
+        "f_high_hz": [d.box[3] for d in rows],
+        "note": [""] * n,
+        "label": [d.label for d in rows],
+        "emitter_id": pd.array([d.emitter_id for d in rows], dtype="Int64"),
+        "clicked_hz": floats([d.clicked_hz for d in rows]),
+        "clicked_t_s": floats([d.clicked_t_s for d in rows]),
+        "labeler": [d.labeler for d in rows],
+        "labeled_at": [d.labeled_at for d in rows],
+        "tool_version": [d.tool_version for d in rows],
+        "queue_id": [d.queue_id for d in rows],
+        "item_id": [d.item_id for d in rows],
+        "det_index": pd.array([d.det_index for d in rows], dtype="Int64"),
+        "df_bin": [d.df_bin for d in rows],
+        "emitter_baseline_hz": floats([d.emitter_baseline_hz for d in rows]),
+        "click_offset_hz": floats([d.click_offset_hz for d in rows]),
+        "via": [d.via for d in rows],
+        "frontend": [d.frontend for d in rows],
+        "window_s": floats([d.window_s for d in rows]),
+        "prediction_shown": pd.array(
+            [d.prediction_shown for d in rows], dtype="boolean"
+        ),
+        "n_candidates": pd.array([d.n_candidates for d in rows], dtype="Int64"),
+        "delta_f_hz": floats([d.delta_f_hz for d in rows]),
+        "recording_dir": [d.recording_dir for d in rows],
+        "tracks_dir": [d.tracks_dir for d in rows],
+    }
+    for key in (*EXTRA_COLUMNS[EXTRA_COLUMNS.index("candidate_id") :], *extra_keys):
+        values = [c.get(key) for c in candidate]
+        dtype = _CANDIDATE_DTYPES.get(key)
+        if dtype is not None:
+            table[key] = pd.array(values, dtype=dtype)
+        elif key == "candidate_id" or key == "candidate_source":
+            table[key] = ["" if v is None else str(v) for v in values]
+        else:
+            table[key] = pd.array(values, dtype=object)
+    return pd.DataFrame(table)

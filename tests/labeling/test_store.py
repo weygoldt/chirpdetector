@@ -10,7 +10,12 @@ import pytest
 from gridtools.io import AUDIAN_COLUMNS, read_labels
 
 from chirpdetector.labeling.queue import QueueItem
-from chirpdetector.labeling.store import LABEL_COLUMNS, LabelStore
+from chirpdetector.labeling.store import (
+    EXTRA_COLUMNS,
+    LABEL_COLUMNS,
+    SKIP,
+    LabelStore,
+)
 
 
 def _item(det_index: int, trial: str = "2000-01-01-10_00") -> QueueItem:
@@ -55,7 +60,8 @@ def test_click_is_logged_and_written_to_csv(tmp_path: Path) -> None:
     assert event["emitter_id"] == 7
     assert event["candidates"] == [[7, 700.0], [8, 760.0]]
     df = _csv(tmp_path)
-    assert list(df.columns) == [*AUDIAN_COLUMNS, *LABEL_COLUMNS]
+    # the original columns stay first and in order; new ones are appended
+    assert list(df.columns) == [*AUDIAN_COLUMNS, *LABEL_COLUMNS, *EXTRA_COLUMNS]
     row = df.iloc[0]
     assert (row.t_start_s, row.t_end_s, row.f_low_hz, row.f_high_hz) == (
         4.0,
@@ -164,3 +170,93 @@ def test_unknown_label_is_rejected(tmp_path: Path) -> None:
         pytest.raises(ValueError, match="label"),
     ):
         store.record(_item(1), "q", "maybe")
+
+
+def test_new_fields_are_stored_and_written(tmp_path: Path) -> None:
+    with LabelStore(tmp_path, "pw", "2") as store:
+        store.record(
+            _item(3),
+            "q1",
+            "chirp",
+            emitter_id=7,
+            clicked_hz=701.5,
+            clicked_t_s=4.05,
+            emitter_baseline_hz=700.25,
+            click_offset_hz=1.25,
+            via="mouse",
+            frontend="browser",
+            window_s=0.2048,
+            prediction_shown=False,
+            recording_dir="/rec",
+            tracks_dir="/trk",
+        )
+    row = _csv(tmp_path).iloc[0]
+    assert row.emitter_baseline_hz == pytest.approx(700.25)
+    assert row.click_offset_hz == pytest.approx(1.25)
+    assert (row.via, row.frontend, row.window_s) == ("mouse", "browser", 0.2048)
+    assert not row.prediction_shown
+    assert (row.n_candidates, row.delta_f_hz) == (2, 60.0)
+    assert (row.recording_dir, row.tracks_dir) == ("/rec", "/trk")
+    assert pd.isna(row.candidate_id)
+
+
+def test_unknown_frontend_is_rejected(tmp_path: Path) -> None:
+    with (
+        LabelStore(tmp_path, "pw", "2") as store,
+        pytest.raises(ValueError, match="frontend"),
+    ):
+        store.record(_item(1), "q", "chirp", frontend="excel")
+
+
+def test_old_events_without_the_new_fields_replay(tmp_path: Path) -> None:
+    """Logs written by the first version (no new fields) still load."""
+    old = {
+        "type": "click",
+        "seq": 0,
+        "labeler": "pw",
+        "labeled_at": "2026-11-12T10:00:00.000+00:00",
+        "tool_version": "2.0.0.dev0",
+        "queue_id": "q",
+        "item_id": "2000-01-01-10_00#1",
+        "trial": "2000-01-01-10_00",
+        "det_index": 1,
+        "df_bin": "50-100",
+        "box": [2.0, 2.1, 690.0, 800.0],
+        "label": "chirp",
+        "emitter_id": 4,
+        "clicked_hz": 701.0,
+        "clicked_t_s": 2.05,
+        "candidates": [[4, 700.0]],
+    }
+    (tmp_path / "events.jsonl").write_text(json.dumps(old) + "\n")
+    with LabelStore(tmp_path, "pw", "2") as store:
+        decision = store.current(old["item_id"])
+        assert decision is not None
+        assert decision.emitter_id == 4
+        assert decision.emitter_baseline_hz is None
+        assert decision.frontend == ""
+        store.record(_item(2), "q", "not_chirp", frontend="mpl")
+    df = _csv(tmp_path)
+    assert list(df.label) == ["chirp", "not_chirp"]
+    assert df.prediction_shown.isna().all()
+
+
+def test_skip_is_logged_undoable_and_never_written(tmp_path: Path) -> None:
+    with LabelStore(tmp_path, "pw", "2") as store:
+        store.record(_item(1), "q", SKIP)
+        assert store.skipped(_item(1).item_id)
+        assert store.current(_item(1).item_id) is None
+        assert not (tmp_path / "labels" / "2000-01-01-10_00.csv").exists()
+        store.record(_item(1), "q", "not_chirp")  # deciding later replaces the skip
+        assert not store.skipped(_item(1).item_id)
+        assert len(_csv(tmp_path)) == 1
+        store.undo()
+        assert store.skipped(_item(1).item_id)
+        undone = store.undo()
+        assert undone is not None
+        assert undone.label == SKIP
+        assert not store.skipped(_item(1).item_id)
+    assert [e["type"] for e in _events(tmp_path)] == [SKIP, "click", "undo", "undo"]
+    with LabelStore(tmp_path, "pw", "2") as store:  # replay
+        assert not store.skipped(_item(1).item_id)
+        assert store.decisions() == []

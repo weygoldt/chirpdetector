@@ -29,7 +29,7 @@ import tempfile
 import zlib
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,7 @@ from gridtools.io import Tracks, load_tracks, read_v1_detections
 __all__ = [
     "DEFAULT_BIN_EDGES_HZ",
     "SINGLE_BIN",
+    "CandidateValue",
     "LabelQueue",
     "QueueConfig",
     "QueueItem",
@@ -49,9 +50,11 @@ __all__ = [
     "bin_labels",
     "binned_detections",
     "build_queue",
+    "delta_f_bins",
     "load_or_build_queue",
     "queue_id_for",
     "trial_fingerprint",
+    "write_json_atomic",
 ]
 
 log = logging.getLogger(__name__)
@@ -62,6 +65,9 @@ DEFAULT_BIN_EDGES_HZ = (0.0, 10.0, 25.0, 50.0, 100.0)
 
 SINGLE_BIN = "single"
 """Bin of detections with fewer than two live tracks."""
+
+CandidateValue = str | int | float | bool | None
+"""Type of a value in :attr:`QueueItem.candidate`."""
 
 _DETECTIONS_FILE = "chirpdetector_bboxes.csv"
 _TRACK_FILES = ("times.npy", "fund_v.npy", "ident_v.npy", "idx_v.npy")
@@ -118,10 +124,16 @@ def bin_labels(edges_hz: Sequence[float]) -> list[str]:
 class QueueItem:
     """One detection to label.
 
-    ``item_id`` is ``"<trial>#<det_index>"``, where ``det_index`` is the row
-    of the detection in :func:`gridtools.io.read_v1_detections` (sorted by
-    start time). ``delta_f_hz`` is None for items with fewer than two live
-    tracks. v1's assigned emitter is deliberately not stored.
+    For queues sampled from v1 detections, ``item_id`` is
+    ``"<trial>#<det_index>"``, where ``det_index`` is the row of the
+    detection in :func:`gridtools.io.read_v1_detections` (sorted by start
+    time), and v1's assigned emitter is deliberately not stored. For queues
+    read from a candidates file (:mod:`chirpdetector.labeling.candidates`),
+    ``item_id`` is ``"<recording>#<candidate_id>"``, ``det_index`` is the
+    row in that file, and ``candidate`` holds the file's other columns
+    (``candidate_id``, ``score``, ``emitter_hz``, ``track_id``, ``source``
+    and any extra column), which the frontends hide by default.
+    ``delta_f_hz`` is None for items with fewer than two live tracks.
     """
 
     item_id: str
@@ -134,6 +146,7 @@ class QueueItem:
     n_candidates: int
     delta_f_hz: float | None
     df_bin: str
+    candidate: tuple[tuple[str, CandidateValue], ...] = ()
 
     @property
     def t_center_s(self) -> float:
@@ -145,10 +158,26 @@ class QueueItem:
         """``(t_start_s, t_end_s, f_low_hz, f_high_hz)``."""
         return (self.t_start_s, self.t_end_s, self.f_low_hz, self.f_high_hz)
 
+    @property
+    def candidate_columns(self) -> dict[str, CandidateValue]:
+        """``candidate`` as a dict (empty for v1 detections)."""
+        return dict(self.candidate)
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> QueueItem:
+        """Inverse of :func:`dataclasses.asdict` (lists back to tuples)."""
+        fields = dict(data)
+        fields["candidate"] = tuple((str(k), v) for k, v in fields.get("candidate", ()))
+        return cls(**fields)
+
 
 @dataclass(frozen=True)
 class TrialInput:
-    """A trial a queue was sampled from."""
+    """A trial (recording) a queue was made from.
+
+    ``path`` is the recording directory; ``tracks_path`` the directory of
+    its wavetracker arrays (empty: the same as ``path``).
+    """
 
     name: str
     path: str
@@ -156,17 +185,34 @@ class TrialInput:
     n_detections: int
     n_kept: int
     kept_per_bin: dict[str, int]
+    tracks_path: str = ""
+
+    @property
+    def recording_dir(self) -> Path:
+        """The recording directory."""
+        return Path(self.path)
+
+    @property
+    def tracks_dir(self) -> Path:
+        """The tracks directory."""
+        return Path(self.tracks_path or self.path)
 
 
 @dataclass(frozen=True)
 class LabelQueue:
-    """A persisted, ordered list of detections to label."""
+    """A persisted, ordered list of detections to label.
+
+    ``origin`` says where the items came from: empty for v1 detections,
+    ``{"kind": "candidates", "path": ..., "sha256": ..., "shuffle": ...}``
+    for a candidates file.
+    """
 
     queue_id: str
     created_at: str
     config: QueueConfig
     trials: tuple[TrialInput, ...]
     items: tuple[QueueItem, ...]
+    origin: dict[str, Any] = field(default_factory=dict)
 
     def __len__(self) -> int:
         return len(self.items)
@@ -192,6 +238,7 @@ class LabelQueue:
             "config": asdict(self.config),
             "trials": [asdict(t) for t in self.trials],
             "items": [asdict(i) for i in self.items],
+            "origin": dict(self.origin),
         }
 
     @classmethod
@@ -207,8 +254,22 @@ class LabelQueue:
             created_at=data["created_at"],
             config=QueueConfig(**config),
             trials=tuple(TrialInput(**t) for t in data["trials"]),
-            items=tuple(QueueItem(**i) for i in data["items"]),
+            items=tuple(QueueItem.from_json(i) for i in data["items"]),
+            origin=dict(data.get("origin", {})),
         )
+
+    def trial(self, name: str) -> TrialInput:
+        """The trial of this name.
+
+        Raises
+        ------
+        KeyError
+            If the queue has no such trial.
+        """
+        for trial in self.trials:
+            if trial.name == name:
+                return trial
+        raise KeyError(name)
 
 
 def trial_fingerprint(trial_dir: str | Path) -> str:
@@ -280,6 +341,47 @@ def _duplicates(
     return drop
 
 
+def delta_f_bins(
+    tracks: Tracks,
+    t_s: npt.ArrayLike,
+    bin_edges_hz: Sequence[float] = DEFAULT_BIN_EDGES_HZ,
+    max_gap_s: float = 1.0,
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.float64], list[str]]:
+    """Live tracks, :math:`|\\Delta F|` and its bin at given times.
+
+    Parameters
+    ----------
+    tracks
+        The recording's tracks.
+    t_s
+        Times (box centres).
+    bin_edges_hz
+        Lower bin edges (see :class:`QueueConfig`).
+    max_gap_s
+        Track liveness gap.
+
+    Returns
+    -------
+    ``n_live`` (tracks live at each time), ``delta_f_hz`` (frequency
+    difference of the two closest live tracks; NaN with fewer than two) and
+    the bin names (``single`` with fewer than two live tracks).
+    """
+    t = np.atleast_1d(np.asarray(t_s, dtype=np.float64))
+    ids = tracks.ids
+    freqs = np.full((len(t), len(ids)), np.nan)
+    for j, ident in enumerate(ids):
+        freqs[:, j] = tracks.track(int(ident)).frequency_at(t, max_gap_s)
+    n_live = np.isfinite(freqs).sum(axis=1).astype(np.int64)
+    pair = n_live >= 2
+    delta_f = np.full(len(t), np.nan)
+    if pair.any():
+        ordered = np.sort(freqs[pair], axis=1)  # NaN sort last
+        delta_f[pair] = np.nanmin(np.diff(ordered, axis=1), axis=1)
+    names = bin_labels(bin_edges_hz)
+    bins = np.where(pair, np.digitize(np.nan_to_num(delta_f), bin_edges_hz) - 1, -1)
+    return n_live, delta_f, [names[b] for b in bins]
+
+
 def binned_detections(
     tracks: Tracks, detections: pd.DataFrame, config: QueueConfig
 ) -> pd.DataFrame:
@@ -304,27 +406,16 @@ def binned_detections(
         dtype=np.float64
     )
     t_center = 0.5 * (boxes[:, 0] + boxes[:, 1])
-    ids = tracks.ids
-    freqs = np.full((len(boxes), len(ids)), np.nan)
-    for j, ident in enumerate(ids):
-        freqs[:, j] = tracks.track(int(ident)).frequency_at(t_center, config.max_gap_s)
-    n_live = np.isfinite(freqs).sum(axis=1)
+    n_live, delta_f, bins = delta_f_bins(
+        tracks, t_center, config.bin_edges_hz, config.max_gap_s
+    )
     keep = ~_duplicates(
         boxes, detections["score"].to_numpy(dtype=np.float64), config.dedup_iou
-    )
-    pair = n_live >= 2
-    delta_f = np.full(len(boxes), np.nan)
-    if pair.any():
-        ordered = np.sort(freqs[pair], axis=1)  # NaN sort last
-        delta_f[pair] = np.nanmin(np.diff(ordered, axis=1), axis=1)
-    names = bin_labels(config.bin_edges_hz)
-    bins = np.where(
-        pair, np.digitize(np.nan_to_num(delta_f), config.bin_edges_hz) - 1, -1
     )
     out = detections.loc[keep, ["t_start_s", "t_end_s", "f_low_hz", "f_high_hz"]].copy()
     out["n_candidates"] = n_live[keep]
     out["delta_f_hz"] = delta_f[keep]
-    out["df_bin"] = [names[b] for b in bins[keep]]
+    out["df_bin"] = [b for b, k in zip(bins, keep, strict=True) if k]
     return out
 
 
@@ -423,7 +514,8 @@ def build_queue(
     )
 
 
-def _write_json_atomic(data: dict[str, Any], path: Path) -> None:
+def write_json_atomic(data: dict[str, Any], path: Path) -> None:
+    """Write JSON to ``path`` via a fsynced temporary file and a rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -468,6 +560,6 @@ def load_or_build_queue(
         log.info("resuming queue %s (%d items)", queue_id, len(queue))
         return queue
     queue = build_queue(list(paths.values()), config, fingerprints)
-    _write_json_atomic(queue.to_json(), path)
+    write_json_atomic(queue.to_json(), path)
     log.info("new queue %s (%d items) written to %s", queue_id, len(queue), path)
     return queue

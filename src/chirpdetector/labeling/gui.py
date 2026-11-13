@@ -1,4 +1,8 @@
-"""Matplotlib grid labeller: many cutouts per page, one click per chirp.
+"""Matplotlib grid labeller: many cutouts per page (``--view grid``).
+
+The default frontends show one candidate at a time
+(:mod:`chirpdetector.labeling.single`, :mod:`chirpdetector.labeling.server`);
+this grid is kept for quick passes over many clear chirps.
 
 One figure shows a page of cutouts (default 4 x 6). Each cutout is a v1
 detection with its box outlined and short dashed ticks at the left and
@@ -8,7 +12,9 @@ unnumbered, so nothing hints at v1's emitter).
 Mouse (inside a cutout; clicking again overrides):
 
 - left: chirp; the emitter is the live track whose baseline at the chirp is
-  nearest to the clicked frequency, if within ``tolerance_hz`` (else NA);
+  nearest to the clicked frequency, if within ``tolerance_hz`` (else NA).
+  The stored ``emitter_baseline_hz`` is the track's frequency at the box
+  start, as in the single-candidate view;
 - right: not a chirp;
 - middle: chirp, emitter unclear.
 
@@ -24,7 +30,6 @@ from __future__ import annotations
 
 import logging
 import math
-import threading
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -35,7 +40,7 @@ from typing import Any
 import matplotlib
 import numpy as np
 import numpy.typing as npt
-from gridtools.io import Recording, Tracks, load_tracks, open_recording
+from gridtools.io import Recording, Tracks
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
@@ -45,6 +50,7 @@ from matplotlib.text import Text
 
 from chirpdetector.labeling.queue import LabelQueue, QueueItem
 from chirpdetector.labeling.render import Cutout, CutoutConfig, render_cutout
+from chirpdetector.labeling.session import TrialSources
 from chirpdetector.labeling.store import LabelStore
 
 __all__ = ["HELP", "Labeller", "nearest_track", "run"]
@@ -122,7 +128,8 @@ class Labeller:
     queue
         Items to label, in order.
     trial_dirs
-        Directory of every trial in the queue, by trial name.
+        Directory of every trial in the queue (recording and tracks), by
+        trial name, or the recordings and tracks as :class:`TrialSources`.
     store
         Where clicks are saved.
     config
@@ -141,7 +148,7 @@ class Labeller:
     def __init__(
         self,
         queue: LabelQueue,
-        trial_dirs: Mapping[str, Path],
+        trial_dirs: Mapping[str, Path] | TrialSources,
         store: LabelStore,
         *,
         config: CutoutConfig | None = None,
@@ -150,12 +157,17 @@ class Labeller:
         figure: Figure | None = None,
         background: bool = True,
     ) -> None:
-        missing = {t.name for t in queue.trials} - set(trial_dirs)
+        sources = (
+            trial_dirs
+            if isinstance(trial_dirs, TrialSources)
+            else TrialSources({k: (Path(v), Path(v)) for k, v in trial_dirs.items()})
+        )
+        missing = {t.name for t in queue.trials} - set(sources.paths)
         if missing:
             msg = f"no directory given for trials {sorted(missing)}"
             raise ValueError(msg)
         self.queue = queue
-        self.trial_dirs = dict(trial_dirs)
+        self.sources = sources
         self.store = store
         self.config = config or CutoutConfig()
         self.rows, self.cols = grid
@@ -163,8 +175,6 @@ class Labeller:
         self.n_pages = max(1, math.ceil(len(queue) / self.per_page))
         self.tolerance_hz = tolerance_hz
         self._index = {item.item_id: i for i, item in enumerate(queue.items)}
-        self._trials: dict[str, tuple[Recording, Tracks]] = {}
-        self._trial_lock = threading.Lock()
         self._executor = ThreadPoolExecutor(1) if background else None
         self._pages: dict[int, Future[_Page]] = {}
         self._cmap = matplotlib.colormaps["magma"]  # a copy, used by the worker
@@ -218,11 +228,7 @@ class Labeller:
         return 0
 
     def _trial(self, name: str) -> tuple[Recording, Tracks]:
-        with self._trial_lock:
-            if name not in self._trials:
-                path = self.trial_dirs[name]
-                self._trials[name] = (open_recording(path), load_tracks(path))
-            return self._trials[name]
+        return self.sources.recording(name), self.sources.tracks(name)
 
     def _render_page(self, page: int) -> _Page:
         """Render and colour-map a page (runs in the worker thread).
@@ -454,19 +460,39 @@ class Labeller:
         if label is None:
             return
         cut = self.cutouts[slot]
+        item = items[slot]
         baselines = cut.baselines if cut is not None else ()
         emitter, clicked_hz, clicked_t_s = None, None, None
+        baseline_hz, offset_hz = None, None
         if label == "chirp" and event.xdata is not None and event.ydata is not None:
             clicked_t_s, clicked_hz = float(event.xdata), float(event.ydata)
             emitter = nearest_track(baselines, clicked_hz, self.tolerance_hz)
+            if emitter is not None:
+                track = self.sources.tracks(item.trial).track(emitter)
+                gap = self.config.max_gap_s
+                at_start = float(track.frequency_at(item.t_start_s, gap)[0])
+                at_click = float(track.frequency_at(clicked_t_s, gap)[0])
+                centre = dict(baselines)[emitter]
+                baseline_hz = at_start if math.isfinite(at_start) else centre
+                at_click = at_click if math.isfinite(at_click) else centre
+                offset_hz = clicked_hz - at_click
+        recording_dir, tracks_dir = self.sources.paths[item.trial]
         self.store.record(
-            items[slot],
+            item,
             self.queue.queue_id,
             label,
             emitter_id=emitter,
             clicked_hz=clicked_hz,
             clicked_t_s=clicked_t_s,
             candidates=baselines,
+            emitter_baseline_hz=baseline_hz,
+            click_offset_hz=offset_hz,
+            via="mouse",
+            frontend="mpl-grid",
+            window_s=self.config.window_s,
+            prediction_shown=False,
+            recording_dir=recording_dir,
+            tracks_dir=tracks_dir,
         )
         self._message = ""
         self._decorate(slot)
@@ -514,7 +540,7 @@ class Labeller:
 
 def run(
     queue: LabelQueue,
-    trial_dirs: Mapping[str, Path],
+    trial_dirs: Mapping[str, Path] | TrialSources,
     store: LabelStore,
     *,
     config: CutoutConfig | None = None,
