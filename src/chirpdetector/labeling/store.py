@@ -47,6 +47,10 @@ then :data:`EXTRA_COLUMNS`:
     closest of them.
 ``recording_dir``, ``tracks_dir``
     Where the recording and its tracks were read from.
+``elapsed_s``
+    Seconds from showing the item to this decision (NA for older labels).
+``blind``
+    Whether the session was blind (``--blind``: no box, no model output).
 ``candidate_id``, ``candidate_score``, ``candidate_emitter_hz``,
 ``candidate_track_id``, ``candidate_source``
     The candidates-file columns (NA for v1 detections), followed by any
@@ -115,6 +119,8 @@ EXTRA_COLUMNS = (
     "delta_f_hz",
     "recording_dir",
     "tracks_dir",
+    "elapsed_s",
+    "blind",
     "candidate_id",
     "candidate_score",
     "candidate_emitter_hz",
@@ -170,6 +176,8 @@ class Decision:
     recording_dir: str = ""
     tracks_dir: str = ""
     candidate: tuple[tuple[str, CandidateValue], ...] = ()
+    elapsed_s: float | None = None
+    blind: bool | None = None
 
     @classmethod
     def from_event(cls, event: dict[str, Any]) -> Decision:
@@ -307,6 +315,8 @@ class LabelStore:
         prediction_shown: bool | None = None,
         recording_dir: str | Path = "",
         tracks_dir: str | Path = "",
+        elapsed_s: float | None = None,
+        blind: bool | None = None,
     ) -> Decision:
         """Store a click on ``item`` (overrides earlier clicks on it).
 
@@ -339,6 +349,10 @@ class LabelStore:
             Whether the model's predicted emitter was visible.
         recording_dir, tracks_dir
             Where the item's recording and tracks were read from.
+        elapsed_s
+            Seconds from showing the item to this decision.
+        blind
+            Whether the session was blind.
 
         Returns
         -------
@@ -383,6 +397,8 @@ class LabelStore:
             recording_dir=str(recording_dir),
             tracks_dir=str(tracks_dir),
             candidate=item.candidate,
+            elapsed_s=opt(elapsed_s),
+            blind=None if blind is None else bool(blind),
         )
         event_type = SKIP if label == SKIP else "click"
         self._append({"type": event_type, **asdict(decision)})
@@ -501,6 +517,8 @@ def decision_table(rows: Sequence[Decision]) -> pd.DataFrame:
         "delta_f_hz": floats([d.delta_f_hz for d in rows]),
         "recording_dir": [d.recording_dir for d in rows],
         "tracks_dir": [d.tracks_dir for d in rows],
+        "elapsed_s": floats([d.elapsed_s for d in rows]),
+        "blind": pd.array([d.blind for d in rows], dtype="boolean"),
     }
     for key in (*EXTRA_COLUMNS[EXTRA_COLUMNS.index("candidate_id") :], *extra_keys):
         values = [c.get(key) for c in candidate]

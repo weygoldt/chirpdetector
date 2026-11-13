@@ -105,6 +105,36 @@ box, then `label` (`chirp`, `not_chirp`, `chirp_emitter_unclear`),
 | `recording_dir`, `tracks_dir` | where recording and tracks were read |
 | `candidate_id`, `candidate_score`, `candidate_emitter_hz`, `candidate_track_id`, `candidate_source`, `candidate_*` | the candidates-file columns |
 
+### Human against model (blind benchmark)
+
+`--blind` labels without hints: no box (only a time marker at its centre),
+no score, source or predicted emitter (`e` is disabled, and the server never
+sends them), and the time per item is stored (`elapsed_s`, `blind`).
+`chirpdetector label-benchmark` uses it to compare a human with the model
+on simulated scenes, where the truth is known:
+
+```sh
+# items: visible chirps (half from the lowest SNR quartile with excursion
+# < 60 Hz), model detections without a chirp, quiet baselines, a few
+# invisible chirps; candidates and truth go to different directories
+uv run chirpdetector label-benchmark build --scenes SCENES --detections DETS \
+    --candidates /mnt/data1/chirp_v2/labels/candidates/human_benchmark_v1.parquet \
+    --truth /mnt/data1/chirp_v2/labels/benchmark/human_benchmark_v1_truth.parquet
+uv run chirpdetector label-emitters --candidates .../human_benchmark_v1.parquet \
+    --out /mnt/data1/chirp_v2/labels/human_benchmark_v1 --blind --serve
+uv run chirpdetector label-benchmark score --truth .../human_benchmark_v1_truth.parquet \
+    --labels /mnt/data1/chirp_v2/labels/human_benchmark_v1 --out REPORT_DIR
+```
+
+`DETS` holds one `<scene>.parquet` of `predict_span` detections per scene
+(tracks given, post-filter on, score >= 0.05). The report gives recall on
+true chirps and false alarms on negatives (by stratum, SNR quartile and
+excursion), emitter accuracy, exact McNemar tests on the paired decisions,
+stratified bootstrap CIs and a figure of recall against SNR.
+`label-benchmark gallery` shows real boxes labelled `not_chirp` next to
+simulated true chirps with similar decoded height, FWHM and contrast
+(never from the benchmark's scenes).
+
 ## Evaluating detections
 
 `chirpdetector evaluate` scores predictions against hand labels (audian files

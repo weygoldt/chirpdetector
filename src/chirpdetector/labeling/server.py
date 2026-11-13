@@ -27,7 +27,7 @@ Endpoints
 ``GET /api/image?index=I&window=W&panel=P``
     A panel as PNG (row 0 = highest frequency).
 ``POST /api/action``
-    ``{"index", "window_s", "prediction_shown", "action", ...}`` with
+    ``{"index", "window_s", "prediction_shown", "elapsed_s", "action", ...}`` with
     ``action`` one of ``click`` (``panel, x, y, width, height``), ``pick``
     (``key``), ``not_chirp``, ``unclear`` (optional ``via``), ``skip``.
 ``POST /api/undo``
@@ -35,6 +35,11 @@ Endpoints
 
 Every response that changes state carries the new progress and the index
 to show next.
+
+Blind sessions (``--blind``) send neither the box edges (only its centre
+time, ``t_center_s``) nor the candidate's prediction, score or source, so
+not even the page's data reveal them; the page draws a time marker
+instead of the box and ignores ``e``.
 """
 
 from __future__ import annotations
@@ -137,22 +142,33 @@ def _progress(p: Progress) -> dict[str, Any]:
     }
 
 
-def _decision(decision: Decision | None, view_tracks: tuple = ()) -> Any:
+def _decision(
+    decision: Decision | None, view_tracks: tuple = (), *, ids: bool = True
+) -> Any:
     if decision is None:
         return None
     return {
         "label": decision.label,
-        "emitter_id": decision.emitter_id,
+        "emitter_id": decision.emitter_id if ids else None,
         "clicked_hz": _num(decision.clicked_hz),
         "clicked_t_s": _num(decision.clicked_t_s),
         "emitter_baseline_hz": _num(decision.emitter_baseline_hz),
         "via": decision.via,
-        "text": describe(decision, view_tracks),
+        "text": describe(decision, view_tracks, ids=ids),
     }
 
 
 class _BadRequest(Exception):
     pass
+
+
+def _elapsed(value: object) -> float | None:
+    """The page's time on an item (None if absent or not a sane number)."""
+    try:
+        elapsed = float(value)  # pyright: ignore[reportArgumentType]
+    except (TypeError, ValueError):
+        return None
+    return elapsed if math.isfinite(elapsed) and elapsed >= 0 else None
 
 
 class LabelServer:
@@ -229,6 +245,7 @@ class LabelServer:
             "progress": _progress(s.progress()),
             "origin": s.queue.origin,
             "help": HELP,
+            "blind": s.blind,
         }
 
     def _window(self, value: object) -> float:
@@ -257,39 +274,44 @@ class LabelServer:
         item = s.item(index)
         tracks = s.tracks(index)
         next_index = s.next_index(index)
+        described: dict[str, Any] = {
+            "item_id": item.item_id,
+            "trial": item.trial,
+            "t_center_s": item.t_center_s,
+            "df_bin": item.df_bin,
+            "delta_f_hz": _num(item.delta_f_hz),
+            "n_candidates": item.n_candidates,
+        }
+        if not s.blind:  # blind: the page never learns the box
+            described.update(
+                t_start_s=item.t_start_s,
+                t_end_s=item.t_end_s,
+                f_low_hz=item.f_low_hz,
+                f_high_hz=item.f_high_hz,
+            )
         payload: dict[str, Any] = {
             "index": index,
-            "item": {
-                "item_id": item.item_id,
-                "trial": item.trial,
-                "t_start_s": item.t_start_s,
-                "t_end_s": item.t_end_s,
-                "f_low_hz": item.f_low_hz,
-                "f_high_hz": item.f_high_hz,
-                "df_bin": item.df_bin,
-                "delta_f_hz": _num(item.delta_f_hz),
-                "n_candidates": item.n_candidates,
-            },
+            "item": described,
             "window_s": window_s,
             "tracks": [
                 {
                     "key": t.key,
-                    "track_id": t.track_id,
+                    "track_id": None if s.blind else t.track_id,
                     "baseline_hz": t.baseline_hz,
                     "t": t.times_s.tolist(),
                     "f": t.freqs_hz.tolist(),
-                    "gap_s": t.gap_s,
+                    "gap_s": 0.0 if s.blind else t.gap_s,
                 }
                 for t in tracks
             ],
             "prediction": None,
             "status": s.status(index),
-            "decision": _decision(s.decision(index), tracks),
+            "decision": _decision(s.decision(index), tracks, ids=not s.blind),
             "next_index": next_index,
             "panels": None,
             "error": None,
         }
-        prediction = prediction_of(item)
+        prediction = None if s.blind else prediction_of(item)
         if prediction is not None:
             payload["prediction"] = {
                 "emitter_hz": _num(prediction.emitter_hz),
@@ -328,7 +350,8 @@ class LabelServer:
         s = self.session
         index = self._index(body.get("index"))
         window_s = self._window(body.get("window_s", s.config.window_s))
-        shown = bool(body.get("prediction_shown", False))
+        shown = bool(body.get("prediction_shown", False)) and not s.blind
+        elapsed = _elapsed(body.get("elapsed_s"))
         action = body.get("action")
         extra: dict[str, Any] = {}
         if action == "click":
@@ -346,22 +369,34 @@ class LabelServer:
                 raise _BadRequest(str(err)) from None
             extra = {"t_s": t_s, "f_hz": f_hz}
             result = s.click(
-                index, t_s, f_hz, window_s=window_s, prediction_shown=shown
+                index,
+                t_s,
+                f_hz,
+                window_s=window_s,
+                prediction_shown=shown,
+                elapsed_s=elapsed,
             )
         elif action == "pick":
             try:
                 key = int(body["key"])
             except (KeyError, TypeError, ValueError):
                 raise _BadRequest("pick needs an integer key") from None
-            result = s.pick(index, key, window_s=window_s, prediction_shown=shown)
+            result = s.pick(
+                index, key, window_s=window_s, prediction_shown=shown, elapsed_s=elapsed
+            )
         elif action in ("not_chirp", "unclear"):
             label = "not_chirp" if action == "not_chirp" else "chirp_emitter_unclear"
             via = "mouse" if body.get("via") == "mouse" else "key"
             result = s.mark(
-                index, label, window_s=window_s, prediction_shown=shown, via=via
+                index,
+                label,
+                window_s=window_s,
+                prediction_shown=shown,
+                via=via,
+                elapsed_s=elapsed,
             )
         elif action == "skip":
-            result = s.skip(index)
+            result = s.skip(index, elapsed_s=elapsed)
         else:
             raise _BadRequest(f"unknown action {action!r}")
         return result, extra
@@ -377,7 +412,7 @@ class LabelServer:
             "message": result.message,
             "index": result.index,
             "next_index": result.next_index,
-            "decision": _decision(result.decision, tracks),
+            "decision": _decision(result.decision, tracks, ids=not s.blind),
             "progress": _progress(s.progress()),
             **(extra or {}),
         }

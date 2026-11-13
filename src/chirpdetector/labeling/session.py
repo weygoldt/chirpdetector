@@ -141,14 +141,19 @@ class Progress:
         return self.total - self.labelled - self.skipped
 
 
-def describe(decision: Decision, view_tracks: tuple[TrackView, ...] = ()) -> str:
-    """Short text of a decision, e.g. ``chirp -> 2 (id 7)``."""
+def describe(
+    decision: Decision, view_tracks: tuple[TrackView, ...] = (), *, ids: bool = True
+) -> str:
+    """Short text of a decision, e.g. ``chirp -> 2 (id 7)`` (``chirp -> 2``
+    without ``ids``, as blind sessions show it)."""
     if decision.label == SKIP:
         return "skipped"
     if decision.label == "chirp" and decision.emitter_id is not None:
         key = next(
             (t.key for t in view_tracks if t.track_id == decision.emitter_id), None
         )
+        if not ids:
+            return f"chirp -> {key}" if key is not None else "chirp"
         number = f"{key} " if key is not None else ""
         return f"chirp -> {number}(id {decision.emitter_id})"
     return {
@@ -177,6 +182,13 @@ class LabelSession:
         Recordings and tracks; default: the queue's trial paths.
     background
         Render prefetched views in a worker thread.
+    blind
+        Blind labelling (``--blind``): the frontends draw no box (only a
+        time marker at its centre), never show or send the candidate's
+        score, source or predicted emitter, and show tracks by their
+        on-screen number only (no track ids, no track gaps: in simulated
+        scenes they tell simulated from real background fish); every
+        decision records ``blind`` and ``prediction_shown`` False.
 
     Raises
     ------
@@ -195,6 +207,7 @@ class LabelSession:
         frontend: str = "mpl",
         sources: TrialSources | None = None,
         background: bool = True,
+        blind: bool = False,
     ) -> None:
         if not tolerance_hz > 0:
             msg = f"tolerance_hz must be > 0, got {tolerance_hz}"
@@ -204,6 +217,7 @@ class LabelSession:
         self.config = config or ViewConfig()
         self.tolerance_hz = float(tolerance_hz)
         self.frontend = frontend
+        self.blind = bool(blind)
         self.sources = sources or TrialSources.from_queue(queue)
         start = self.config.window_s
         other = ALT_WINDOW_S[1] if start == ALT_WINDOW_S[0] else ALT_WINDOW_S[0]
@@ -384,8 +398,11 @@ class LabelSession:
         click_offset_hz: float | None = None,
         via: str = "",
         prediction_shown: bool | None = None,
+        elapsed_s: float | None = None,
     ) -> ActionResult:
         item = self.item(index)
+        if self.blind:
+            prediction_shown = False
         recording_dir, tracks_dir = self.sources.paths[item.trial]
         if window_s is None and label != SKIP:
             window_s = self.config.window_s
@@ -406,9 +423,11 @@ class LabelSession:
                 prediction_shown=prediction_shown,
                 recording_dir=recording_dir,
                 tracks_dir=tracks_dir,
+                elapsed_s=elapsed_s,
+                blind=self.blind,
             )
             next_index = self.next_index(index)
-        text = describe(decision, self.tracks(index))
+        text = describe(decision, self.tracks(index), ids=not self.blind)
         return ActionResult(
             ok=True,
             message=f"#{index + 1}: {text}",
@@ -425,8 +444,13 @@ class LabelSession:
         *,
         window_s: float | None = None,
         prediction_shown: bool = False,
+        elapsed_s: float | None = None,
     ) -> ActionResult:
-        """Chirp from the track snapped to a click at ``(t_s, f_hz)``."""
+        """Chirp from the track snapped to a click at ``(t_s, f_hz)``.
+
+        ``elapsed_s`` (all actions): seconds since the frontend showed the
+        item, stored with the decision.
+        """
         tracks = self.tracks(index)
         found = snap(tracks, t_s, f_hz, self.tolerance_hz)
         if found is None:
@@ -449,6 +473,7 @@ class LabelSession:
             click_offset_hz=found.offset_hz,
             via="mouse",
             prediction_shown=prediction_shown,
+            elapsed_s=elapsed_s,
         )
 
     def pick(
@@ -458,6 +483,7 @@ class LabelSession:
         *,
         window_s: float | None = None,
         prediction_shown: bool = False,
+        elapsed_s: float | None = None,
     ) -> ActionResult:
         """Chirp from the track numbered ``key`` on screen."""
         tracks = self.tracks(index)
@@ -476,6 +502,7 @@ class LabelSession:
             emitter_baseline_hz=track.baseline_hz,
             via="key",
             prediction_shown=prediction_shown,
+            elapsed_s=elapsed_s,
         )
 
     def mark(
@@ -486,16 +513,22 @@ class LabelSession:
         window_s: float | None = None,
         prediction_shown: bool = False,
         via: str = "key",
+        elapsed_s: float | None = None,
     ) -> ActionResult:
         """``not_chirp`` or ``chirp_emitter_unclear``."""
         if label not in LABELS or label == "chirp":
             msg = f"mark takes not_chirp or chirp_emitter_unclear, got {label!r}"
             raise ValueError(msg)
         return self._record(
-            index, label, window_s, via=via, prediction_shown=prediction_shown
+            index,
+            label,
+            window_s,
+            via=via,
+            prediction_shown=prediction_shown,
+            elapsed_s=elapsed_s,
         )
 
-    def skip(self, index: int) -> ActionResult:
+    def skip(self, index: int, *, elapsed_s: float | None = None) -> ActionResult:
         """Move on without deciding (logged unless the item is labelled)."""
         if self.status(index) == "labelled":
             return ActionResult(
@@ -504,7 +537,7 @@ class LabelSession:
                 index=index,
                 next_index=self.next_index(index),
             )
-        return self._record(index, SKIP, None)
+        return self._record(index, SKIP, None, elapsed_s=elapsed_s)
 
     def undo(self) -> ActionResult:
         """Revert this labeller's latest action."""
@@ -517,7 +550,7 @@ class LabelSession:
         tracks = self.tracks(index) if index is not None else ()
         return ActionResult(
             ok=True,
-            message=f"undid {describe(decision, tracks)} on {where}",
+            message=f"undid {describe(decision, tracks, ids=not self.blind)} on {where}",
             index=index,
             decision=decision,
             next_index=index,
