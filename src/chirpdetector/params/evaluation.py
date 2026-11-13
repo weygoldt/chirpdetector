@@ -851,7 +851,17 @@ def natural_prior_weights(
     ids = np.asarray(template_ids, dtype=np.int64)
     if not options.get("equalize", True):
         return np.ones(ids.size), {"equalized": False}
-    pool = TemplatePool.open(ChirpConfig(library=str(templates["path"])))
+    # Scenes restricted to a fish-disjoint template split (gridtools
+    # ``chirps.template_split``) drew from that split's pool, binned on the
+    # whole eligible pool's edges; rebuild exactly that.
+    split = templates.get("split")
+    pool = TemplatePool.open(
+        ChirpConfig(
+            library=str(templates["path"]),
+            template_split=None if split is None else split["name"],
+            template_splits=None if split is None else str(split["path"]),
+        )
+    )
     if pool.view.n_templates != int(templates.get("n_eligible", pool.view.n_templates)):
         msg = (
             f"the rebuilt pool has {pool.view.n_templates} templates, the scenes "
@@ -860,7 +870,10 @@ def natural_prior_weights(
         raise ValueError(msg)
     bins = tuple(options.get("bins", pool.bins))
     alpha = float(options.get("alpha", 0.6))
-    eq = pool.view.equalization_bins(bins, spacing=options.get("spacing", "log"))
+    edges = None if pool.split is None else pool.split.edges
+    eq = pool.view.equalization_bins(
+        bins, spacing=options.get("spacing", "log"), edges=edges
+    )
     position = {int(t): k for k, t in enumerate(eq.template_ids.tolist())}
     missing = sorted({int(i) for i in ids} - set(position))
     if missing:

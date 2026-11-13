@@ -262,6 +262,48 @@ def test_natural_prior_weights(params_scenes: Path) -> None:
         natural_prior_weights(ids, scenes, level="individual")
 
 
+def test_natural_prior_weights_on_template_split_scenes(
+    params_library: Path, tmp_path: Path
+) -> None:
+    """A scene drawn from one fish-disjoint template split rebuilds that
+    split's pool (binned on the whole pool's edges), not the whole library."""
+    from dataclasses import replace
+
+    from gridtools.sim.config import ChirpConfig, PopulationConfig
+    from gridtools.sim.scene import simulate_scene, write_scene
+    from gridtools.templates import load_library
+    from gridtools.templates.splits import assign_template_splits, write_splits
+
+    from chirpdetector.params.evaluation import natural_prior_weights
+
+    from ..data.conftest import scene_config
+
+    splits = assign_template_splits(load_library(params_library), seed=0)
+    path = write_splits(splits, tmp_path / "splits.json", params_library)
+    config = scene_config(
+        params_library,
+        layout=(3, 3),
+        population=PopulationConfig(n_fish=(2, 2)),
+        chirps=ChirpConfig(
+            library=str(params_library),
+            rate_hz=(1.2, 1.4),
+            template_split="train",
+            template_splits=str(path),
+        ),
+    )
+    scene = simulate_scene(replace(config, name="params_split"), 3)
+    directory = write_scene(scene, tmp_path / "train" / "000003", plots=False)
+    record = json.loads((directory / "scene.json").read_text())["templates"]
+    ids = pd.read_csv(directory / "chirps.csv")["template_id"].to_numpy()
+    assert ids.size > 0
+    weights, info = natural_prior_weights(ids, [directory])
+    assert record["split"]["name"] == "train"
+    assert info["pool_size"] == record["split"]["n_templates"]
+    assert info["pool_size"] < record["split"]["n_eligible_all"]
+    assert weights.mean() == pytest.approx(1.0)
+    assert (weights > 0).all()
+
+
 def test_a_chirp_truth_ignores_the_emitters_other_chirps(clean_scene: Path) -> None:
     """A window reaching into the next chirp of the same fish must not change
     the truth: the peak and undershoot of a neighbour are not this chirp's."""
