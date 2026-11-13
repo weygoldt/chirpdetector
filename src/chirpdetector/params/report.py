@@ -624,9 +624,10 @@ def real_section(real: dict[str, Any], *, figure: bool = False) -> list[str]:
         "competition recordings were detected (and matched) by the detector. The "
         "reference is the per-period parameters of each chirp's extracted "
         "frequency trace; differences are agreement, not error. These chirps are "
-        "also templates of the simulation library (the decoder trained on them in "
-        "simulated scenes), and all are big chirps: real small chirps are not "
-        "checked here.",
+        "also templates of the simulation library, so the decoder may have seen "
+        "their shapes in simulated scenes (all of them with one template pool for "
+        "all splits; only those of training-split fish with fish-disjoint template "
+        "splits), and all are big chirps: real small chirps are not checked here.",
         "",
         _table(pd.DataFrame(rows)) if rows else "(too few detected)",
         "",
@@ -670,13 +671,31 @@ def _reuse_lines(reuse: dict[str, Any]) -> list[str]:
             "- Template reuse between training and test chirps: unknown (the "
             "training sample set is gone and the bundle predates recording it)."
         ]
+    group_seen = float(reuse["fraction_group_seen"])
+    if group_seen == 0.0:
+        meaning = (
+            "No test chirp comes from an individual whose templates the decoder "
+            "trained on (fish-disjoint template splits), so these numbers measure "
+            "new fish."
+        )
+    elif group_seen < 1.0:
+        meaning = (
+            "Part of the test chirps come from individuals the decoder trained on, "
+            "so these numbers mix known and new fish; the breakdown 'by template' "
+            "compares seen and new templates."
+        )
+    else:
+        meaning = (
+            "All test chirps come from individuals the decoder trained on (one "
+            "template pool for all splits), so these numbers measure known chirp "
+            "shapes in new scenes, not new fish; the breakdown 'by template' "
+            "compares seen and new templates."
+        )
     return [
         f"- **Template reuse**: {100 * reuse['fraction_template_seen']:.1f} % of the "
         "test chirps use a chirp template that also occurs among the decoder's "
-        f"training chirps, {100 * reuse['fraction_group_seen']:.1f} % a template of an "
-        "individual (template group) that does. The simulator draws all splits from "
-        "one library, so these numbers measure known chirp shapes in new scenes, not "
-        "new fish; the breakdown 'by template' compares seen and new templates."
+        f"training chirps, {100 * group_seen:.1f} % a template of an individual "
+        f"(template group) that does. {meaning}"
     ]
 
 
