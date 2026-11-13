@@ -7,10 +7,10 @@ geometry and snapping are the same code.
 A view has two panels sharing the time axis:
 
 ``overview``
-    The box padded by ``pad_s`` in time, and from the lowest to the highest
-    of the box and every live track, padded by ``pad_hz``, in frequency
-    (the chirp's whole shape), with the selected window (``w`` toggles
-    204.8 / 51.2 ms).
+    ``span_s`` (2 s) centred on the box in time and ``span_hz`` (500 Hz) in
+    frequency, centred on the box and the baselines near it (both grow if
+    the box plus ``pad_s``/``pad_hz`` and those baselines need more), with
+    the selected window (``w`` toggles 204.8 / 51.2 ms).
 ``zoom``
     The baselines near the box only: from ``zoom_pad_hz`` below the lowest
     to ``zoom_pad_hz`` above the highest live track whose baseline is
@@ -20,6 +20,10 @@ A view has two panels sharing the time axis:
     baselines a few Hz apart). Spectra are zero-padded to ``zoom_bin_hz``
     bins (sinc interpolation; the resolution is still that of the window),
     so a few Hz span many pixels.
+
+Colours run from the ``floor_percentile`` (5th) percentile of a panel's
+dB values to its maximum, so the noise floor stays visible as texture
+instead of clipping to black.
 
 A track is live if its detections around the box centre are at most
 ``max_gap_s`` apart. wavetracker tracks often have gaps of a few seconds
@@ -75,11 +79,17 @@ class ViewConfig:
 
     Parameters
     ----------
+    span_s
+        Time span of both panels, centred on the box (2 s).
+    span_hz
+        Frequency span of the overview, centred on the box and the
+        baselines near it (500 Hz).
     pad_s
-        Time shown before the box start and after the box end.
+        Least time shown before the box start and after the box end (the
+        span grows for chirps longer than ``span_s``).
     pad_hz
-        Overview: frequency shown below the lowest and above the highest of
-        box and live tracks.
+        Overview: least frequency shown below the lowest and above the
+        highest of the box and the baselines near it.
     window_s
         Overview spectrogram window (0.2048 s: 4.9 Hz resolution, separates
         close baselines; 0.0512 s shows the chirp's shape).
@@ -87,11 +97,9 @@ class ViewConfig:
         Window of the baseline zoom (whatever the overview shows).
     hop_s
         Hop between spectra.
-    db_range
-        Colour range below the overview's maximum.
-    zoom_db_range
-        Colour range below the zoom panel's maximum (narrower, so the
-        baseline peaks stand out).
+    floor_percentile
+        Lower colour limit of both panels: this percentile of the panel's
+        dB values (the noise floor stays visible); the upper is the maximum.
     overview_fft_pad
         Zero-padding factor of the overview's spectra.
     zoom_bin_hz
@@ -110,13 +118,14 @@ class ViewConfig:
         Points of each track's polyline across the window.
     """
 
+    span_s: float = 2.0
+    span_hz: float = 500.0
     pad_s: float = 0.25
     pad_hz: float = 40.0
     window_s: float = 0.2048
     zoom_window_s: float = 0.2048
     hop_s: float = 0.0016
-    db_range: float = 45.0
-    zoom_db_range: float = 30.0
+    floor_percentile: float = 5.0
     overview_fft_pad: int = 4
     zoom_bin_hz: float = 0.25
     zoom_pad_hz: float = 8.0
@@ -138,8 +147,11 @@ class ViewConfig:
         if min(self.pad_s, self.pad_hz, self.zoom_pad_hz, self.near_below_hz) < 0:
             msg = "paddings must be >= 0"
             raise ValueError(msg)
-        if min(self.db_range, self.zoom_db_range, self.zoom_bin_hz) <= 0:
-            msg = "db_range, zoom_db_range and zoom_bin_hz must be > 0"
+        if min(self.span_s, self.span_hz, self.zoom_bin_hz) <= 0:
+            msg = "span_s, span_hz and zoom_bin_hz must be > 0"
+            raise ValueError(msg)
+        if not 0 <= self.floor_percentile < 100:
+            msg = "floor_percentile must lie in [0, 100)"
             raise ValueError(msg)
         if self.zoom_min_span_hz <= 0:
             msg = "zoom_min_span_hz must be > 0"
@@ -277,14 +289,24 @@ def prediction_of(item: QueueItem) -> Prediction | None:
     )
 
 
+def time_window(item: QueueItem, config: ViewConfig) -> tuple[float, float]:
+    """Both panels' time span: ``span_s`` centred on the box, or the box
+    padded by ``pad_s`` if that is longer."""
+    centre = 0.5 * (item.t_start_s + item.t_end_s)
+    half = max(
+        0.5 * config.span_s, 0.5 * (item.t_end_s - item.t_start_s) + config.pad_s
+    )
+    return centre - half, centre + half
+
+
 def track_views(
     tracks: Tracks, item: QueueItem, config: ViewConfig
 ) -> tuple[TrackView, ...]:
     """The tracks live at the box centre, numbered by baseline.
 
-    Polylines span the overview's time window (box padded by ``pad_s``).
+    Polylines span the panels' time window (:func:`time_window`).
     """
-    t0, t1 = item.t_start_s - config.pad_s, item.t_end_s + config.pad_s
+    t0, t1 = time_window(item, config)
     grid = np.linspace(t0, t1, config.track_points)
     found: list[
         tuple[float, int, npt.NDArray[np.float64], npt.NDArray[np.float64], float]
@@ -321,20 +343,20 @@ def view_windows(
 ) -> dict[str, tuple[float, float, float, float]]:
     """Requested ``(t0, t1, f0, f1)`` of the overview and zoom panels."""
     nyquist = 0.5 * samplerate_hz
-    t0, t1 = item.t_start_s - config.pad_s, item.t_end_s + config.pad_s
-    lows = [item.f_low_hz, *(float(t.freqs_hz.min()) for t in tracks)]
-    highs = [item.f_high_hz, *(float(t.freqs_hz.max()) for t in tracks)]
-    overview = (
-        t0,
-        t1,
-        max(0.0, min(lows) - config.pad_hz),
-        min(nyquist, max(highs) + config.pad_hz),
-    )
-    near = [
+    t0, t1 = time_window(item, config)
+    close = [
         t
         for t in tracks
         if item.f_low_hz - config.near_below_hz <= t.baseline_hz <= item.f_high_hz
-    ] or list(tracks)
+    ]
+    lo = min([item.f_low_hz, *(float(t.freqs_hz.min()) for t in close)])
+    hi = max([item.f_high_hz, *(float(t.freqs_hz.max()) for t in close)])
+    lo, hi = lo - config.pad_hz, hi + config.pad_hz
+    if hi - lo < config.span_hz:
+        centre = 0.5 * (lo + hi)
+        lo, hi = centre - 0.5 * config.span_hz, centre + 0.5 * config.span_hz
+    overview = (t0, t1, max(0.0, lo), min(nyquist, hi))
+    near = close or list(tracks)
     if near:
         lo = min(float(t.freqs_hz.min()) for t in near) - config.zoom_pad_hz
         hi = max(float(t.freqs_hz.max()) for t in near) + config.zoom_pad_hz
@@ -362,9 +384,9 @@ def _panel(
         rec, window, window_s=window_s, hop_s=config.hop_s, fft_pad=fft_pad
     )
     vmax = float(spec.db.max())
-    db_range = config.zoom_db_range if name == "zoom" else config.db_range
+    floor = float(np.percentile(spec.db, config.floor_percentile))
     return Panel(
-        name=name, db=spec.db, extent=spec.extent, clim=(vmax - db_range, vmax)
+        name=name, db=spec.db, extent=spec.extent, clim=(min(floor, vmax - 1.0), vmax)
     )
 
 

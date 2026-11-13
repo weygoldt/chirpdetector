@@ -158,7 +158,7 @@ def test_tracks_are_numbered_by_baseline_at_the_box_start() -> None:
     assert [(v.key, v.track_id) for v in views] == [(1, 1), (2, 0)]
     assert views[1].baseline_hz == pytest.approx(708.0)
     assert views[0].baseline_hz == pytest.approx(704.0)
-    t0, t1 = 4.0 - 0.25, 4.1 + 0.25
+    t0, t1 = 4.05 - 1.0, 4.05 + 1.0  # span_s (2 s) centred on the box
     assert views[1].times_s[0] == pytest.approx(t0)
     assert views[1].times_s[-1] == pytest.approx(t1)
     np.testing.assert_allclose(views[1].freqs_hz, 712.0 - views[1].times_s)
@@ -199,13 +199,29 @@ def test_zoom_spans_the_near_baselines_only() -> None:
     windows = view_windows(item, views, config, 20_000.0)
     t0, t1, lo, hi = windows["zoom"]
     assert (lo, hi) == pytest.approx((690.0, 714.0))  # 4 Hz + 2 x 8 Hz < 24 Hz
-    assert windows["overview"][2:] == pytest.approx((655.0, 940.0))
-    assert (t0, t1) == pytest.approx((3.75, 4.35))
+    # overview: 500 Hz centred on box and near baselines (655-860 Hz needed)
+    assert windows["overview"][2:] == pytest.approx((507.5, 1007.5))
+    assert (t0, t1) == pytest.approx((3.05, 5.05))  # 2 s centred on the box
     # a 60 Hz pair: the zoom covers both baselines plus the padding
     views = track_views(_tracks((700.0, 0), (760.0, 0)), item, config)
     assert view_windows(item, views, config, 20_000.0)["zoom"][2:] == pytest.approx(
         (692.0, 768.0)
     )
+
+
+def test_spans_grow_for_long_chirps_and_wide_baselines() -> None:
+    config = ViewConfig()
+    item = _item((4.0, 6.5, 700.0, 1350.0))  # a 2.5 s, 650 Hz box
+    views = track_views(
+        _tracks(
+            (690.0, 0),
+        ),
+        item,
+        config,
+    )
+    t0, t1, lo, hi = view_windows(item, views, config, 20_000.0)["overview"]
+    assert (t0, t1) == pytest.approx((3.75, 6.75))  # box + pad_s
+    assert (lo, hi) == pytest.approx((650.0, 1390.0))  # baseline/box + pad_hz
 
 
 def test_zoom_falls_back_to_all_tracks_and_to_the_box() -> None:
@@ -242,7 +258,10 @@ def test_panels_match_their_windows(rendered) -> None:
     # zoom bins are at most zoom_bin_hz wide (zero padding)
     zoom = view.zoom
     assert (zoom.extent[3] - zoom.extent[2]) / zoom.db.shape[0] <= 0.25 + 1e-9
-    assert zoom.clim[1] - zoom.clim[0] == 30.0
+    for panel in (view.overview, zoom):  # noise floor to peak
+        assert panel.clim == pytest.approx(
+            (float(np.percentile(panel.db, 5.0)), float(panel.db.max()))
+        )
 
 
 def test_zoom_peaks_sit_on_the_tracks(rendered) -> None:

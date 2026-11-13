@@ -123,6 +123,13 @@ def label_emitters(
     bins: Annotated[
         str, typer.Option(help="Lower edges of the ΔF bins in Hz; the last is open.")
     ] = "0,10,25,50,100",
+    span_s: Annotated[
+        float, typer.Option(help="Time span of the single view, centred on the box.")
+    ] = 2.0,
+    span_hz: Annotated[
+        float,
+        typer.Option(help="Frequency span of the single view's overview panel."),
+    ] = 500.0,
     pad_s: Annotated[float, typer.Option(help="Time padding around the box.")] = 0.25,
     pad_hz: Annotated[
         float, typer.Option(help="Frequency padding around tracks and box.")
@@ -247,7 +254,12 @@ def label_emitters(
                 queue,
                 store,
                 config=ViewConfig(
-                    pad_s=pad_s, pad_hz=pad_hz, window_s=window_s, max_gap_s=track_gap_s
+                    span_s=span_s,
+                    span_hz=span_hz,
+                    pad_s=pad_s,
+                    pad_hz=pad_hz,
+                    window_s=window_s,
+                    max_gap_s=track_gap_s,
                 ),
                 tolerance_hz=tolerance_hz,
                 frontend="browser" if serve else "mpl",
