@@ -276,8 +276,10 @@ class LabelServer:
         tracks = s.tracks(index)
         next_index = s.next_index(index)
         described: dict[str, Any] = {
-            "item_id": item.item_id,
-            "trial": item.trial,
+            # blind: no recording name or item id either (repeats of earlier
+            # items, or a recording's name, would hint at the answer)
+            "item_id": "" if s.blind else item.item_id,
+            "trial": "" if s.blind else item.trial,
             "t_center_s": item.t_center_s,
             "df_bin": item.df_bin,
             "delta_f_hz": _num(item.delta_f_hz),

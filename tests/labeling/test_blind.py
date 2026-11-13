@@ -81,6 +81,8 @@ def test_server_never_sends_box_or_model_output(
             "hint_box",  # fixed size, never the box's edges (checked below)
         }
         assert view["item"]["t_center_s"] == pytest.approx(4.0)
+        # no recording name or item id: repeats or scene names would hint
+        assert (view["item"]["item_id"], view["item"]["trial"]) == ("", "")
         # track ids and gaps would tell simulated from real background fish
         assert [t["track_id"] for t in view["tracks"]] == [None, None]
         assert {t["gap_s"] for t in view["tracks"]} == {0.0}
@@ -150,6 +152,7 @@ def test_matplotlib_blind_view(blind_session: LabelSession) -> None:
         info = lab.info.get_text()
         assert "t 4.00 s" in info
         assert "3.930" not in info  # no box edges
+        assert "2000-01-01-10_00" not in info  # no recording name
         for leak in ("700.4", "model", "score", "e: model"):
             assert leak not in info
         assert "(id" not in info

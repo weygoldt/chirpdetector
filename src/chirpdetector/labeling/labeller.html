@@ -107,7 +107,7 @@ function renderBar() {
     (t.track_id !== null ? ` (id ${t.track_id}` + (t.gap_s > 1 ? `, gap ${t.gap_s.toFixed(1)} s)` : ")") : "")).join("   ") || "none";
   const state = v.decision ? v.decision.text : v.status;
   const when = st.blind ? `t ${it.t_center_s.toFixed(2)} s` : `${it.t_start_s.toFixed(3)}-${it.t_end_s.toFixed(3)} s`;
-  let info = `${it.trial}   ${when}   ΔF ${fmt(it.delta_f_hz, 1)} Hz (${it.df_bin})   tracks ${tracks}   [${state}]`;
+  let info = `${it.trial ? it.trial + "   " : ""}${when}   ΔF ${fmt(it.delta_f_hz, 1)} Hz (${it.df_bin})   tracks ${tracks}   [${state}]`;
   const pr = v.prediction;
   if (pr && S.showPred) {
     const parts = ["model:"];
