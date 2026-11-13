@@ -79,28 +79,20 @@ forbids downloads. Details: [docs/models.md](docs/models.md).
 You need a recording directory with the raw data (fishgrid
 `traces-grid1.raw` with its `fishgrid.cfg`, or one multichannel wav file)
 and the wavetracker frequency tracks of its fish (`fund_v.npy`,
-`ident_v.npy`, `idx_v.npy`, `times.npy`). Write a run config:
-
-```toml
-# run.toml
-[run]
-name = "first_run"
-out = "detections"      # relative to this file
-```
-
-and run the pipeline:
+`ident_v.npy`, `idx_v.npy`, `times.npy`). Then:
 
 ```sh
-chirpdetector run run.toml /path/to/recording               # on a GPU
-chirpdetector run run.toml /path/to/recording --device cpu  # without one
+chirpdetector run --out detections /path/to/recording
 ```
 
-The detector and the decoder default to the released models. The output is
-in `detections/first_run/<recording>/`: `chirps_rtdetr.parquet` (one row per
+This uses the released detector and decoder and every default setting, on
+CUDA if available (`--device cpu` forces the CPU). The output is in
+`detections/default/<recording>/`: `chirps_rtdetr.parquet` (one row per
 detection), `chirp_times_rtdetr.npy` and `chirp_ids_rtdetr.npy`,
 `meta.json`, `qc/qc.md` and a few annotated windows. Rows with `chirp ==
 True` are the chirps at the operating threshold (0.5); `track_id` is the
-emitter's track.
+emitter's track. A run config (`chirpdetector run run.toml RECORDING`)
+changes any setting; [`examples/run.toml`](examples/run.toml) lists them.
 
 [docs/quickstart.md](docs/quickstart.md) walks through this on a simulated
 recording, including reading the table and re-rendering a window.
@@ -129,29 +121,26 @@ before relying on these numbers.
 
 ## Documentation
 
-| page | contents |
-|---|---|
-| [Installation](docs/installation.md) | uv and pip, extras, GPU |
-| [Quickstart](docs/quickstart.md) | the pipeline on a recording in five minutes |
-| [Pretrained models](docs/models.md) | download, cache, offline use, bundles |
-| [The production pipeline](docs/pipeline.md) | run config, outputs, chirp table, legacy arrays, QC, windows, render |
-| [Python API](docs/api.md) | `predict_span`, bundles, reading the outputs |
-| [Post-processing](docs/postprocessing.md) | harmonic copies, duplicates, re-attribution |
-| [Chirp parameters](docs/decoder.md) | what the decoder estimates and how to use it |
-| [Click removal](docs/clicks.md) | when it runs and what it protects |
-| [Detector datasets](docs/datasets.md) | from simulated scenes and hand labels |
-| [Training a detector](docs/training.md) | dual-head (default) and YOLO26, bundles |
-| [Training the decoder](docs/decoder-training.md) | samples, calibration, evaluation |
-| [Evaluation](docs/evaluation.md) | matching rule, metrics, outputs |
-| [Labelling](docs/labelling.md) | `label-emitters`: frontends, keys, candidates, blind mode |
-| [Human against model](docs/benchmark.md) | `label-benchmark` |
-| [Design notes](docs/design.md) | linear frequency, footprint boxes, emitter head, calibration |
-| [Limitations](docs/limitations.md) | what the numbers do and do not show |
-| [Command line](docs/cli.md) | every command |
-| [Development](docs/development.md) | tests, checks, the docs site |
+Start at [docs/README.md](docs/README.md). The pages:
 
-The same pages build as a site with `uvx --from mkdocs==1.6.1 --with
-mkdocs-material==9.8.1 mkdocs build --strict`.
+- [Installation](docs/installation.md): uv and pip, extras, GPU
+- [Quickstart](docs/quickstart.md): the pipeline on a recording in five minutes
+- [Pretrained models](docs/models.md): download, cache, offline use, bundles
+- [The production pipeline](docs/pipeline.md): run config, outputs, chirp table, legacy arrays, QC, windows, render
+- [Python API](docs/api.md): `predict_span`, bundles, reading the outputs
+- [Post-processing](docs/postprocessing.md): harmonic copies, duplicates, re-attribution
+- [Chirp parameters](docs/decoder.md): what the decoder estimates and how to use it
+- [Click removal](docs/clicks.md): when it runs and what it protects
+- [Detector datasets](docs/datasets.md): from simulated scenes and hand labels
+- [Training a detector](docs/training.md): dual-head (default) and YOLO26, bundles
+- [Training the decoder](docs/decoder-training.md): samples, calibration, evaluation
+- [Evaluation](docs/evaluation.md): matching rule, metrics, outputs
+- [Labelling](docs/labelling.md): `label-emitters`, both frontends, keys, candidates, blind mode
+- [Human against model](docs/benchmark.md): `label-benchmark`
+- [Design notes](docs/design.md): linear frequency, footprint boxes, emitter head, calibration
+- [Limitations](docs/limitations.md): what the numbers do and do not show
+- [Command line](docs/cli.md): every command
+- [Development](docs/development.md): tests and checks
 
 ## Versions
 

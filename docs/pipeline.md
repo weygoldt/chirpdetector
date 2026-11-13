@@ -6,16 +6,20 @@ harmonic copies and duplicates, and writes one table per recording with
 everything needed to analyse and audit the result.
 
 ```sh
+chirpdetector run --out OUT REC_DIR...                # no config: released models, every default
 chirpdetector run CONFIG.toml REC_DIR...              # some recordings
 chirpdetector run CONFIG.toml --dataset ROOT          # every recording directory in ROOT
 chirpdetector run CONFIG.toml REC_DIR --dry-run       # first 300 s, into run '<name>_dryrun'
 chirpdetector run CONFIG.toml --dataset ROOT --list   # what is done and what is left
 ```
 
+Without a config file, `--out` is required, the run is called `default`,
+and the device is CUDA if available, else the CPU.
+
 | option | effect |
 |---|---|
 | `--dataset ROOT` | process every recording directory in `ROOT` |
-| `--out`, `--name` | override `[run] out` and `[run] name` |
+| `--out`, `--name` | override `[run] out` and `[run] name` (`--out` is required without a config) |
 | `--dry-run` | only `--limit-s` (default 300 s) of each recording, into the run `<name>_dryrun` |
 | `--limit-s S`, `--start-s T` | process only `[T, T + S)` of each recording |
 | `--redo` | recompute recordings that are complete |
@@ -57,16 +61,41 @@ range; otherwise it is recomputed.
 
 Only `[run] name` is required. Unknown keys are refused, so a typo cannot
 silently fall back to a default. Relative paths are relative to the config
-file's directory. All keys with their defaults (`examples/run.toml`):
+file's directory. [`examples/run.toml`](../examples/run.toml) lists every
+key with its default; the sections:
 
 ```toml
---8<-- "examples/run.toml"
+[run]
+name = "my_run"               # outputs go to OUT/<name>/<recording>/
+out = "detections"
+
+[models]
+detector = "default"          # released detector, "pretrained:NAME", or a bundle directory
+decoder = "default"           # released decoder, a bundle directory, or "none"
+
+[detection]
+store_threshold = 0.05
+operating_threshold = 0.5
+postprocess = true
+
+[assignment]
+tracks = "."                  # relative to the recording directory
+tolerance_hz = 20.0
+max_gap_s = 10.0
+
+[compute]
+device = "cuda"
+max_vram_fraction = 0.4
+
+[validation]
+windows = 10
 ```
 
 | key | meaning |
 |---|---|
 | `run.out` | output root; the run goes to `OUT/<name>/` (the code default is a path of the development machine: always set it) |
-| `models.detector`, `models.decoder` | `"default"` (the released models), or bundle directories; `decoder = ""` runs without the decoder |
+| `models.detector` | `"default"` (the released detector, the default), `"pretrained:NAME"` (a published model, see [Pretrained models](models.md)), or a bundle directory |
+| `models.decoder` | default: the published decoder trained on the detector's boxes (for the released detector: the released decoder), else none; `"default"`, `"pretrained:NAME"` or a bundle directory; `"none"` (or `""`) runs without the decoder |
 | `models.allow_detector_mismatch` | use a decoder trained on another detector's boxes (its estimates are then not validated) |
 | `detection.store_threshold` | every detection down to this score is stored, so the operating threshold can change later without rerunning |
 | `detection.operating_threshold` | marked in the column `operating`; the legacy arrays, QC and windows use it |
@@ -83,8 +112,10 @@ file's directory. All keys with their defaults (`examples/run.toml`):
 | `validation.windows`, `window_s` | annotated sample windows per recording and their length |
 | `validation.candidates_per_cell`, `seed` | size and seed of the validation sample (`candidates.csv`) |
 
-The resolved config is written next to the outputs (`config.toml`,
-`run.json`, every `meta.json`).
+The resolved config is written to `run.json` and every `meta.json`
+(model references resolved to `pretrained:<versioned name>`, so a run made
+with one release is not resumed with another); a config file is also
+copied to `config.toml`.
 
 ## Outputs
 
@@ -92,7 +123,7 @@ The resolved config is written next to the outputs (`config.toml`,
 OUT/<name>/
   run.json                   manifest: config, code, models, recordings and their status
   run.log                    log of every invocation (appended)
-  config.toml                the config the run was started with
+  config.toml                the config file the run was started with (if any)
   columns.md                 the chirp table's columns, documented
   candidates.csv             validation sample in the labeller's format
   candidates_strata.csv      the same ids with stratum and assignment fields
@@ -203,11 +234,10 @@ post-processing flagged, and re-attributed harmonic copies. Within a
 stratum every recording is equally likely. `candidates_strata.csv` keeps
 the stratum of each candidate for the evaluation.
 
-!!! warning
-    A detection whose box starts before the recording (possible for a chirp
-    in the first 0.1 s) gets a negative `t_start_s`, and `label-emitters`
-    refuses a candidates file with such a row. Drop those rows before
-    labelling.
+> **Note.** A detection whose box starts before the recording (possible
+> for a chirp in the first 0.1 s) gets a negative `t_start_s`, and
+> `label-emitters` refuses a candidates file with such a row. Drop those rows
+> before labelling.
 
 ## Assignment
 

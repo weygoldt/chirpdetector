@@ -5,7 +5,7 @@ with its default. `-v` before the command turns on debug logging.
 
 | command | what | page |
 |---|---|---|
-| `run CONFIG [REC_DIR...] [--dataset ROOT]` | detect, decode and assign chirps in whole recordings (resumable) | [Pipeline](pipeline.md) |
+| `run [CONFIG] [REC_DIR...] [--dataset ROOT] [--out OUT]` | detect, decode and assign chirps in whole recordings (resumable); without a config, `--out` and the released models | [Pipeline](pipeline.md) |
 | `render RUN_DIR RECORDING T0 T1` | re-render a window of a run (PNG + NPZ) | [Pipeline](pipeline.md#sample-windows-and-rendering) |
 | `check-reference CONFIG REC_DIR` | compare the chunked pipeline with `predict_span` on part of a recording | [Pipeline](pipeline.md#checking-the-pipeline) |
 | `models list` / `download [NAME...]` / `path NAME` | the released models: list, download, locate in the cache | [Pretrained models](models.md) |
@@ -31,4 +31,5 @@ with its default. `-v` before the command turns on debug logging.
 | `CHIRP_MAX_VRAM_FRACTION` | cap on this process's share of GPU memory (training and inference; the smaller of it and the config's value applies) |
 | `CHIRPDETECTOR_CACHE` | cache directory of the released models (default `$XDG_CACHE_HOME/chirpdetector`, else `~/.cache/chirpdetector`) |
 | `CHIRPDETECTOR_OFFLINE` | `1`: never download a model |
+| `CHIRPDETECTOR_MODELS_URL` | download the released models from this base URL instead of the GitHub release (mirrors, tests) |
 | `HF_HOME` | Hugging Face cache, where the COCO weights for training the dual-head model are stored |

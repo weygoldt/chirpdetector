@@ -11,7 +11,7 @@ out = "detections"
 
 [models]
 detector = "default"          # the released dual-head detector (downloaded on first use), or a bundle directory
-decoder = "default"           # the released decoder, a bundle directory, or "" for none
+decoder = "default"           # the released decoder, a bundle directory, or "none"
 allow_detector_mismatch = false
 
 [detection]

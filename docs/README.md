@@ -1,4 +1,4 @@
-# chirpdetector
+# chirpdetector documentation
 
 Detect the chirps of wave-type weakly electric fish in multi-electrode grid
 recordings, assign each chirp to the fish that emitted it, and measure its
@@ -6,8 +6,10 @@ height, duration and undershoot.
 
 ```sh
 uv pip install "git+https://github.com/weygoldt/chirpdetector"
-chirpdetector run run.toml /path/to/recording
+chirpdetector run --out detections /path/to/recording
 ```
+
+Back to the [project README](../README.md).
 
 ## How it works
 
@@ -40,13 +42,40 @@ on simulated fish, mixed into real background recordings, with exact
 ground truth. They are evaluated on hand-labelled real recordings, on
 held-out simulations of new fish, and against a human labeller.
 
-## Where to start
+## Pages
 
-- [Installation](installation.md) and the [Quickstart](quickstart.md):
-  the pipeline on a recording.
-- [The production pipeline](pipeline.md): what the outputs contain.
-- [Limitations](limitations.md): what the evaluation shows and what not.
-- [Design notes](design.md): why the parts are built the way they are.
+Getting started
+
+- [Installation](installation.md): uv and pip, extras, GPU memory
+- [Quickstart](quickstart.md): the pipeline on a recording
+- [Pretrained models](models.md): the released detector and decoder, cache, offline use, bundles
+
+Detecting chirps
+
+- [The production pipeline](pipeline.md): `chirpdetector run`, run config, outputs, chirp table, legacy arrays, QC, windows, assignment
+- [Python API](api.md): `predict_span`, bundles, spectrograms, reading the outputs
+- [Post-processing](postprocessing.md): harmonic copies, duplicates, re-attribution
+- [Chirp parameters](decoder.md): height, FWHM, 10 % width, undershoot; calibration
+- [Click removal](clicks.md): the electrode-coincidence guard
+
+Training and evaluation
+
+- [Detector datasets](datasets.md): from simulated scenes and hand-labelled recordings
+- [Training a detector](training.md): dual-head (default) and YOLO26
+- [Training the decoder](decoder-training.md): samples, calibration, evaluation report
+- [Evaluation](evaluation.md): matching rule, metrics, showcase
+
+Labelling
+
+- [Labelling chirps and emitters](labelling.md): `label-emitters`, both frontends, keys, candidates, blind mode, SSH
+- [Human against model](benchmark.md): `label-benchmark`
+
+Background and reference
+
+- [Design notes](design.md): why linear frequency, footprint boxes, the emitter head, calibration
+- [Limitations](limitations.md): what the evaluation shows and what not
+- [Command line](cli.md): every command and environment variable
+- [Development](development.md): tests and checks
 
 ## Performance of the released models
 

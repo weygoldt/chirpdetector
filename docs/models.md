@@ -18,11 +18,28 @@ against the checksums. The cache directory is `$CHIRPDETECTOR_CACHE` if set,
 else `$XDG_CACHE_HOME/chirpdetector`, else `~/.cache/chirpdetector`.
 
 ```sh
-chirpdetector models list                 # names, versions, cached or not
+chirpdetector models list                 # names, aliases, sizes, cached or not
 chirpdetector models download             # all models
-chirpdetector models download detector    # one
-chirpdetector models path decoder         # the bundle directory in the cache
+chirpdetector models download detector    # one (name or alias); --force downloads again
+chirpdetector models path decoder         # the bundle directory in the cache (downloads if missing)
 ```
+
+```text
+$ chirpdetector models list
+NAME                          KIND      ALIAS     SIZE     STATUS
+dualhead-rtdetrv2-r18-sim_v4  detector  detector  77.6 MB  cached
+  dual-head RT-DETRv2-r18: chirp boxes and the emitter's EOD frequency (trained on sim_v4)
+decoder-dualhead-sim_v4       decoder   decoder   3.3 MB   cached
+  chirp-parameter decoder (height, FWHM, width at 10 %, undershoot) for the boxes of dualhead-rtdetrv2-r18-sim_v4
+cache: /home/USER/.cache/chirpdetector
+```
+
+A download goes to a temporary file in the cache; its size and sha256 are
+checked, it is unpacked, the bundle's weights are checked against the
+published hash, and the directory is moved into place
+(`CACHE/<name>/`). Concurrent processes wait for one download. Every use
+re-checks the weights' sha256, so a damaged cache is noticed and downloaded
+again (or reported, offline).
 
 From Python:
 
@@ -34,7 +51,9 @@ bundle_dir = pretrained.download("detector")  # returns the cached bundle direct
 pretrained.path("decoder")
 ```
 
-`"default"` stands for the released model wherever a bundle is expected:
+`"default"` stands for the released model wherever a bundle is expected,
+and `"pretrained:NAME"` for any published model (name or alias); only the
+string is a reference, `Path("default")` is a directory:
 
 ```python
 from chirpdetector.bundle import load_bundle
@@ -46,19 +65,30 @@ chirps = predict_span(
 )
 ```
 
-In a run config, `[models] detector` and `decoder` default to `"default"`.
-Give a bundle directory instead to use another model, or `decoder = ""` to
-run without the decoder.
+`load_params_bundle("default")` (in `chirpdetector.params.bundle`) loads
+the released decoder. In a run config, `[models] detector` defaults to the
+released detector, and `decoder` to the published decoder trained on the
+detector's boxes (the released decoder); give bundle directories to use
+other models, or `decoder = "none"` to run without the decoder.
+`chirpdetector run --out OUT RECORDING` without a config uses both released
+models. The resolved config records the versioned names
+(`pretrained:dualhead-rtdetrv2-r18-sim_v4`), so a run is never resumed with
+another release.
 
 ## Offline use
 
 Download once with `chirpdetector models download`, then set
-`CHIRPDETECTOR_OFFLINE=1`: chirpdetector then never touches the network and
-fails with an error if a model is not cached. Copying the cache directory to
-another machine (and pointing `CHIRPDETECTOR_CACHE` at it) works too.
+`CHIRPDETECTOR_OFFLINE=1` (or `true`, `yes`, `on`): chirpdetector then never
+touches the network and fails with an error that says where to put a model
+that is not cached. Copying the cache directory to another machine (and
+pointing `CHIRPDETECTOR_CACHE` at it) works too. Loading and running a
+model never uses the network. `CHIRPDETECTOR_MODELS_URL` replaces the
+GitHub release as the download location (a mirror: asset `A` is fetched
+from `$CHIRPDETECTOR_MODELS_URL/A`).
 
-Without the automatic download, unzip the release files yourself and give
-the bundle directories by path:
+Or download the zip files from the release page yourself, unzip them
+(each holds one bundle directory of the same name) and give the bundle
+directories by path:
 
 ```toml
 [models]

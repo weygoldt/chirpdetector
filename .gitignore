@@ -26,6 +26,3 @@ tmp/
 .vscode/
 .envrc
 .claude/
-
-# MkDocs build output
-site/

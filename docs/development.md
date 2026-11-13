@@ -24,25 +24,16 @@ uv run pytest
 Test markers: `slow` (long-running), `gpu` (needs CUDA; skipped without
 it), `data` (needs the competition recordings; skipped without them). With
 `CUDA_VISIBLE_DEVICES=""` the suite runs on the CPU only. `tests/test_examples.py`
-loads every config in `examples/`, so the configs the docs embed stay valid.
+loads every config in `examples/`, so the configs the docs refer to stay valid.
 
 ## Documentation
 
-The pages in `docs/` are plain Markdown that render on GitHub and build as
-a site with MkDocs (Material theme; config in `mkdocs.yml`):
-
-```sh
-uvx --from mkdocs==1.6.1 --with mkdocs-material==9.8.1 mkdocs build --strict   # into site/
-uvx --from mkdocs==1.6.1 --with mkdocs-material==9.8.1 mkdocs serve            # live preview
-```
-
-`--8<--` lines include files from the repository (the example configs), so
-the site always shows the configs the tests load. CI builds the site on
-every push. To publish it on the repository's GitHub Pages:
-
-```sh
-uvx --from mkdocs==1.6.1 --with mkdocs-material==9.8.1 mkdocs gh-deploy
-```
+The documentation is plain Markdown in `docs/` (index:
+[docs/README.md](README.md)), read on GitHub. Configs shown in the pages
+are excerpts of the files in [`examples/`](../examples/), which
+`tests/test_examples.py` loads. `tests/test_docs.py` checks that every
+relative link in `README.md` and `docs/*.md` points to an existing file and,
+for a `#fragment`, to an existing heading.
 
 ## Conventions
 

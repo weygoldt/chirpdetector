@@ -16,17 +16,15 @@ This installs [gridtools](https://github.com/weygoldt/gridtools) (recording
 I/O and the simulator) from GitHub as well. Do not install `gridtools` from
 PyPI: that name belongs to an unrelated package.
 
-!!! note "If the plain install fails"
-    Up to `main` 341fee5, chirpdetector found gridtools through a relative
-    path (`../gridtools`), which only works in a checkout of both
-    repositories side by side. With such a version, name both packages and
-    tell uv to ignore that path:
+Versions of chirpdetector up to `main` 341fee5 found gridtools through a
+relative path (`../gridtools`) and fail to install from GitHub. To install
+one of those, name both packages and tell uv to ignore that path:
 
-    ```sh
-    uv pip install --no-sources \
-        "gridtools @ git+https://github.com/weygoldt/gridtools" \
-        "chirpdetector[dualhead,label] @ git+https://github.com/weygoldt/chirpdetector"
-    ```
+```sh
+uv pip install --no-sources \
+    "gridtools @ git+https://github.com/weygoldt/gridtools" \
+    "chirpdetector[dualhead,label] @ git+https://github.com/weygoldt/chirpdetector@341fee5"
+```
 
 ## Into a uv project
 
@@ -40,7 +38,7 @@ uv add "chirpdetector[label] @ git+https://github.com/weygoldt/chirpdetector"   
 | extra | adds | needed for |
 |---|---|---|
 | `label` | matplotlib | `label-emitters` (both frontends render with it), `showcase`, the figures of `evaluate params` and `label-benchmark` |
-| `dualhead` | transformers | the dual-head detector; kept as an alias now that transformers is a core dependency |
+| `dualhead` | nothing new | transformers (the dual-head detector) is a core dependency; the extra is kept so that `chirpdetector[dualhead]` installs keep working |
 
 ## GPU memory
 
@@ -53,15 +51,13 @@ configs; there is no automatic batch sizing.
 
 ## From source
 
-For development, clone both repositories side by side, or the
-[chirp_competition_upgrade](https://github.com/weygoldt/chirp_competition_upgrade)
-workspace that holds both as submodules (private), and see
-[Development](development.md).
-
 ```sh
-git clone https://github.com/weygoldt/gridtools
 git clone https://github.com/weygoldt/chirpdetector
 cd chirpdetector
-uv sync --all-extras
+uv sync --all-extras          # gridtools comes from its GitHub main
 uv run chirpdetector --help
 ```
+
+To change gridtools and chirpdetector together, work in the
+chirp_competition_upgrade workspace (private), which holds both as git
+submodules and installs both editable; see [Development](development.md).

@@ -21,17 +21,46 @@ chirpdetector train detector examples/train_dualhead.toml --dataset DATASET --ru
 chirpdetector train detector examples/train_yolo26s.toml  --dataset DATASET --run-dir runs/yolo26s
 ```
 
-!!! warning "Optimiser defaults"
-    A config without `[model] type` trains the dual-head model, but the
-    `[optim]` defaults (lr0 1e-3, 100 epochs, warm-up 3 epochs, patience 20)
-    were tuned for YOLO26. The dual-head model was trained with lr0 1e-4,
-    lrf 0.05, warm-up 0.5 epochs, weight decay 1e-4, 30 epochs and patience
-    6, as in `examples/train_dualhead.toml`.
+> **Optimiser defaults.** A config without `[model] type` trains the
+> dual-head model, but the `[optim]` defaults (lr0 1e-3, 100 epochs, warm-up
+> 3 epochs, patience 20) were tuned for YOLO26. The dual-head model was
+> trained with lr0 1e-4, lrf 0.05, warm-up 0.5 epochs, weight decay 1e-4,
+> 30 epochs and patience 6, as in
+> [`examples/train_dualhead.toml`](../examples/train_dualhead.toml).
 
 ## Dual-head config
 
+[`examples/train_dualhead.toml`](../examples/train_dualhead.toml), the
+settings of the released detector, abridged:
+
 ```toml
---8<-- "examples/train_dualhead.toml"
+seed = 0
+deterministic = false        # deformable attention has no deterministic CUDA backward
+device = "cuda"
+max_vram_fraction = 0.35
+score_threshold = 0.5
+
+[model]
+type = "dualhead"
+architecture = "rtdetr_v2_r18vd"   # COCO weights from the Hugging Face hub
+pretrained = true
+max_det = 50
+emitter_loss_weight = 10.0
+time_shift_px = 32
+val_max_images = 2000
+
+[optim]
+epochs = 30
+batch = 16
+lr0 = 0.0001
+lrf = 0.05
+warmup_epochs = 0.5
+weight_decay = 0.0001
+patience = 6
+
+[cv]
+n_folds = 0                  # one fit on the train groups,
+final_fit = true             # validated on the val groups
 ```
 
 `[model]` keys of the dual-head model (`chirpdetector.models.dualhead`):
@@ -52,8 +81,24 @@ ships its best validated epoch as the bundle.
 
 ## YOLO26 config
 
+[`examples/train_yolo26s.toml`](../examples/train_yolo26s.toml), the box-only
+reference, abridged:
+
 ```toml
---8<-- "examples/train_yolo26s.toml"
+[model]
+type = "ultralytics-yolo"
+architecture = "yolo26s"     # ultralytics downloads the COCO weights
+pretrained = true
+
+[optim]
+epochs = 80
+batch = 32
+lr0 = 0.001
+patience = 15
+
+[cv]
+n_folds = 0
+final_fit = true
 ```
 
 `[model] architecture` is any YOLO26 size (`yolo26n` ... `yolo26x`); the

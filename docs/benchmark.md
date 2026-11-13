@@ -136,7 +136,6 @@ copies, and worse on false alarms among other models' detections (0.160 vs
 0.073). The human's test-retest agreement on 30 repeated pairs was 0.900
 (Cohen's kappa 0.796); median time per item 1.06 s.
 
-!!! info "Verified"
-    `build`, blind labelling through the server's API, `score` (both report
-    formats), `features`, `gaps` and `build-v2` were run on three 20-s
-    simulated scenes on the CPU.
+> **Verified.** `build`, blind labelling through the server's API, `score`
+> (both report formats), `features`, `gaps` and `build-v2` were run on three
+> 20-s simulated scenes on the CPU.

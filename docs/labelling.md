@@ -134,8 +134,7 @@ shape), no score, source, recording name or predicted emitter (`e` is
 disabled, and the server never sends them). The time per item is stored.
 The [human benchmark](benchmark.md) labels this way.
 
-!!! info "Verified"
-    The browser server was run on the pipeline's `candidates.csv` of a
-    simulated scene (port 8781), in normal and blind mode; labels were posted
-    through its HTTP API (`/api/action`, `/api/undo`) and `label-summary`
-    counted them.
+> **Verified.** The browser server was run on the pipeline's
+> `candidates.csv` of a simulated scene (port 8781), in normal and blind
+> mode; labels were posted through its HTTP API (`/api/action`,
+> `/api/undo`) and `label-summary` counted them.

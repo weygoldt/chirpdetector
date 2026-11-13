@@ -21,57 +21,48 @@ A recording directory holds
   `ident_v.npy`, `idx_v.npy`, `times.npy` (and optionally `sign_v.npy`).
   Without tracks the chirps are detected and measured but not assigned
   (`assign_status = "no_tracks"`). Tracks elsewhere: `[assignment] tracks`
-  in the run config.
+  in a run config (step 6).
 
 The sampling rate does not matter: every setting is in seconds and Hz.
 
-## 3. Write a run config
-
-```toml
-# run.toml
-[run]
-name = "first_run"
-out = "detections"      # relative to this file
-```
-
-Every other setting has a default: the released detector and decoder, a
-store threshold of 0.05, an operating threshold of 0.5, post-processing on,
-assignment within 20 Hz of a track. The full list with defaults is in
-[The production pipeline](pipeline.md#run-config).
-
-## 4. Run
+## 3. Run
 
 ```sh
-chirpdetector run run.toml /path/to/recording --device cpu   # drop --device on a GPU
+chirpdetector run --out detections /path/to/recording
 ```
 
-On first use the two models (81 MB) are downloaded into
-`~/.cache/chirpdetector` ([Pretrained models](models.md)). The run on a
-20-s simulated 9-electrode scene, on the CPU (models already in place;
-paths shortened):
+Without a run config, the pipeline uses the released detector and decoder
+and every default setting (store threshold 0.05, operating threshold 0.5,
+post-processing on, assignment within 20 Hz of a track), on CUDA if
+available, else on the CPU (`--device cpu` forces the CPU). On first use
+the two models (81 MB) are downloaded into `~/.cache/chirpdetector`
+([Pretrained models](models.md)). The run is called `default`.
+
+A 20-s simulated 9-electrode scene on the CPU (paths shortened):
 
 ```text
-INFO chirpdetector.pipeline.run: run quickstart: 1 recordings, 0 complete (skipped), 1 to do -> detections/quickstart
+INFO chirpdetector.pipeline.run: run default: 1 recordings, 0 complete (skipped), 1 to do -> nocfg/default
 INFO chirpdetector.pipeline.run: [1/1] 000000: start
-INFO chirpdetector.pipeline.run: [1/1] 000000: done in 0h00m09s (2x real time): 25 chirps, 25 assigned
-INFO chirpdetector.pipeline.candidates: validation candidates: 19 -> detections/quickstart/candidates.csv
-INFO chirpdetector.pipeline.run: run quickstart: 1 done, 0 skipped, 0 failed
+INFO chirpdetector.pipeline.run: [1/1] 000000: done in 0h00m05s (4x real time): 25 chirps, 25 assigned
+INFO chirpdetector.pipeline.candidates: validation candidates: 19 -> nocfg/default/candidates.csv
+INFO chirpdetector.pipeline.run: run default: 1 done, 0 skipped, 0 failed
 ```
 
 Runs are resumable: run the same command again and finished recordings are
 skipped; `--list` shows what is done.
 
 ```sh
-chirpdetector run run.toml /path/to/recording --list
-chirpdetector run run.toml --dataset /path/to/many/recordings     # every recording directory in it
-chirpdetector run run.toml --dataset /path/to/many/recordings --dry-run   # first 300 s of each
+chirpdetector run --out detections /path/to/recording --list
+chirpdetector run --out detections --dataset /path/to/many/recordings            # every recording directory in it
+chirpdetector run --out detections --dataset /path/to/many/recordings --dry-run  # first 300 s of each
+chirpdetector run --out detections /path/to/recording --start-s 1140 --limit-s 30  # a 30-s span
 ```
 
-## 5. Look at the output
+## 4. Look at the output
 
 ```text
-detections/first_run/
-  run.json  run.log  config.toml  columns.md  candidates.csv  candidates_strata.csv
+detections/default/
+  run.json  run.log  columns.md  candidates.csv  candidates_strata.csv
   <recording>/
     chirps_rtdetr.parquet     one row per detection (score >= 0.05)
     chunks_rtdetr.parquet     one row per processed chunk
@@ -102,7 +93,7 @@ In Python:
 ```python
 import pandas as pd
 
-chirps = pd.read_parquet("detections/first_run/REC/chirps_rtdetr.parquet")
+chirps = pd.read_parquet("detections/default/REC/chirps_rtdetr.parquet")
 chirps = chirps[chirps["chirp"]]  # operating threshold, not flagged
 per_fish = chirps.groupby("track_id").size()
 sizes = chirps[["t_center_s", "track_id", "height_hz", "fwhm_s", "params_ok"]]
@@ -113,17 +104,39 @@ ones are `t_center_s` (chirp time), `track_id` (emitter, wavetracker
 `ident_v` value), `assign_confidence`, `height_hz` and `fwhm_s`
 (calibrated decoder estimates) with `params_ok`.
 
-## 6. Re-render a window
+## 5. Re-render a window
 
 Any window can be drawn again from the run's outputs (the spectrogram is
 recomputed from the raw data):
 
 ```sh
-chirpdetector render detections/first_run REC 5 15
+chirpdetector render detections/default REC 5 15
 ```
 
 This writes a PNG and an NPZ with the data to redraw it to
-`detections/first_run/REC/renders/`.
+`detections/default/REC/renders/`.
+
+## 6. Use a run config
+
+A run config names the run and changes any setting:
+
+```toml
+# run.toml
+[run]
+name = "first_run"
+out = "detections"      # relative to this file
+
+[compute]
+device = "cpu"
+```
+
+```sh
+chirpdetector run run.toml /path/to/recording
+```
+
+The output then goes to `detections/first_run/`, with the config copied to
+`config.toml`. Every key and its default: [The production
+pipeline](pipeline.md#run-config) and [`examples/run.toml`](../examples/run.toml).
 
 ## Next
 
@@ -134,8 +147,6 @@ This writes a PNG and an NPZ with the data to redraw it to
   [`label-emitters`](labelling.md).
 - Score the output against labels: [Evaluation](evaluation.md).
 
-!!! info "Verified"
-    The commands on this page were run on a 20-s simulated scene
-    (`gridtools sim run`, 3 fish on a 3 x 3 grid) on the CPU, with the
-    released bundles given by path; the automatic download is described
-    in [Pretrained models](models.md).
+> **Verified.** The commands on this page were run on the CPU on a 20-s
+> simulated scene (`gridtools sim run`, 3 fish on a 3 x 3 grid) and on 30 s
+> of a real recording, with the models downloaded into a fresh cache.

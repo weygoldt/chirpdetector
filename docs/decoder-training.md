@@ -36,10 +36,35 @@ by seed instead. Only scenes on real background segments are used
 ## Config
 
 Every key is optional; `chirpdetector.params.training` lists the defaults.
-The released decoder was trained with (`examples/train_params.toml`):
+The released decoder was trained with
+[`examples/train_params.toml`](../examples/train_params.toml):
 
 ```toml
---8<-- "examples/train_params.toml"
+seed = 0
+device = "auto"
+max_vram_fraction = 0.1
+workers = 5                   # sample extraction processes
+scene_background = "hybrid"   # only scenes on real background segments
+
+[boxes]
+mode = "detector"             # train on the boxes of the detector that feeds it
+score_threshold = 0.25        # detector boxes kept in the sample set
+
+[crop]
+size = [96, 96]
+margin_rel = 0.15
+canvas_s = 3.2
+
+[optim]
+epochs = 40
+batch = 256
+lr = 0.002
+patience = 8
+min_score = 0.25
+
+[calibration]
+method = "inverse-median"
+min_score = 0.5               # fit on validation boxes at the detector's threshold
 ```
 
 `[boxes] mode = "footprint"` trains on the scenes' footprint boxes
