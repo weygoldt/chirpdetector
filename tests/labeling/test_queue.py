@@ -59,7 +59,22 @@ def test_queue_items_never_carry_v1_assignment(ramp: Path) -> None:
     queue = build_queue([ramp], QueueConfig(per_bin=5))
     fields = set(queue_module.QueueItem.__dataclass_fields__)
     assert not fields & {"track_id", "emitter_hz", "emitter_eodf", "score"}
+    assert all(item.candidate == () for item in queue.items)
     assert "track_id" not in str(queue.to_json()["items"])
+
+
+def test_queue_json_without_new_fields_loads(ramp: Path) -> None:
+    """Queues saved by the first version (no candidate, origin) still load."""
+    queue = build_queue([ramp], QueueConfig(per_bin=5))
+    data = queue.to_json()
+    del data["origin"]
+    for item in data["items"]:
+        del item["candidate"]
+    for trial in data["trials"]:
+        del trial["tracks_path"]
+    again = queue_module.LabelQueue.from_json(data)
+    assert again.items == queue.items
+    assert again.trials[0].tracks_dir == again.trials[0].recording_dir
 
 
 def test_same_seed_same_queue_other_seed_other_queue(ramp: Path) -> None:
