@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 
 __all__ = ["app"]
 
-DEFAULT_LABEL_DIR = Path("/mnt/data1/chirp_v2/labels/emitters")
-
 app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
@@ -66,6 +64,15 @@ def _parse_grid(grid: str) -> tuple[int, int]:
     return rows, cols
 
 
+def _login_name() -> str:
+    """The user's login name, for --labeler."""
+    try:
+        return getpass.getuser()
+    except (OSError, KeyError) as err:  # no login name (e.g. a container)
+        msg = "cannot find your login name: give --labeler NAME"
+        raise typer.BadParameter(msg) from err
+
+
 def _parse_bins(bins: str) -> tuple[float, ...]:
     try:
         return tuple(float(v) for v in bins.split(","))
@@ -76,6 +83,15 @@ def _parse_bins(bins: str) -> tuple[float, ...]:
 
 @app.command("label-emitters")
 def label_emitters(
+    out: Annotated[
+        Path,
+        typer.Option(
+            help=(
+                "Output directory (queue, event log, label CSVs); the same "
+                "command with the same directory resumes."
+            )
+        ),
+    ],
     trial_dirs: Annotated[
         list[Path] | None,
         typer.Argument(
@@ -99,13 +115,10 @@ def label_emitters(
                 "CSV or Parquet of boxes to label instead of v1 detections. "
                 "Required columns: recording, t_start_s, t_end_s, f_low_hz, "
                 "f_high_hz; optional: candidate_id, score, emitter_hz, track_id, "
-                "source, tracks (see the README)."
+                "source, tracks (docs/labelling.md)."
             ),
         ),
     ] = None,
-    out: Annotated[
-        Path, typer.Option(help="Output directory (queue, event log, label CSVs).")
-    ] = DEFAULT_LABEL_DIR,
     per_bin: Annotated[
         int, typer.Option(help="Detections sampled per trial and ΔF bin (v1).")
     ] = 20,
@@ -118,8 +131,9 @@ def label_emitters(
         ),
     ] = True,
     labeler: Annotated[
-        str, typer.Option(help="Name stored with every label.")
-    ] = getpass.getuser(),
+        str | None,
+        typer.Option(help="Name stored with every label (default: your login name)."),
+    ] = None,
     view: Annotated[
         str,
         typer.Option(
@@ -231,6 +245,7 @@ def label_emitters(
     if blind and view == "grid":
         raise typer.BadParameter("--blind needs the single view (the grid draws boxes)")
     out = out.resolve()
+    labeler = labeler or _login_name()
     rows_cols = _parse_grid(grid)
     config = QueueConfig(per_bin=per_bin, seed=seed, bin_edges_hz=_parse_bins(bins))
     if candidates is not None:
@@ -315,8 +330,9 @@ def label_emitters(
 @app.command("label-summary")
 def label_summary(
     out: Annotated[
-        Path, typer.Argument(help="Output directory of label-emitters.")
-    ] = DEFAULT_LABEL_DIR,
+        Path,
+        typer.Argument(metavar="OUT", help="Output directory of label-emitters."),
+    ],
     labeler: Annotated[
         str | None, typer.Option(help="Only this labeller's labels.")
     ] = None,
@@ -742,15 +758,29 @@ def evaluate_params_command(
     real: Annotated[
         bool,
         typer.Option(
-            help="Also check agreement on the harvested real long chirps (library v4)."
+            help=(
+                "Also check agreement on the harvested real long chirps of "
+                "--library (template library v4) in --recordings; skipped "
+                "without --library."
+            )
         ),
     ] = True,
     library: Annotated[
-        Path, typer.Option(help="Template library with the harvested chirps.")
-    ] = Path("/mnt/data1/chirp_v2/templates/v4"),
+        Path | None,
+        typer.Option(
+            exists=True,
+            file_okay=False,
+            help="Template library with the harvested chirps (gridtools.templates).",
+        ),
+    ] = None,
     recordings: Annotated[
-        Path, typer.Option(help="Directory of the competition recordings.")
-    ] = Path("/mnt/data2/2019_tube_competition"),
+        Path | None,
+        typer.Option(
+            exists=True,
+            file_okay=False,
+            help="Directory of the recordings the harvested chirps come from.",
+        ),
+    ] = None,
     workers: Annotated[int, typer.Option(help="Extraction processes.")] = 4,
     device: Annotated[
         str, typer.Option(help="Torch device (auto, cpu, cuda).")
@@ -769,6 +799,9 @@ def evaluate_params_command(
     from chirpdetector.bundle import BundleError
     from chirpdetector.params.evaluation import run_evaluation
 
+    if real and library is not None and recordings is None:
+        msg = "--library needs --recordings (the recordings its chirps come from)"
+        raise typer.BadParameter(msg, param_hint="--recordings")
     try:
         report = run_evaluation(
             bundle,
@@ -829,7 +862,7 @@ def showcase_command(
 
     One panel per snippet and model (tracks, boxes, scores, predicted emitter
     EODf, hand labels, optionally decoded chirp parameters), collected in a
-    contact sheet. Columns already in ``--out`` are kept, so the sheet grows
+    contact sheet. Columns already in --out are kept, so the sheet grows
     with every model tried.
     """
     from chirpdetector.evaluation.showcase import (

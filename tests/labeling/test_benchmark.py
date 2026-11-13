@@ -478,3 +478,48 @@ def test_cli_build_and_score(scenes, tmp_path: Path) -> None:
     assert metrics["point"]["recall_human"] == 1.0
     assert metrics["point"]["false_alarm_human"] == 0.0
     assert metrics["point"]["emitter_recall_human"] == 1.0
+
+
+def test_cli_build_with_relative_paths(
+    scenes, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chirpdetector.labeling.candidates import read_candidates
+
+    _, dets = scenes
+    (tmp_path / "dets").mkdir()
+    for name, det in dets.items():
+        det.to_parquet(tmp_path / "dets" / f"{name}.parquet", index=False)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        [
+            "label-benchmark",
+            "build",
+            "--scenes",
+            "scenes",
+            "--detections",
+            "dets",
+            "--candidates",
+            "c/bench.parquet",
+            "--truth",
+            "t/truth.parquet",
+            "--n-chirps",
+            "8",
+            "--n-ambiguous",
+            "2",
+            "--n-hard",
+            "4",
+            "--n-easy",
+            "3",
+            "--n-invisible",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    stored = pd.read_parquet(tmp_path / "c" / "bench.parquet")["recording"]
+    assert all(Path(r).is_absolute() for r in stored)
+    # the labeller resolves relative paths against the candidates' directory
+    assert len(read_candidates(tmp_path / "c" / "bench.parquet")) == len(stored)
+    summary = json.loads((tmp_path / "t" / "truth.json").read_text())
+    for key in ("candidates", "scenes", "detections"):
+        assert Path(summary[key]).is_absolute()

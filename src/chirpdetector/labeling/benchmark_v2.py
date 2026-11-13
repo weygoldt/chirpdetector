@@ -687,7 +687,7 @@ def plan_gaps(
         alias = f"{int(name) + 10000:06d}" if name.isdigit() else f"{name}_gap"
         target = make_gap_scene(
             path,
-            Path(target_root) / alias,
+            Path(target_root).resolve() / alias,
             int(feats["emitter_id"].iloc[c]),
             [float(feats["t_center_s"].iloc[c])],
             half_s,
@@ -789,7 +789,7 @@ def build_v2(
     rng = np.random.default_rng(config.seed)
     margin = config.margin_s
     loaded: dict[str, _Scene] = {
-        name: _Scene(name, path, feats, info, load_tracks(path))
+        name: _Scene(name, Path(path).resolve(), feats, info, load_tracks(path))
         for name, (path, feats, info) in sorted(scenes.items())
     }
     rows: list[dict[str, Any]] = []

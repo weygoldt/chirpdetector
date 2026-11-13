@@ -2,16 +2,17 @@
 
 A run config names the models, the thresholds, the track source, the
 compute budget and the validation outputs. Every key has a default except
-the run name; unknown keys are refused, so a typo cannot silently fall back
-to a default. Example (all keys)::
+the run name (``out``: ``detections`` next to the config file); unknown
+keys are refused, so a typo cannot silently fall back to a default.
+Example (all keys)::
 
     [run]
     name = "v2_2019_competition"        # OUT/<name>/...
-    out = "/mnt/data1/chirp_v2/detections"
+    out = "detections"                  # relative to the config file
 
     [models]
-    detector = "/mnt/data1/chirp_v2/runs/dualhead_r18_sim_v4_r1/final/bundle"
-    decoder = "/mnt/data1/chirp_v2/params/runs/v4-dualhead-sim-v4/bundle"
+    detector = "default"                # or a bundle directory
+    decoder = "default"                 # or a bundle directory, or "none"
     allow_detector_mismatch = false
 
     [detection]
@@ -88,6 +89,10 @@ __all__ = [
 
 DETECTOR_BATCH = 16
 """Batch size of the detectors at inference; chunks hold whole batches."""
+
+DEFAULT_OUT = "detections"
+"""Output root of a config without ``[run] out``, relative to the config file
+(to the working directory for `config_from_dict` without ``base_dir``)."""
 
 
 class ConfigError(ValueError):
@@ -386,7 +391,7 @@ def config_from_dict(
         models["decoder"] = path(models["decoder"]) if decoder is None else decoder
     return PipelineConfig(
         name=str(run["name"]),
-        out=path(run.get("out", "/mnt/data1/chirp_v2/detections")),
+        out=path(run.get("out", DEFAULT_OUT)),
         models=_section(ModelsConfig, models, "models"),
         detection=_section(DetectionConfig, data.get("detection", {}), "detection"),
         assignment=_section(AssignmentConfig, data.get("assignment", {}), "assignment"),

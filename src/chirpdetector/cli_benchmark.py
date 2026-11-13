@@ -63,7 +63,10 @@ def build(
         float, typer.Option(help="Least score of a hard negative.")
     ] = 0.05,
 ) -> None:
-    """Sample the benchmark items and write candidates and truth."""
+    """Sample the benchmark items and write candidates and truth.
+
+    Paths may be relative; the candidates file stores absolute scene paths.
+    """
     from chirpdetector.labeling.benchmark import (
         BenchmarkConfig,
         build_benchmark,
@@ -80,14 +83,15 @@ def build(
         n_invisible=n_invisible,
         min_hard_score=min_hard_score,
     )
+    scenes, detections = scenes.resolve(), detections.resolve()
     dets = read_detections(detections)
     scene_dirs = sorted(d for d in scenes.iterdir() if d.is_dir() and d.name in dets)
     if not scene_dirs:
         typer.echo("error: no scene has detections", err=True)
         raise typer.Exit(code=1)
     cands, table, summary = build_benchmark(scene_dirs, dets, config)
-    summary["detections"] = str(detections.resolve())
-    summary["scenes"] = str(scenes.resolve())
+    summary["detections"] = str(detections)
+    summary["scenes"] = str(scenes)
     try:
         write_benchmark(cands, table, summary, candidates, truth)
     except ValueError as err:
@@ -394,7 +398,8 @@ def features(
 
     out.mkdir(parents=True, exist_ok=True)
     jobs = [
-        (str(s), str(out), str(templates) if templates else "") for s in sorted(scenes)
+        (str(s.resolve()), str(out), str(templates) if templates else "")
+        for s in sorted(scenes)
     ]
     with ProcessPoolExecutor(workers) as pool:
         for k, name in enumerate(pool.map(_features_one, jobs), start=1):
@@ -447,6 +452,7 @@ def gaps(
     """Copies of scenes whose emitter track breaks around one chirp each."""
     from chirpdetector.labeling.benchmark_v2 import BuildV2Config, plan_gaps
 
+    scenes, out = scenes.resolve(), out.resolve()
     found = {
         name: (scenes / name, chirps, info)
         for name, (_, chirps, info) in _load_features(features_dir).items()
@@ -526,6 +532,8 @@ def build_v2_command(
         for name, (path, kind) in _model_option(model).items()
     }
     feats = _load_features(features_dir)
+    scenes = scenes.resolve()
+    gap_root = gap_root.resolve() if gap_root else None
     new = {
         n: (scenes / n, c, i) for n, (_, c, i) in feats.items() if (scenes / n).is_dir()
     }

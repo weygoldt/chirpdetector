@@ -60,7 +60,8 @@ class YoloModelConfig:
         One of `ARCHITECTURES`.
     pretrained
         Start from ultralytics' COCO weights of the architecture
-        (downloaded once into ``~/.cache/chirpdetector/weights``); else
+        (downloaded once into ``weights/`` of chirpdetector's cache,
+        `chirpdetector.pretrained.cache_dir`); else
         from random weights.
     weights
         Path of a starting checkpoint instead (overrides ``pretrained``).

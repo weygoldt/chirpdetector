@@ -21,12 +21,13 @@ chirpdetector train detector examples/train_dualhead.toml --dataset DATASET --ru
 chirpdetector train detector examples/train_yolo26s.toml  --dataset DATASET --run-dir runs/yolo26s
 ```
 
-> **Optimiser defaults.** A config without `[model] type` trains the
-> dual-head model, but the `[optim]` defaults (lr0 1e-3, 100 epochs, warm-up
-> 3 epochs, patience 20) were tuned for YOLO26. The dual-head model was
-> trained with lr0 1e-4, lrf 0.05, warm-up 0.5 epochs, weight decay 1e-4,
-> 30 epochs and patience 6, as in
-> [`examples/train_dualhead.toml`](../examples/train_dualhead.toml).
+> **Optimiser defaults.** The `[optim]` defaults depend on `[model] type`.
+> The dual-head model (the default) gets the settings it was trained with:
+> lr0 1e-4, lrf 0.05, warm-up 0.5 epochs, weight decay 1e-4, 30 epochs and
+> patience 6, as in
+> [`examples/train_dualhead.toml`](../examples/train_dualhead.toml). YOLO26
+> gets lr0 1e-3, lrf 0.01, warm-up 3 epochs, weight decay 5e-4, 100 epochs
+> and patience 20. Keys given in `[optim]` replace them one by one.
 
 ## Dual-head config
 

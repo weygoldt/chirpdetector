@@ -45,6 +45,38 @@ def test_yolo_is_selected_by_type() -> None:
     assert config.model["architecture"] == "yolo26s"
 
 
+DUALHEAD_OPTIM = {
+    "epochs": 30,
+    "lr0": 1e-4,
+    "lrf": 0.05,
+    "warmup_epochs": 0.5,
+    "weight_decay": 1e-4,
+    "patience": 6,
+}
+
+
+def test_optim_defaults_follow_the_model_type() -> None:
+    # without [optim], the dual-head gets the settings it was trained with ...
+    dualhead = DetectorTrainingConfig.from_dict({})
+    assert dualhead.optim == OptimConfig(**DUALHEAD_OPTIM)  # type: ignore[arg-type]
+    assert DetectorTrainingConfig().optim == dualhead.optim
+    # ... and YOLO26 keeps the defaults tuned for it
+    yolo = DetectorTrainingConfig.from_dict({"model": {"type": "ultralytics-yolo"}})
+    assert yolo.optim == OptimConfig()
+    assert yolo.optim.lr0 == 0.001
+    assert yolo.optim.epochs == 100
+    # a partial [optim] keeps the model type's defaults for the other keys
+    partial = DetectorTrainingConfig.from_dict({"optim": {"epochs": 2}})
+    assert partial.optim == OptimConfig(**{**DUALHEAD_OPTIM, "epochs": 2})  # type: ignore[arg-type]
+    for config in (dualhead, yolo, partial):
+        assert DetectorTrainingConfig.from_dict(config.to_dict()) == config
+    # the released dual-head's example differs only in the machine's workers
+    example = DetectorTrainingConfig.from_toml(
+        Path(__file__).resolve().parents[2] / "examples" / "train_dualhead.toml"
+    )
+    assert example.optim == OptimConfig(**{**DUALHEAD_OPTIM, "workers": 8})  # type: ignore[arg-type]
+
+
 def test_toml_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "train.toml"
     path.write_text(

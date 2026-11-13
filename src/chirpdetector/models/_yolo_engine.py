@@ -112,12 +112,13 @@ log = logging.getLogger(__name__)
 PAD_VALUE = 0
 """Value of the padding pixels: the bottom of the normalised dB range."""
 
-WEIGHTS_CACHE = (
-    Path(
-        os.environ.get("CHIRPDETECTOR_CACHE", Path.home() / ".cache" / "chirpdetector")
-    )
-    / "weights"
-)
+
+def weights_cache() -> Path:
+    """COCO weights of ultralytics: ``weights/`` in chirpdetector's cache."""
+    from chirpdetector.pretrained import cache_dir
+
+    return cache_dir() / "weights"
+
 
 _NAMES = dict(enumerate(CLASSES))
 
@@ -584,10 +585,9 @@ def _starting_weights(config: YoloModelConfig) -> tuple[str, dict[str, Any]]:
             "sha256": sha256_file(path),
         }
     if config.pretrained:
-        WEIGHTS_CACHE.mkdir(parents=True, exist_ok=True)
-        path = Path(
-            attempt_download_asset(str(WEIGHTS_CACHE / f"{config.architecture}.pt"))
-        )
+        cache = weights_cache()
+        cache.mkdir(parents=True, exist_ok=True)
+        path = Path(attempt_download_asset(str(cache / f"{config.architecture}.pt")))
         return str(path), {
             "source": "ultralytics-coco",
             "path": str(path),

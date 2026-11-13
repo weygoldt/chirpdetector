@@ -25,7 +25,7 @@ def build_scenes(
         typer.Argument(
             help=(
                 "Scene directories: a glob (quote it), e.g. "
-                "'/mnt/data1/chirp_v2/scenes/train_v1/*', or a directory of "
+                "'scenes/train/*', or a directory of "
                 "scenes. Optional with --split-dir (default: all scenes in "
                 "the split directories)."
             )
@@ -50,7 +50,7 @@ def build_scenes(
             help=(
                 "SPLIT=DIRECTORY, repeatable: the scenes in DIRECTORY go to "
                 "SPLIT (replaces --split), e.g. --split-dir "
-                "train=/mnt/data1/chirp_v2/scenes/train_v2/train"
+                "train=scenes/train"
             ),
         ),
     ] = None,
@@ -124,27 +124,26 @@ def build_scenes(
 def build_real(
     out: Annotated[Path, typer.Option(help="Output dataset directory.")],
     recording: Annotated[
-        list[Path] | None,
+        list[Path],
         typer.Option(
             "--recording",
             exists=True,
             file_okay=False,
-            help="Labelled recording directory, repeatable (default: the four).",
+            help=(
+                "Recording directory with hand labels "
+                "(traces-grid1-editable-labels.csv), repeatable."
+            ),
         ),
-    ] = None,
+    ],
     device: Annotated[str, typer.Option(help="STFT device: cpu or cuda.")] = "cpu",
     overwrite: Annotated[
         bool, typer.Option(help="Replace an existing dataset.")
     ] = False,
 ) -> None:
     """Tile the hand-labelled regions of real recordings into the test set."""
-    from chirpdetector.data.real import (
-        DEFAULT_RECORDINGS,
-        RealDatasetConfig,
-        build_real_dataset,
-    )
+    from chirpdetector.data.real import RealDatasetConfig, build_real_dataset
 
-    dirs = list(recording) if recording else list(DEFAULT_RECORDINGS)
+    dirs = list(recording)
     dataset = build_real_dataset(
         out,
         dirs,

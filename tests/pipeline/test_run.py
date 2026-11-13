@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -12,9 +13,10 @@ from typer.testing import CliRunner
 
 from chirpdetector.bundle import Bundle
 from chirpdetector.cli import app
+from chirpdetector.labeling.candidates import read_candidates
 from chirpdetector.pipeline import run as run_module
 from chirpdetector.pipeline.assign import SIM_V4_DUALHEAD
-from chirpdetector.pipeline.candidates import CANDIDATE_COLUMNS
+from chirpdetector.pipeline.candidates import CANDIDATE_COLUMNS, write_candidates
 from chirpdetector.pipeline.config import (
     ConfigError,
     PipelineConfig,
@@ -28,6 +30,7 @@ from chirpdetector.pipeline.outputs import (
     model_tag,
     read_chirps,
     recording_start,
+    write_parquet,
 )
 from chirpdetector.pipeline.run import discover_recordings, run_pipeline
 
@@ -595,3 +598,85 @@ def test_decoder_columns_appear_once_in_order(
     np.testing.assert_allclose(
         table["height_raw_hz"], table["f_high_hz"] - table["f_low_hz"]
     )
+
+
+def test_candidates_start_inside_the_recording(
+    tmp_path: Path, stub_bundle: Bundle, trial_dirs: list[Path]
+) -> None:
+    # A chirp at the recording's start can have a box reaching before its
+    # first sample; the labeller only takes boxes inside the recording.
+    cfg = _config(
+        tmp_path,
+        stub_bundle,
+        validation={"windows": 0, "qc": False, "candidates_per_cell": 1000},
+    )
+    run_pipeline(cfg, trial_dirs[:1], models=make_models(stub_bundle))
+    path = cfg.run_dir / trial_dirs[0].name / "chirps_rtdetr.parquet"
+    table, meta = read_chirps(path)
+    a, b = np.flatnonzero(table["kept"].to_numpy(dtype=bool))[:2]
+    t_start = table["t_start_s"].to_numpy(dtype=float).copy()
+    t_end = table["t_end_s"].to_numpy(dtype=float).copy()
+    t_start[a] = -0.05
+    t_start[b], t_end[b] = -0.3, -0.1  # wholly before the recording
+    table["t_start_s"], table["t_end_s"] = t_start, t_end
+    write_parquet(path, table, meta)
+    write_candidates(cfg.run_dir, cfg)
+    cand = pd.read_csv(cfg.run_dir / "candidates.csv")
+    chirp_id = table["chirp_id"].to_numpy()
+    ids = cand["candidate_id"].to_numpy(dtype=object)
+    row = np.flatnonzero(ids == f"{trial_dirs[0].name}:{chirp_id[a]}")
+    assert cand["t_start_s"].to_numpy()[row].tolist() == [0.0]
+    assert cand["t_end_s"].to_numpy()[row].tolist() == [t_end[a]]
+    assert f"{trial_dirs[0].name}:{chirp_id[b]}" not in set(ids)
+    assert bool((cand["t_start_s"] >= 0).all())
+    assert len(read_candidates(cfg.run_dir / "candidates.csv")) == len(cand)
+
+
+def test_render_writes_the_files_it_prints(
+    tmp_path: Path, stub_bundle: Bundle, trial_dirs: list[Path]
+) -> None:
+    cfg = _config(tmp_path, stub_bundle, validation={"windows": 0, "qc": False})
+    run_pipeline(cfg, trial_dirs[:1], models=make_models(stub_bundle))
+    out = tmp_path / "r"
+    printed = []
+    for t1 in ("5.0", "5.5"):  # windows that differ only after the decimal point
+        result = CliRunner().invoke(
+            app,
+            [
+                "render",
+                str(cfg.run_dir),
+                trial_dirs[0].name,
+                "3.0",
+                t1,
+                "--out",
+                str(out),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        printed += re.findall(r"\S+\.(?:png|npz)", result.output)
+    assert len(printed) == 4
+    assert sorted(printed) == sorted(str(p) for p in out.iterdir())
+
+
+def test_qc_of_a_span_without_chirps(
+    tmp_path: Path, stub_bundle: Bundle, trial_dirs: list[Path]
+) -> None:
+    # e.g. `run --limit-s 60` on a quiet span: detections, none a chirp
+    from chirpdetector.pipeline.qc import write_qc
+
+    cfg = _config(tmp_path, stub_bundle, validation={"windows": 0, "qc": False})
+    run_pipeline(cfg, trial_dirs[:1], models=make_models(stub_bundle))
+    rec = cfg.run_dir / trial_dirs[0].name
+    table, _ = read_chirps(rec / "chirps_rtdetr.parquet")
+    chunks = pd.read_parquet(rec / "chunks_rtdetr.parquet")
+    table = table.assign(
+        chirp=False,
+        operating=False,
+        height_hz=np.nan,
+        fwhm_s=np.nan,
+        params_ok=False,
+        params_flag="",
+    )
+    meta = {"recording": trial_dirs[0].name, "operating_threshold": 0.5}
+    write_qc(tmp_path / "qc", table, chunks, meta, duration_s=10.0)
+    assert (tmp_path / "qc" / "qc.png").exists()

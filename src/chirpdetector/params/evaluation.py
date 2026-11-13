@@ -1492,6 +1492,9 @@ def run_evaluation(
     torch_device = None if device == "auto" else device
     result = evaluate_params(bundle, samples, split=split, device=torch_device)
     if real_library is not None and Path(real_library).is_dir():
+        if real_recordings is None:
+            msg = "the real-data check needs real_recordings with real_library"
+            raise ValueError(msg)
         if detector_bundle is None and bundle.detector is not None:
             detector_bundle = load_bundle(bundle.detector["path"])
         if detector_bundle is None:
@@ -1502,7 +1505,7 @@ def run_evaluation(
                 estimator,
                 detector_bundle,
                 real_library,
-                real_recordings or "/mnt/data2/2019_tube_competition",
+                real_recordings,
                 device=torch_device,
             )
             result.real = real

@@ -93,7 +93,7 @@ windows = 10
 
 | key | meaning |
 |---|---|
-| `run.out` | output root; the run goes to `OUT/<name>/` (the code default is a path of the development machine: always set it) |
+| `run.out` | output root; the run goes to `OUT/<name>/` (default `detections`, next to the config file) |
 | `models.detector` | `"default"` (the released detector, the default), `"pretrained:NAME"` (a published model, see [Pretrained models](models.md)), or a bundle directory |
 | `models.decoder` | default: the published decoder trained on the detector's boxes (for the released detector: the released decoder), else none; `"default"`, `"pretrained:NAME"` or a bundle directory; `"none"` (or `""`) runs without the decoder |
 | `models.allow_detector_mismatch` | use a decoder trained on another detector's boxes (its estimates are then not validated) |
@@ -235,9 +235,9 @@ stratum every recording is equally likely. `candidates_strata.csv` keeps
 the stratum of each candidate for the evaluation.
 
 > **Note.** A detection whose box starts before the recording (possible
-> for a chirp in the first 0.1 s) gets a negative `t_start_s`, and
-> `label-emitters` refuses a candidates file with such a row. Drop those rows
-> before labelling.
+> for a chirp in the first 0.1 s) has a negative `t_start_s` in the chirp
+> table; `candidates.csv` clips it to 0 (and leaves out boxes that end
+> before the start), so `label-emitters` takes the file as written.
 
 ## Assignment
 

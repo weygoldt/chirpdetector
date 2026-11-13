@@ -16,8 +16,8 @@ chirpdetector label-emitters --candidates candidates.csv --out labels --labeler 
 chirpdetector label-summary labels
 ```
 
-Set `--out` and `--labeler`: their defaults are a directory on the
-development machine and its user.
+`--out` is required (the same command with the same `--out` resumes);
+`--labeler` defaults to your login name.
 
 ## The view
 

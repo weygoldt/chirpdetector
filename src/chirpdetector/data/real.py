@@ -62,7 +62,6 @@ from chirpdetector.spectrogram import (
 )
 
 __all__ = [
-    "DEFAULT_RECORDINGS",
     "LABEL_FILE",
     "RealDatasetConfig",
     "build_real_dataset",
@@ -74,14 +73,6 @@ log = logging.getLogger(__name__)
 
 LABEL_FILE = "traces-grid1-editable-labels.csv"
 """audian label file of a recording directory."""
-
-DEFAULT_RECORDINGS: tuple[Path, ...] = (
-    Path("/mnt/data2/2019_tube_competition/2019-12-09-10_00"),
-    Path("/mnt/data2/2019_tube_competition/2020-06-03-10_10"),
-    Path("/mnt/data2/2022_tube_competition/raw/2022-05-12-10_00"),
-    Path("/mnt/data2/2022_tube_competition/raw/2022-06-01-10_00"),
-)
-"""The four hand-labelled recordings (335 chirps), the locked real test set."""
 
 _TRACK_FILES = ("times.npy", "fund_v.npy", "ident_v.npy", "idx_v.npy")
 _EDGES = ("t_start_s", "t_end_s", "f_low_hz", "f_high_hz")
@@ -276,7 +267,7 @@ def region_tiles(
 
 def build_real_dataset(
     out: str | Path,
-    recordings: Sequence[str | Path] = DEFAULT_RECORDINGS,
+    recordings: Sequence[str | Path],
     config: RealDatasetConfig | None = None,
     *,
     overwrite: bool = False,

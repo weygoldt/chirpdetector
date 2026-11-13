@@ -220,7 +220,9 @@ def render_command(
         },
         device=device,
     )
-    typer.echo(f"{stem}.png, {stem}.npz ({info['n_boxes']} boxes)")
+    typer.echo(
+        f"{target / info['png']}, {target / info['npz']} ({info['n_boxes']} boxes)"
+    )
 
 
 def check_reference_command(

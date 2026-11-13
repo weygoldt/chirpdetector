@@ -139,6 +139,12 @@ def _scalar(value: Any) -> CandidateValue:
     return str(value)
 
 
+def _values(values: npt.NDArray[np.float64], n: int = 5) -> str:
+    """The first ``n`` values, for an error message."""
+    shown = ", ".join(f"{v:g}" for v in values[:n])
+    return shown + (", ..." if len(values) > n else "")
+
+
 def _resolve(value: object, base: Path) -> Path:
     path = Path(str(value)).expanduser()
     return path if path.is_absolute() else (base / path)
@@ -215,7 +221,14 @@ def read_candidates(path: str | Path) -> pd.DataFrame:
     with np.errstate(invalid="ignore"):
         bad(box[:, 1] <= box[:, 0], "t_end_s <= t_start_s")
         bad(box[:, 3] <= box[:, 2], "f_high_hz <= f_low_hz")
-        bad((box[:, 0] < 0) | (box[:, 2] < 0), "negative time or frequency")
+        before = box[:, 0] < 0
+        bad(
+            before,
+            f"t_start_s is negative ({_values(box[before, 0])}): times are "
+            "seconds from the recording's first sample; clip t_start_s to 0 "
+            "(and drop boxes that end before it)",
+        )
+        bad(box[:, 2] < 0, "f_low_hz is negative")
     score = _floats(column("score"))
     emitter = _floats(column("emitter_hz"))
     with np.errstate(invalid="ignore"):
@@ -232,7 +245,10 @@ def read_candidates(path: str | Path) -> pd.DataFrame:
     )
     if errors:
         listed = "\n  ".join(errors[:_MAX_ERRORS])
-        msg = f"{path}: invalid candidates:\n  {listed}"
+        msg = (
+            f"{path}: invalid candidates (rows counted from 0, without the "
+            f"header):\n  {listed}"
+        )
         raise ValueError(msg)
 
     base = path.parent

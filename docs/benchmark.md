@@ -21,10 +21,9 @@ chirpdetector label-benchmark score --truth bench/truth/bench_truth.parquet \
     --labels bench/labels --out bench/report
 ```
 
-Give `--scenes` as an absolute path: the candidates file stores the scene
-paths as given, and the labeller resolves relative paths against the
-candidates file's directory. Keep candidates and truth in different
-directories; nothing in the labeller opens the truth.
+`--scenes` may be relative: the candidates file stores absolute scene
+paths. Keep candidates and truth in different directories; nothing in the
+labeller opens the truth.
 
 A detections directory can be made with:
 

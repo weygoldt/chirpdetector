@@ -301,7 +301,8 @@ def _prepare(
     from chirpdetector.params.samples import match_predictions
 
     scenes = []
-    for directory in sorted(Path(d) for d in scene_dirs):
+    # absolute: the candidates file is read from another directory
+    for directory in sorted(Path(d).resolve() for d in scene_dirs):
         name = directory.name
         if name not in detections:
             msg = f"no detections for scene {name}"
@@ -678,7 +679,7 @@ def write_benchmark(
     candidates.to_parquet(candidates_path, index=False)
     truth.to_parquet(truth_path, index=False)
     sidecar = dict(summary)
-    sidecar["candidates"] = str(candidates_path)
+    sidecar["candidates"] = str(candidates_path.resolve())
     truth_path.with_suffix(".json").write_text(json.dumps(sidecar, indent=1))
 
 

@@ -83,9 +83,9 @@ Tiles the labelled regions (audian label files,
 recordings into the test split, with the same front end, tiling and click
 removal; each recording is one group. Hand-drawn chirp boxes are kept as
 drawn; parts of a tile outside the region's labelled band become ignore
-regions (`unlabelled`). Without `--recording`, the four hand-labelled
-recordings of the chirp competition data are used (paths on the
-development machine). `emitter_hz` is only a proxy here (nearest track to
+regions (`unlabelled`). `--recording` is required (the chirp competition's
+real test set is its four hand-labelled recordings). `emitter_hz` is only
+a proxy here (nearest track to
 the box's lower edge); the real test set scores detection.
 
 ## In Python

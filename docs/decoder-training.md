@@ -107,8 +107,8 @@ figures:
   continuum;
 - with `--real` (default): agreement on the harvested long chirps of the
   competition recordings (template library v4 and the recordings; give
-  their locations with `--library` and `--recordings`, whose defaults are
-  paths on the development machine). Use `--no-real` without them.
+  their locations with `--library` and `--recordings`; skipped without
+  `--library`).
 
 ## Trying it on a small scale
 

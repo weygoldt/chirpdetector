@@ -184,3 +184,17 @@ def test_changed_file_gives_a_new_queue(candidates_csv: Path, tmp_path: Path) ->
         load_or_build_candidate_queue(candidates_csv, None, out).queue_id
         != first.queue_id
     )
+
+
+def test_negative_times_say_what_to_do(trial: Path, tmp_path: Path) -> None:
+    path = write_candidates(tmp_path / "c.csv", trial)
+    df = pd.read_csv(path)
+    df.loc[1, "t_start_s"] = -0.0312
+    df.to_csv(path, index=False)
+    with pytest.raises(ValueError, match="t_start_s") as info:
+        read_candidates(path)
+    text = str(info.value)
+    assert "rows 1" in text
+    assert "-0.0312" in text
+    assert "recording's first sample" in text
+    assert "clip" in text

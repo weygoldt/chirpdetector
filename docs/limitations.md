@@ -58,16 +58,3 @@ likely to fail.
   end are seen with less context; the decoder flags crops that cross the
   edge (`params_flag = "edge"`).
 - **Box-only models** (YOLO26) cannot assign emitters in the pipeline.
-
-## Practical notes
-
-- Several defaults are paths on the development machine: `[run] out` of the
-  run config (`/mnt/data1/chirp_v2/detections`), `label-emitters --out` and
-  `--labeler`, `label-summary`'s directory, `evaluate params --library` and
-  `--recordings`, and the four recordings of `data build-real`. Set them
-  explicitly.
-- `label-emitters` refuses candidates with negative times, which the
-  pipeline's `candidates.csv` can contain for a chirp in the first 0.1 s of
-  a recording.
-- `label-benchmark build` stores scene paths as given; pass `--scenes` as an
-  absolute path.

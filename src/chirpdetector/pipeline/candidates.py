@@ -29,6 +29,11 @@ the recording directory), ``t_start_s``, ``t_end_s``, ``f_low_hz``,
 ``source`` (``pipeline:<run>:<stratum>``) and ``tracks`` (directory of the
 wavetracker arrays). ``candidates_strata.csv`` repeats the candidate ids
 with the stratum and the assignment fields, for the evaluation.
+
+Boxes are clipped to the recording's start: a chirp in its first tenth of a
+second can have a box from a negative time (the spectrogram window reaches
+before the first sample), which the labeller refuses. Boxes that end before
+the start are left out (logged).
 """
 
 from __future__ import annotations
@@ -164,6 +169,15 @@ def write_candidates(run_dir: Path, config: PipelineConfig) -> dict[str, Any]:
         again = df["pp_reattributed"].astype(str).to_numpy() == "harmonic"
         add(df.loc[again], 5 * k, "postprocess=reattributed")
     sample = pd.concat(parts, ignore_index=True)
+    before = sample["t_end_s"].to_numpy(dtype=float) <= 0.0
+    if before.any():
+        log.warning(
+            "validation candidates: %d boxes end before the recording starts; left out",
+            int(before.sum()),
+        )
+        sample = sample.loc[~before].reset_index(drop=True)
+    sample["t_start_s"] = sample["t_start_s"].clip(lower=0.0)
+    sample["f_low_hz"] = sample["f_low_hz"].clip(lower=0.0)
     out = pd.DataFrame(
         {
             "recording": sample["recording_dir"],

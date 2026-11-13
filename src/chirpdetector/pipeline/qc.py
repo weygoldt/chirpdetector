@@ -66,7 +66,8 @@ def _rate_panel(ax: Any, table: pd.DataFrame, duration_s: float, bin_s: float) -
         "chirp rate per track (chirps = operating & kept; "
         f"{n_again} re-attributed harmonics included)"
     )
-    ax.legend(fontsize=7, frameon=False)
+    if len(chirps):
+        ax.legend(fontsize=7, frameon=False)
 
 
 def write_qc(
@@ -186,8 +187,9 @@ def write_qc(
                 s=3,
                 alpha=0.4,
             )
-            ax.set_xscale("log")
-            ax.set_yscale("log")
+            if ok.any():  # a log axis without data cannot be drawn
+                ax.set_xscale("log")
+                ax.set_yscale("log")
             ax.set_xlabel("FWHM (ms)")
             ax.set_ylabel("height (Hz)")
             ax.set_title(f"decoder parameters (params_ok chirps, n={int(ok.sum())})")

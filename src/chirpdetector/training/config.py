@@ -13,17 +13,17 @@ Example (every key optional; these are the defaults)::
     architecture = "rtdetr_v2_r18vd"  # further keys belong to the implementation
     pretrained = true
 
-    [optim]
-    epochs = 100
+    [optim]                    # defaults of the model type (OPTIM_DEFAULTS)
+    epochs = 30                # ultralytics-yolo: 100
     batch = 16                 # fixed; no AutoBatch
     optimizer = "AdamW"
-    lr0 = 0.001
-    lrf = 0.01                 # final learning rate = lr0 * lrf
+    lr0 = 0.0001               # ultralytics-yolo: 0.001
+    lrf = 0.05                 # final learning rate = lr0 * lrf; yolo: 0.01
     schedule = "cosine"        # or "linear"
-    warmup_epochs = 3.0
-    weight_decay = 0.0005
+    warmup_epochs = 0.5        # ultralytics-yolo: 3.0
+    weight_decay = 0.0001      # ultralytics-yolo: 0.0005
     momentum = 0.937
-    patience = 20              # early stopping; 0 disables it
+    patience = 6               # early stopping; 0 disables it; yolo: 20
     amp = true
     workers = 4
 
@@ -37,10 +37,12 @@ Example (every key optional; these are the defaults)::
 The default model is the dual-head RT-DETRv2 (``dualhead``,
 `chirpdetector.models.dualhead`: boxes and the emitter's EOD frequency);
 ``type = "ultralytics-yolo"`` selects YOLO26 (`chirpdetector.models.yolo`),
-which predicts boxes only. The ``[optim]`` defaults were tuned for YOLO26;
-the dual-head detector was trained with ``lr0 = 1e-4``, ``lrf = 0.05``,
-``warmup_epochs = 0.5``, ``weight_decay = 1e-4``, ``epochs = 30`` and
-``patience = 6`` (``examples/train_dualhead.toml`` in the repository).
+which predicts boxes only. The ``[optim]`` defaults depend on the model
+type: the dual-head's are the settings it was trained with (``lr0 = 1e-4``,
+``lrf = 0.05``, ``warmup_epochs = 0.5``, ``weight_decay = 1e-4``,
+``epochs = 30``, ``patience = 6``; ``examples/train_dualhead.toml`` in the
+repository), YOLO26's those of `OptimConfig` (tuned for it). Keys given in
+``[optim]`` replace them one by one.
 
 Unknown keys raise at every level, so a typo never silently falls back to a
 default. `DetectorTrainingConfig.to_dict` gives the resolved config (every
@@ -61,6 +63,7 @@ from chirpdetector.models import get_backend
 
 __all__ = [
     "DEFAULT_MODEL_TYPE",
+    "OPTIM_DEFAULTS",
     "AugmentConfig",
     "CVConfig",
     "DetectorTrainingConfig",
@@ -174,6 +177,34 @@ class OptimConfig:
         )
 
 
+OPTIM_DEFAULTS: dict[str, dict[str, Any]] = {
+    "dualhead": {
+        "epochs": 30,
+        "lr0": 1e-4,
+        "lrf": 0.05,
+        "warmup_epochs": 0.5,
+        "weight_decay": 1e-4,
+        "patience": 6,
+    },
+}
+"""``[optim]`` defaults per model type where they differ from `OptimConfig`'s.
+
+`OptimConfig`'s defaults were tuned for YOLO26 (``ultralytics-yolo``); the
+dual-head's are the settings of the released model (run
+``dualhead_r18_sim_v4_r1``) except ``workers``, a property of the machine.
+"""
+
+
+def _optim(model_type: str, table: Any) -> OptimConfig:
+    """``[optim]`` of a model type: its defaults, replaced by ``table``'s keys."""
+    if not isinstance(table, Mapping):
+        msg = f"[optim] must be a table, got {table!r}"
+        raise ValueError(msg)
+    return _from_table(
+        OptimConfig, {**OPTIM_DEFAULTS.get(model_type, {}), **table}, "optim"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AugmentConfig:
     """Image-space augmentation (see `chirpdetector.models._yolo_engine`).
@@ -214,18 +245,24 @@ class CVConfig:
 
 _DEVICE_HINT = "device must be 'auto', 'cpu', 'cuda', 'cuda:N' or 'N'"
 
+_MODEL_OPTIM = OptimConfig()
+"""Default of `DetectorTrainingConfig.optim`: replaced by the model type's
+defaults (`OPTIM_DEFAULTS`). An explicit ``OptimConfig()`` is another object
+and is kept as given."""
+
 
 @dataclass(frozen=True)
 class DetectorTrainingConfig:
     """Everything that determines a detector training run (module docstring).
 
     ``model`` is the implementation's resolved ``[model]`` table, without
-    ``type`` (that is ``model_type``).
+    ``type`` (that is ``model_type``). Without ``optim``, the model type's
+    defaults apply (`OPTIM_DEFAULTS`).
     """
 
     model_type: str = DEFAULT_MODEL_TYPE
     model: Mapping[str, Any] = field(default_factory=dict)
-    optim: OptimConfig = field(default_factory=OptimConfig)
+    optim: OptimConfig = _MODEL_OPTIM
     augment: AugmentConfig = field(default_factory=AugmentConfig)
     cv: CVConfig = field(default_factory=CVConfig)
     score_threshold: float = 0.5
@@ -237,6 +274,8 @@ class DetectorTrainingConfig:
     def __post_init__(self) -> None:
         resolved = get_backend(self.model_type).resolve_model_config(dict(self.model))
         object.__setattr__(self, "model", resolved)
+        if self.optim is _MODEL_OPTIM:
+            object.__setattr__(self, "optim", _optim(self.model_type, {}))
         _check(
             _is_number(self.score_threshold) and 0 <= self.score_threshold <= 1,
             "score_threshold must lie in [0, 1]",
@@ -274,7 +313,7 @@ class DetectorTrainingConfig:
         return cls(
             model_type=model_type,
             model=model,
-            optim=_from_table(OptimConfig, data.pop("optim", {}), "optim"),
+            optim=_optim(model_type, data.pop("optim", {})),
             augment=_from_table(AugmentConfig, data.pop("augment", {}), "augment"),
             cv=_from_table(CVConfig, data.pop("cv", {}), "cv"),
             **data,

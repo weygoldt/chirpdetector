@@ -327,8 +327,11 @@ def render_window(
         "flagged; colour = assigned track; dotted line = predicted emitter EODf",
         fontsize=8,
     )
+    # the stem may contain dots (times): append the suffix, never replace one
+    png = path_stem.with_name(f"{path_stem.name}.png")
+    npz = path_stem.with_name(f"{path_stem.name}.npz")
     path_stem.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path_stem.with_suffix(".png"), dpi=90)
+    fig.savefig(png, dpi=90)
     plt.close(fig)
     boxes = np.zeros(len(in_win), dtype=[(f, "f8") for f in BOX_FIELDS])
     for f in BOX_FIELDS:
@@ -348,7 +351,7 @@ def render_window(
         **(meta or {}),
     }
     np.savez_compressed(
-        path_stem.with_suffix(".npz"),
+        npz,
         spec_db=db.astype(np.float16),
         times_s=times,
         freqs_hz=freqs[rows],
@@ -359,11 +362,7 @@ def render_window(
         track_freqs_hz=np.concatenate(tfreqs) if tfreqs else np.zeros(0),
         meta=np.asarray(json.dumps(info, default=str)),
     )
-    return {
-        "png": path_stem.with_suffix(".png").name,
-        "npz": path_stem.with_suffix(".npz").name,
-        "n_boxes": len(in_win),
-    }
+    return {"png": png.name, "npz": npz.name, "n_boxes": len(in_win)}
 
 
 def write_windows(

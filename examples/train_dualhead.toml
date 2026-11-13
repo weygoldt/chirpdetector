@@ -5,8 +5,8 @@
 #   chirpdetector train detector examples/train_dualhead.toml \
 #       --dataset DATASET --run-dir RUN
 #
-# The [optim] defaults of chirpdetector.training.config are tuned for YOLO26;
-# keep the values below for the dual-head.
+# [optim] below equals the dual-head's defaults (chirpdetector.training.config,
+# OPTIM_DEFAULTS) except workers; YOLO26 has defaults of its own.
 seed = 0
 deterministic = false        # deformable attention has no deterministic CUDA backward
 device = "cuda"

@@ -1,6 +1,6 @@
 # Run config of `chirpdetector run`: detect, decode and assign chirps in whole
 # recordings. Only [run] name is required; every other key has the default
-# shown, except [run] out (chirpdetector.pipeline.config documents them).
+# shown (chirpdetector.pipeline.config documents them).
 # Relative paths are relative to this file's directory.
 #
 #   chirpdetector run examples/run.toml RECORDING_DIR...
