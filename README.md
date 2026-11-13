@@ -191,20 +191,28 @@ in training; `uncertain`: a sd above the 99.5th percentile of the validation
 chirps).
 
 **Evaluation** (`chirpdetector evaluate params`, report in `BUNDLE/eval/`):
-errors by family, SNR, ΔF, overlap and decile of the true value, before and
-after calibration (shrinkage slopes); coverage of the sds; whether the
-*distribution* of estimates over a population matches the true one
-(KS/Wasserstein distances, quantiles, joint height x FWHM histograms), also
-after re-weighting the test chirps to the natural template mix of the
-library (training scenes over-sample big and long chirps); whether separated
-chirp types stay separated and a continuum stays a continuum; and agreement
-with the independently extracted frequency traces of 533 harvested real
-chirps.
+errors by family, SNR, ΔF, overlap, template reuse and decile of the true
+value, before and after calibration (shrinkage slopes); whether the error is
+coupled to the chirp's own parameters *within* SNR strata (quintiles of each
+true parameter, rank correlations of every error with every true parameter);
+coverage of the sds; whether the *distribution* of estimates over a
+population matches the true one (KS/Wasserstein distances, quantiles, joint
+height x FWHM histograms), also after re-weighting the test chirps to the
+library's template mix (training scenes over-sample big and long chirps);
+whether separated chirp types stay separated and a continuum stays a
+continuum; and agreement with the independently extracted frequency traces of
+533 harvested real chirps, next to the correlation the simulation predicts
+over the same narrow range.
 
 **Caveats.** Accuracy is measured on simulations (real chirp templates on
-simulated and real background); on real recordings only the agreement on
-big, long harvested chirps is checked, not small chirps. The parameters are
-only valid for boxes of the detector recorded in the bundle.
+real background segments); on real recordings only the agreement on big,
+long harvested chirps is checked, not small chirps. The simulator draws every
+split from one template library, so test chirps reuse training templates
+(and individuals): the error on chirps of new fish is not measured. The
+parameters are only valid for boxes of the detector recorded in the bundle.
+For population distributions, calibrated estimates are wider than the truth
+(blurred by the error) and uncalibrated ones are pulled toward the training
+mix; the report measures both against the truth.
 
 ## Development
 
