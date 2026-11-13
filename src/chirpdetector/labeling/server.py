@@ -92,7 +92,8 @@ left click on a baseline  chirp from that fish: snaps to the highlighted
 x / right click           not a chirp
 s / space                 skip (comes back after the open items)
 u / backspace / ctrl+z    undo the last action (jumps to its item)
-left / right arrow        previous / next item
+left / right arrow        previous / next item (labelled or not)
+o / end                   next open item (skips everything labelled)
 w                         overview window 204.8 / 51.2 ms (zoom: 204.8)
 e                         show / hide the model's prediction
 f                         full screen
@@ -313,6 +314,8 @@ class LabelServer:
             "status": s.status(index),
             "decision": _decision(s.decision(index), tracks, ids=not s.blind),
             "next_index": next_index,
+            "queue_id": s.queue.queue_id,
+            "n": len(s.queue),
             "panels": None,
             "error": None,
         }
@@ -419,6 +422,7 @@ class LabelServer:
             "next_index": result.next_index,
             "decision": _decision(result.decision, tracks, ids=not s.blind),
             "progress": _progress(s.progress()),
+            "queue_id": s.queue.queue_id,
             **(extra or {}),
         }
 

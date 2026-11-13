@@ -70,6 +70,17 @@ function loadImage(src) {
     const im = new Image(); im.onload = () => resolve(im); im.onerror = () => reject(new Error("image " + src)); im.src = src;
   });
 }
+// A tab left open across a server restart with another queue would keep the
+// old queue's length and positions: reload as soon as a response says so.
+function staleQueue(r) {
+  if (r && r.queue_id && S.state && r.queue_id !== S.state.queue_id) {
+    setMsg("the server now serves another queue: reloading ...", true);
+    location.reload();
+    return true;
+  }
+  return false;
+}
+
 function fetchView(i, w) {
   const key = i + "|" + w;
   if (!S.cache.has(key)) {
@@ -118,7 +129,10 @@ function renderBar() {
     info += "   " + parts.join(" ");
   } else if (pr) info += "   (e: model's prediction)";
   if (v.error) info += "   " + v.error;
-  document.getElementById("info").textContent = info;
+  const badge = v.decision ? "LABELLED" : v.status === "skipped" ? "SKIPPED" : "OPEN";
+  const el = document.getElementById("info");
+  el.textContent = `${badge}   ${info}`;
+  el.style.color = v.decision ? "#2ecc40" : v.status === "skipped" ? "#ff851b" : "#ffdc00";
   document.title = `label-emitters ${p.labelled}/${p.total}`;
 }
 
@@ -312,6 +326,7 @@ async function show(i) {
   const w = S.windowS;
   let v;
   try { v = await fetchView(i, w); } catch (err) { setMsg("error: " + err.message, true); return; }
+  if (staleQueue(v)) return;
   if (S.index !== i || S.windowS !== w) return;  // superseded
   S.view = v; S.hover = null; S.readout = "";
   if (S.timedIndex !== i) { S.timedIndex = i; S.shownAt = performance.now(); }  // a window toggle keeps the clock
@@ -326,6 +341,7 @@ async function act(payload) {
     const elapsed = (performance.now() - S.shownAt) / 1000;
     const body = Object.assign({ index: S.index, window_s: S.windowS, prediction_shown: S.showPred && !!S.view.prediction, elapsed_s: elapsed }, payload);
     const r = await api("/api/action", body);
+    if (staleQueue(r)) return;
     if (r.progress) S.progress = r.progress;
     if (!r.ok) { setMsg(r.message, true); renderBar(); return; }
     invalidate(r.index);
@@ -339,6 +355,7 @@ async function undo() {
   S.busy = true;
   try {
     const r = await api("/api/undo", {});
+    if (staleQueue(r)) return;
     if (r.progress) S.progress = r.progress;
     setMsg(r.message, !r.ok);
     if (r.ok && r.index !== null) { invalidate(r.index); await show(r.index); } else renderBar();
@@ -368,7 +385,7 @@ cv.addEventListener("mousedown", ev => {
 window.addEventListener("keydown", ev => {
   if (ev.ctrlKey && (ev.key === "z" || ev.key === "Z")) { ev.preventDefault(); undo(); return; }
   if (ev.ctrlKey || ev.metaKey || ev.altKey || !S.state) return;
-  const k = ev.key, n = S.state.n;
+  const k = ev.key, n = (S.progress && S.progress.total) || S.state.n;
   if (/^[1-9]$/.test(k)) act({ action: "pick", key: Number(k) });
   else if (k === "0") act({ action: "unclear" });
   else if (k === "x" || k === "X") act({ action: "not_chirp" });
@@ -376,6 +393,11 @@ window.addEventListener("keydown", ev => {
   else if (k === "u" || k === "Backspace") undo();
   else if (k === "ArrowRight" || k === "n") { setMsg(""); show((S.index + 1) % n); }
   else if (k === "ArrowLeft" || k === "p") { setMsg(""); show((S.index - 1 + n) % n); }
+  else if (k === "o" || k === "End") {
+    const nx = S.view ? S.view.next_index : null;
+    if (nx === null || nx === undefined) setMsg("no open items left");
+    else { setMsg(""); show(nx); }
+  }
   else if (k === "w") {
     const ws = S.state.windows;
     S.windowS = S.windowS === ws[0] ? ws[1] : ws[0];
