@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from typing import Any
 
 import numpy as np
@@ -127,6 +128,12 @@ class SingleLabeller:
         (self.box_lines,) = self.axes["zoom"].plot(
             [], [], color="white", lw=0.6, ls=":"
         )
+        # blind mode: a short tick at the box centre on the top and bottom edges
+        self.centre_marks = {
+            name: ax.plot([], [], color="white", lw=2.0, solid_capstyle="butt")[0]
+            for name, ax in self.axes.items()
+        }
+        self._shown_at = time.perf_counter()
         text = {"color": "0.9", "family": "monospace", "fontsize": 9}
         self.status = self.fig.text(0.005, 0.995, "", va="top", **text)
         self.info = self.fig.text(0.005, 0.965, "", va="top", **text)
@@ -162,7 +169,10 @@ class SingleLabeller:
 
     def show(self, index: int) -> None:
         """Show an item (rendered now unless prefetched)."""
-        self.index = min(max(index, 0), len(self.session) - 1)
+        index = min(max(index, 0), len(self.session) - 1)
+        if index != self.index or self.view is None:  # a window toggle keeps the clock
+            self._shown_at = time.perf_counter()
+        self.index = index
         self.hover = None
         try:
             self.view = self.session.view(self.index, self.window_s)
@@ -200,8 +210,10 @@ class SingleLabeller:
                 ys += [track.frequency_at(t1 - length), fb, math.nan]
                 label = f"{track.key}"
                 if name == "zoom":
-                    label += f"  id {track.track_id}  {track.baseline_hz:.1f} Hz"
-                    if track.gap_s > 1.0:
+                    if not self.session.blind:
+                        label += f"  id {track.track_id}"
+                    label += f"  {track.baseline_hz:.1f} Hz"
+                    if track.gap_s > 1.0 and not self.session.blind:
                         label += f"  (gap {track.gap_s:.1f} s)"
                 self._overlays.append(
                     ax.text(
@@ -223,6 +235,9 @@ class SingleLabeller:
                 )
             (ticks,) = ax.plot(xs, ys, color=TRACK_COLOUR, lw=1.0, ls="--")
             self._overlays.append(ticks)
+        blind = self.session.blind
+        self.box.set_visible(not blind)
+        self.box_lines.set_visible(not blind)
         self.box.set_bounds(
             item.t_start_s,
             item.f_low_hz,
@@ -234,6 +249,14 @@ class SingleLabeller:
             [item.t_start_s, item.t_start_s, math.nan, item.t_end_s, item.t_end_s],
             [lo, hi, math.nan, lo, hi],
         )
+        for name, mark in self.centre_marks.items():
+            f0, f1 = view.panel(name).extent[2:]
+            tick = 0.06 * (f1 - f0)
+            tc = item.t_center_s
+            mark.set_visible(blind)
+            mark.set_data(
+                [tc, tc, math.nan, tc, tc], [f1, f1 - tick, math.nan, f0, f0 + tick]
+            )
 
     def _decorate(self) -> None:
         """Frames, decision markers and the prediction from the current state."""
@@ -268,7 +291,7 @@ class SingleLabeller:
     def _draw_prediction(self, name: str) -> None:
         line = self.pred_lines[name]
         prediction = prediction_of(self.session.item(self.index))
-        if not self.show_prediction or prediction is None or self.view is None:
+        if not self._prediction_visible() or prediction is None or self.view is None:
             line.set_data([], [])
             return
         f = prediction.emitter_hz
@@ -300,21 +323,31 @@ class SingleLabeller:
             self.view.tracks if self.view is not None else session.tracks(self.index)
         )
         listed = "   ".join(
-            f"{t.key}: {t.baseline_hz:.1f} Hz (id {t.track_id}"
-            + (f", gap {t.gap_s:.1f} s)" if t.gap_s > 1.0 else ")")
+            f"{t.key}: {t.baseline_hz:.1f} Hz"
+            + (
+                ""
+                if session.blind
+                else f" (id {t.track_id}"
+                + (f", gap {t.gap_s:.1f} s)" if t.gap_s > 1.0 else ")")
+            )
             for t in tracks
         )
         decision = session.decision(self.index)
         state = (
-            describe(decision, tracks)
+            describe(decision, tracks, ids=not session.blind)
             if decision
             else ("skipped" if session.status(self.index) == "skipped" else "open")
         )
+        when = (
+            f"t {item.t_center_s:.2f} s"
+            if session.blind
+            else f"{item.t_start_s:.3f}-{item.t_end_s:.3f} s"
+        )
         text = (
-            f"{item.trial}   {item.t_start_s:.3f}-{item.t_end_s:.3f} s   {delta} "
+            f"{item.trial}   {when}   {delta} "
             f"({item.df_bin})   tracks {listed or 'none'}   [{state}]"
         )
-        prediction = prediction_of(item)
+        prediction = None if session.blind else prediction_of(item)
         if self.show_prediction and prediction is not None:
             parts = ["model:"]
             if prediction.emitter_hz is not None:
@@ -355,7 +388,9 @@ class SingleLabeller:
             readout = f"{f_hz:.1f} Hz  "
             if found is not None:
                 readout += (
-                    f"-> {found.track.key} (id {found.track.track_id})  "
+                    f"-> {found.track.key}"
+                    + ("" if self.session.blind else f" (id {found.track.track_id})")
+                    + "  "
                     f"{found.offset_hz:+.1f} Hz"
                 )
             else:
@@ -400,6 +435,7 @@ class SingleLabeller:
                 float(event.ydata),
                 window_s=self.window_s,
                 prediction_shown=self._prediction_visible(),
+                elapsed_s=self._elapsed(),
             )
         elif button == 2:
             result = self._mark("chirp_emitter_unclear", via="mouse")
@@ -421,6 +457,7 @@ class SingleLabeller:
                     _KEYS_NUMBERS[key],
                     window_s=self.window_s,
                     prediction_shown=self._prediction_visible(),
+                    elapsed_s=self._elapsed(),
                 )
             )
         elif key == "0":
@@ -428,7 +465,7 @@ class SingleLabeller:
         elif key == "x":
             self._after(self._mark("not_chirp"))
         elif key in ("s", " ", "space"):
-            self._after(self.session.skip(self.index))
+            self._after(self.session.skip(self.index, elapsed_s=self._elapsed()))
         elif key in ("u", "backspace", "ctrl+z"):
             self._after(self.session.undo())
         elif key in ("right", "n"):
@@ -441,6 +478,10 @@ class SingleLabeller:
             self.window_s = self.session.toggle_window(self.window_s)
             self.message = f"window {1e3 * self.window_s:.1f} ms"
             self.show(self.index)
+        elif key == "e" and self.session.blind:
+            self.message = "blind: the model's prediction stays hidden"
+            self._update_text()
+            self.fig.canvas.draw_idle()
         elif key == "e":
             self.show_prediction = not self.show_prediction
             self._decorate()
@@ -459,9 +500,15 @@ class SingleLabeller:
             plt.close(self.fig)
 
     def _prediction_visible(self) -> bool:
-        return self.show_prediction and (
-            prediction_of(self.session.item(self.index)) is not None
+        return (
+            not self.session.blind
+            and self.show_prediction
+            and prediction_of(self.session.item(self.index)) is not None
         )
+
+    def _elapsed(self) -> float:
+        """Seconds since the current item was shown."""
+        return time.perf_counter() - self._shown_at
 
     def _mark(self, label: str, via: str = "key") -> ActionResult:
         return self.session.mark(
@@ -470,6 +517,7 @@ class SingleLabeller:
             window_s=self.window_s,
             prediction_shown=self._prediction_visible(),
             via=via,
+            elapsed_s=self._elapsed(),
         )
 
     def _after(self, result: ActionResult) -> None:

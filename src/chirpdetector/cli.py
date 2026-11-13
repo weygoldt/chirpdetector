@@ -11,6 +11,7 @@ import typer
 from typer.core import TyperGroup
 
 import chirpdetector
+from chirpdetector.cli_benchmark import benchmark_app
 from chirpdetector.cli_data import data_app
 from chirpdetector.cli_pipeline import (
     check_reference_command,
@@ -35,6 +36,7 @@ app.add_typer(data_app, name="data")
 app.command("run")(run_command)
 app.command("render")(render_command)
 app.command("check-reference")(check_reference_command)
+app.add_typer(benchmark_app, name="label-benchmark")
 
 
 @app.callback()
@@ -169,6 +171,17 @@ def label_emitters(
             )
         ),
     ] = 10.0,
+    blind: Annotated[
+        bool,
+        typer.Option(
+            "--blind",
+            help=(
+                "Blind labelling (e.g. the human benchmark): no box, only a time "
+                "marker at its centre; score, source and the model's emitter are "
+                "never shown (e disabled); the time per item is recorded."
+            ),
+        ),
+    ] = False,
     serve: Annotated[
         bool,
         typer.Option(
@@ -204,6 +217,8 @@ def label_emitters(
         raise typer.BadParameter(f"--view must be single or grid, got {view!r}")
     if serve and view == "grid":
         raise typer.BadParameter("--serve shows one candidate at a time (no grid)")
+    if blind and view == "grid":
+        raise typer.BadParameter("--blind needs the single view (the grid draws boxes)")
     out = out.resolve()
     rows_cols = _parse_grid(grid)
     config = QueueConfig(per_bin=per_bin, seed=seed, bin_edges_hz=_parse_bins(bins))
@@ -272,6 +287,7 @@ def label_emitters(
                 tolerance_hz=tolerance_hz,
                 frontend="browser" if serve else "mpl",
                 sources=sources,
+                blind=blind,
             )
             if serve:
                 from chirpdetector.labeling.server import serve_until_interrupted
