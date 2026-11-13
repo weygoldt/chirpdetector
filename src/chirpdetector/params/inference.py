@@ -10,9 +10,14 @@ spectrogram computed with the bundle's front end, the columns
     to natural units.
 ``*_sd_*``
     Calibrated standard deviations in natural units (first order:
-    ``(value + offset) * sigma``, `chirpdetector.params.model.natural_sd`);
-    ``value +- k95 * sd`` (``bundle.calibration.k95``) covered 95 % of the
-    validation chirps.
+    ``(value + offset) * sigma``, `chirpdetector.params.model.natural_sd`).
+    The coverage is calibrated in model space (logs): the interval
+    ``(value + offset) * exp(+-k95 * sigma) - offset`` (``bundle.calibration.
+    k95``) covered 95 % of the validation chirps, ``exp(+-sigma)`` 68 %.
+    ``value +- k95 * sd`` approximates it only for small sigma; it is too
+    narrow above and too wide below, and for undershoot (offset 1 Hz,
+    sigma often > 0.3) it is not a usable interval. With
+    ``sigma = sd / (value + offset)``, compute the interval in log space.
 ``params_ok``, ``params_flag``
     Whether the box is inside the decoder's validated domain, and if not,
     why (comma-separated): ``edge`` (the crop window crosses the start or
