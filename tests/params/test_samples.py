@@ -25,6 +25,8 @@ from chirpdetector.params.truth import scene_truth
 
 from .conftest import footprint_detections
 
+SPLITS_USED = ("train", "val", "test")
+
 
 def _preds(rows: list[tuple[float, float, float, float, float]]) -> pd.DataFrame:
     return pd.DataFrame(
@@ -204,32 +206,42 @@ def test_detector_extraction_matches_predictions(
     assert (np.abs(matched["dt_match_s"].to_numpy(float)) <= 0.1).all()
     # every matched box is its chirp's footprint
     np.testing.assert_allclose(matched["t_start_s"], matched["box_t0_s"])
-    assert samples.manifest["detector_overlap"] == {"train": 0, "val": 0, "test": 0}
+    assert samples.manifest["detector_overlap"] == {
+        s: {"train": 0, "val": 0} for s in ("train", "val", "test")
+    }
 
 
 def test_scenes_the_detector_saw_are_not_val_or_test(
     params_scenes: Path, stub_detector: Bundle, tmp_path: Path
 ) -> None:
-    """A decoder must not be calibrated or scored on the detector's own scenes."""
+    """The decoder is tested on scenes the detector never saw and calibrated
+    on scenes it was not fitted to; sharing its train split is the norm."""
     from dataclasses import replace
 
     refs = discover_scenes([params_scenes])
-    test_id = next(r.source_id for r in refs if r.split == "test")
-    train_id = next(r.source_id for r in refs if r.split == "train")
-    seen = replace(
-        stub_detector,
-        training={"run_id": "stub", "train_groups": [test_id], "val_groups": []},
-    )
-    assert detector_overlap(refs, seen)["test"] == [test_id]
-    with pytest.raises(ValueError, match="val/test scenes of the decoder"):
-        extract_samples(refs, tmp_path / "x", detector=seen, workers=0, device="cpu")
-    assert not (tmp_path / "x").exists()
-    # the detector's training scenes may be the decoder's training scenes
-    fine = replace(
-        stub_detector,
-        training={"run_id": "stub", "train_groups": [], "val_groups": [train_id]},
-    )
-    assert detector_overlap(refs, fine) == {"train": [train_id], "val": [], "test": []}
+    ids = {s: next(r.source_id for r in refs if r.split == s) for s in SPLITS_USED}
+
+    def detector(train: list[str], val: list[str]) -> Bundle:
+        return replace(
+            stub_detector,
+            training={"run_id": "stub", "train_groups": train, "val_groups": val},
+        )
+
+    for train, val, message in (
+        ([ids["test"]], [], "test scenes of the decoder are train scenes"),
+        ([], [ids["test"]], "test scenes of the decoder are val scenes"),
+        ([ids["val"]], [], "val scenes of the decoder are train scenes"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            extract_samples(
+                refs, tmp_path / "x", detector=detector(train, val), workers=0
+            )
+        assert not (tmp_path / "x").exists()
+    allowed = detector([ids["train"]], [ids["val"]])
+    overlap = detector_overlap(refs, allowed)
+    assert overlap["train"]["train"] == [ids["train"]]
+    assert overlap["val"]["val"] == [ids["val"]]
+    assert overlap["test"] == {"train": [], "val": []}
 
 
 def test_natural_prior_weights(params_scenes: Path) -> None:

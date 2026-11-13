@@ -858,27 +858,39 @@ def _identity(
     }
 
 
+DETECTOR_OVERLAP_REFUSED: tuple[tuple[str, str], ...] = (
+    ("test", "train"),
+    ("test", "val"),
+    ("val", "train"),
+)
+"""(decoder split, detector group) pairs `extract_samples` refuses."""
+
+
 def detector_overlap(
     scenes: Sequence[SceneRef], detector: Bundle
-) -> dict[str, list[str]]:
-    """Scenes, per decoder split, that the detector trained or validated on.
+) -> dict[str, dict[str, list[str]]]:
+    """Decoder scenes that the detector trained (``train``) or validated on.
 
     The detector bundle records its dataset groups (``training.train_groups``
     and ``val_groups``; for simulated scenes the group is the scene's source
-    id). A decoder trained on the detector's training scenes sees boxes the
-    detector fits better than on new scenes (recorded, expected); a decoder
-    validated or tested on them would be calibrated or scored on such
-    boxes, which `extract_samples` refuses.
+    id). Returns ``{decoder split: {"train": [...], "val": [...]}}``.
+
+    `extract_samples` refuses `DETECTOR_OVERLAP_REFUSED`: a decoder tested
+    on scenes the detector saw at all, or calibrated on scenes it was fitted
+    to, would be scored or calibrated on boxes better than on new
+    recordings. Allowed and recorded: decoder train scenes that are detector
+    train or val scenes (the production setup trains both on one split), and
+    decoder val scenes that the detector only used to select its epoch.
     """
     groups = {
-        str(g)
-        for key in ("train_groups", "val_groups")
-        for g in detector.training.get(key, []) or []
+        key: {str(g) for g in detector.training.get(f"{key}_groups", []) or []}
+        for key in ("train", "val")
     }
-    out: dict[str, list[str]] = {s: [] for s in SPLITS}
+    out: dict[str, dict[str, list[str]]] = {s: {"train": [], "val": []} for s in SPLITS}
     for ref in scenes:
-        if ref.source_id in groups:
-            out[ref.split].append(ref.source_id)
+        for key, members in groups.items():
+            if ref.source_id in members:
+                out[ref.split][key].append(ref.source_id)
     return out
 
 
@@ -1029,20 +1041,29 @@ def extract_samples(
     extra: dict[str, Any] = {}
     if detector is not None:
         overlap = detector_overlap(scenes, detector)
-        leaked = overlap["val"] + overlap["test"]
-        if leaked:
-            msg = (
-                f"{len(leaked)} val/test scenes of the decoder are training or "
-                f"validation scenes of the detector, e.g. {leaked[0]}; evaluate "
-                "the decoder on scenes the detector has not seen"
-            )
-            raise ValueError(msg)
-        extra["detector_overlap"] = {s: len(v) for s, v in overlap.items()}
-        if overlap["train"]:
+        for split, group in DETECTOR_OVERLAP_REFUSED:
+            leaked = overlap[split][group]
+            if leaked:
+                msg = (
+                    f"{len(leaked)} {split} scenes of the decoder are {group} "
+                    f"scenes of the detector, e.g. {leaked[0]}; the decoder must "
+                    "be tested on scenes the detector never saw and calibrated "
+                    "on scenes it was not fitted to"
+                )
+                raise ValueError(msg)
+        extra["detector_overlap"] = {
+            s: {g: len(v) for g, v in groups.items()} for s, groups in overlap.items()
+        }
+        shared = {
+            f"{s}/{g}": len(v)
+            for s, groups in overlap.items()
+            for g, v in groups.items()
+            if v
+        }
+        if shared:
             say(
-                f"{len(overlap['train'])} of the decoder's train scenes are "
-                "detector training scenes (their boxes fit better than on new "
-                "scenes; val and test are clean)"
+                f"decoder scenes the detector also used (decoder split/detector "
+                f"group): {shared}; allowed, recorded in the manifest"
             )
     if (directory / MANIFEST_FILE).is_file():
         existing = load_samples(directory)
