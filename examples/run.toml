@@ -1,0 +1,42 @@
+# Run config of `chirpdetector run`: detect, decode and assign chirps in whole
+# recordings. Only [run] name is required; every other key has the default
+# shown, except [run] out (chirpdetector.pipeline.config documents them).
+# Relative paths are relative to this file's directory.
+#
+#   chirpdetector run examples/run.toml RECORDING_DIR...
+#   chirpdetector run examples/run.toml --dataset ROOT
+[run]
+name = "my_run"               # outputs go to OUT/<name>/<recording>/
+out = "detections"
+
+[models]
+detector = "default"          # the released dual-head detector (downloaded on first use), or a bundle directory
+decoder = "default"           # the released decoder, a bundle directory, or "" for none
+allow_detector_mismatch = false
+
+[detection]
+store_threshold = 0.05        # every detection down to this score is stored
+operating_threshold = 0.5     # column `operating`; legacy arrays and QC use it
+postprocess = true            # flag harmonic copies and duplicates (rows are kept)
+
+[assignment]
+tracks = "."                  # wavetracker arrays, relative to the recording directory
+tolerance_hz = 20.0
+max_gap_s = 10.0
+baseline_window_s = 1.0
+baseline_guard_s = 0.0
+
+[compute]
+device = "cuda"               # or "cpu"
+max_vram_fraction = 0.4
+chunk_tiles = 48              # 105.6 s per chunk
+click_workers = 2
+clean_processes = 4
+prefetch = 5
+
+[validation]
+qc = true
+windows = 10
+window_s = 10.0
+candidates_per_cell = 6
+seed = 0

@@ -9,8 +9,8 @@ Example (every key optional; these are the defaults)::
     score_threshold = 0.5      # default threshold stored in the bundle
 
     [model]
-    type = "ultralytics-yolo"  # selects the implementation
-    architecture = "yolo26s"   # further keys belong to the implementation
+    type = "dualhead"          # selects the implementation; or "ultralytics-yolo"
+    architecture = "rtdetr_v2_r18vd"  # further keys belong to the implementation
     pretrained = true
 
     [optim]
@@ -34,6 +34,14 @@ Example (every key optional; these are the defaults)::
     n_folds = 5                # 0: no cross-validation
     final_fit = true           # train on all train groups, stop on val groups
 
+The default model is the dual-head RT-DETRv2 (``dualhead``,
+`chirpdetector.models.dualhead`: boxes and the emitter's EOD frequency);
+``type = "ultralytics-yolo"`` selects YOLO26 (`chirpdetector.models.yolo`),
+which predicts boxes only. The ``[optim]`` defaults were tuned for YOLO26;
+the dual-head detector was trained with ``lr0 = 1e-4``, ``lrf = 0.05``,
+``warmup_epochs = 0.5``, ``weight_decay = 1e-4``, ``epochs = 30`` and
+``patience = 6`` (``examples/train_dualhead.toml`` in the repository).
+
 Unknown keys raise at every level, so a typo never silently falls back to a
 default. `DetectorTrainingConfig.to_dict` gives the resolved config (every
 value, including the implementation's defaults), which every run directory
@@ -52,11 +60,15 @@ from typing import Any, Literal, get_args
 from chirpdetector.models import get_backend
 
 __all__ = [
+    "DEFAULT_MODEL_TYPE",
     "AugmentConfig",
     "CVConfig",
     "DetectorTrainingConfig",
     "OptimConfig",
 ]
+
+DEFAULT_MODEL_TYPE = "dualhead"
+"""Model type of a config without ``[model] type``: the dual-head RT-DETRv2."""
 
 Schedule = Literal["cosine", "linear"]
 OPTIMIZERS = (
@@ -211,7 +223,7 @@ class DetectorTrainingConfig:
     ``type`` (that is ``model_type``).
     """
 
-    model_type: str = "ultralytics-yolo"
+    model_type: str = DEFAULT_MODEL_TYPE
     model: Mapping[str, Any] = field(default_factory=dict)
     optim: OptimConfig = field(default_factory=OptimConfig)
     augment: AugmentConfig = field(default_factory=AugmentConfig)
@@ -258,7 +270,7 @@ class DetectorTrainingConfig:
             msg = f"unknown top-level keys: {unknown}; known: {sorted(top)}"
             raise ValueError(msg)
         model = dict(data.pop("model", {}) or {})
-        model_type = str(model.pop("type", "ultralytics-yolo"))
+        model_type = str(model.pop("type", DEFAULT_MODEL_TYPE))
         return cls(
             model_type=model_type,
             model=model,

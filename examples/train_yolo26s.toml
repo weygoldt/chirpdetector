@@ -1,0 +1,37 @@
+# YOLO26s: chirp boxes only (no emitter frequency, so no track assignment in
+# `chirpdetector run`). The settings of the box-only reference model (run
+# yolo26s_sim_v4_r1 on sim_v4).
+#
+#   chirpdetector train detector examples/train_yolo26s.toml \
+#       --dataset DATASET --run-dir RUN
+seed = 0
+deterministic = true
+device = "cuda"
+max_vram_fraction = 0.3
+score_threshold = 0.5
+
+[model]
+type = "ultralytics-yolo"
+architecture = "yolo26s"     # ultralytics downloads the COCO weights
+pretrained = true
+
+[optim]
+epochs = 80
+batch = 32
+optimizer = "AdamW"
+lr0 = 0.001
+lrf = 0.01
+schedule = "cosine"
+warmup_epochs = 1.0
+weight_decay = 0.0005
+momentum = 0.937
+patience = 15
+amp = true
+workers = 8
+
+[augment]
+time_flip = 0.0
+
+[cv]
+n_folds = 0
+final_fit = true

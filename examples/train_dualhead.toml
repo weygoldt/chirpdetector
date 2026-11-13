@@ -1,0 +1,48 @@
+# Dual-head RT-DETRv2-r18: chirp boxes and the emitter's EODf in one pass.
+# The settings of the released detector (run dualhead_r18_sim_v4_r1, best
+# epoch 16 on sim_v4). Needs the `dualhead` extra.
+#
+#   chirpdetector train detector examples/train_dualhead.toml \
+#       --dataset DATASET --run-dir RUN
+#
+# The [optim] defaults of chirpdetector.training.config are tuned for YOLO26;
+# keep the values below for the dual-head.
+seed = 0
+deterministic = false        # deformable attention has no deterministic CUDA backward
+device = "cuda"
+max_vram_fraction = 0.35     # the smaller of this and CHIRP_MAX_VRAM_FRACTION applies
+score_threshold = 0.5        # default threshold stored in the bundle
+
+[model]
+type = "dualhead"
+architecture = "rtdetr_v2_r18vd"   # COCO weights from the Hugging Face hub
+pretrained = true
+num_queries = 300
+num_denoising = 100
+max_det = 50
+emitter_loss_weight = 10.0
+backbone_lr_scale = 0.1
+grad_clip = 0.1
+ema_decay = 0.9999
+time_shift_px = 32
+val_max_images = 2000
+
+[optim]
+epochs = 30
+batch = 16
+optimizer = "AdamW"
+lr0 = 0.0001
+lrf = 0.05
+schedule = "cosine"
+warmup_epochs = 0.5
+weight_decay = 0.0001
+patience = 6                 # epochs without a better validation fitness (AP x assignment accuracy)
+amp = true
+workers = 8
+
+[augment]
+time_flip = 0.0
+
+[cv]
+n_folds = 0                  # no cross-validation: one fit on the train groups,
+final_fit = true             # validated (early stopping, best epoch) on the val groups
