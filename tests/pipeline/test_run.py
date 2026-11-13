@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from chirpdetector.bundle import Bundle
 from chirpdetector.cli import app
 from chirpdetector.pipeline import run as run_module
+from chirpdetector.pipeline.assign import SIM_V4_DUALHEAD
 from chirpdetector.pipeline.candidates import CANDIDATE_COLUMNS
 from chirpdetector.pipeline.config import (
     ConfigError,
@@ -423,11 +424,18 @@ candidates_per_cell = 0
 def test_filter_uses_the_pipeline_assignment(
     tmp_path: Path, stub_bundle: Bundle
 ) -> None:
-    """One assignment: the filter sees track_id as emitter_id, flags, keeps rows."""
+    """One assignment for the filter and the table; re-attribution at 0.5."""
     from gridtools.io import Tracks
 
     from chirpdetector.pipeline.assign import assign_detections
-    from chirpdetector.pipeline.run import _postprocess, build_table, postprocess_config
+    from chirpdetector.pipeline.run import (
+        _postprocess,
+        _with_emitter_id,
+        build_table,
+        postprocess_config,
+        reattributed_assignment,
+    )
+    from chirpdetector.postprocess import flag_detections
 
     times = np.round(np.arange(0.0, 60.0, 0.1), 6)
     t1 = times[(times < 20) | (times > 25)]  # a 5-s gap: live for max_gap 10 s
@@ -438,50 +446,135 @@ def test_filter_uses_the_pipeline_assignment(
         idents=np.r_[np.full(len(t1), 4.0), np.full(len(t2), 9.0)],
         time_indices=np.r_[np.searchsorted(times, t1), np.searchsorted(times, t2)],
     )
+    rows = [
+        # t_start, t_end, f_low, f_high, score, emitter
+        (10.0, 10.2, 690.0, 800.0, 0.9, 701.0),  # 0 chirp of fish 4
+        (10.01, 10.2, 692.0, 795.0, 0.6, 701.5),  # 1 duplicate of 0
+        (30.0, 30.2, 1390.0, 1500.0, 0.8, 1400.5),  # 2 copy, fundamental missed
+        (22.0, 22.2, 690.0, 800.0, 0.7, 700.5),  # 3 in track 4's gap
+        (10.0, 10.2, 1390.0, 1500.0, 0.8, 1401.0),  # 4 copy of 0: stays a copy
+        (40.0, 40.2, 1390.0, 1500.0, 0.4, 1400.0),  # 5 copy below 0.5
+        (50.0, 50.2, 1390.0, 1500.0, 0.8, 1400.0),  # 6 copy; fundamental only at 0.3
+        (50.0, 50.2, 690.0, 790.0, 0.3, 701.0),  # 7 that fundamental
+    ]
     det = pd.DataFrame(
-        {
-            "recording": "r",
-            "t_start_s": [10.0, 10.01, 30.0, 22.0],
-            "t_end_s": [10.2, 10.2, 30.2, 22.2],
-            "f_low_hz": [690.0, 692.0, 1390.0, 690.0],
-            "f_high_hz": [800.0, 795.0, 1500.0, 800.0],
-            "score": [0.9, 0.6, 0.8, 0.7],
-            "emitter_hz": [701.0, 701.5, 1400.5, 700.5],
-            "tile": [1, 1, 2, 3],
-            "span_id": [0, 0, 0, 0],
-        }
-    )
+        rows,
+        columns=[
+            "t_start_s",
+            "t_end_s",
+            "f_low_hz",
+            "f_high_hz",
+            "score",
+            "emitter_hz",
+        ],
+    ).assign(recording="r", tile=1, span_id=0)
+    from chirpdetector.params.inference import ESTIMATE_COLUMNS
+
+    for column in ESTIMATE_COLUMNS:
+        det[column] = {"params_ok": True, "params_flag": ""}.get(column, 1.0)
     cfg = _config(tmp_path, stub_bundle, assignment={"max_gap_s": 10.0})
     assert postprocess_config(cfg).max_gap_s == cfg.assignment.max_gap_s
     assignment = assign_detections(det, tracks, cfg.assignment)
-    flagged, info = _postprocess(det, assignment, tracks, "r", cfg)
+    flagged, info = _postprocess(det, assignment, tracks, "r", cfg, 0.5)
     assert info["status"] == "applied"
-    assert info["counts"]["duplicate"] == 1
-    assert info["counts"]["harmonic"] == 1
-    assert flagged["pp_drop_reason"].tolist() == ["", "duplicate", "harmonic", ""]
+    assert info["reattribution"] == {
+        "enabled": True,
+        "threshold": 0.5,
+        "pass_mismatches": 0,
+    }
+    assert flagged["pp_drop_reason"].tolist() == [
+        "",
+        "duplicate",
+        "",
+        "",
+        "harmonic",
+        "harmonic",
+        "",
+        "",
+    ]
+    assert flagged["pp_reattributed"].tolist() == [
+        "",
+        "",
+        "harmonic",
+        "",
+        "",
+        "",
+        "harmonic",
+        "",
+    ]
+    assert info["counts"]["reattributed"] == 2
     assert flagged["pp_duplicate_of"].tolist()[1] == 0
     assert flagged["pp_harmonic_of_track"].tolist()[2] == 4.0
-    # the detection in track 4's 5-s gap is assigned and protected
-    assert assignment["track_id"].tolist()[3] == 4.0
+    # re-attributed: halved, detected values kept, decoder columns left alone here
+    assert flagged["emitter_hz"].tolist()[2] == pytest.approx(700.25)
+    assert flagged["f_low_hz"].tolist()[2] == pytest.approx(695.0)
+    assert flagged["pp_harmonic_f_low_hz"].tolist()[2] == 1390.0
+    assert np.isnan(flagged["pp_harmonic_f_low_hz"].tolist()[0])
+    # the decoder never saw harmonic crops: its values are void on copies
+    assert np.isnan(flagged["height_hz"].tolist()[2])
+    assert np.isnan(flagged["height_raw_hz"].tolist()[2])
+    assert (
+        flagged["params_ok"].tolist()[2] is False
+        or not flagged["params_ok"].tolist()[2]
+    )
+    assert flagged["params_flag"].tolist()[2] == "harmonic"
+    assert flagged["height_hz"].tolist()[0] == 1.0
+    assert flagged["params_flag"].tolist()[4] == ""
+    # at the operating threshold this is exactly the filter on the rows above it
+    above = (det["score"] >= 0.5).to_numpy()
+    reference = flag_detections(
+        _with_emitter_id(det, assignment).loc[above],
+        {"r": tracks},
+        postprocess_config(cfg),
+    )
+    np.testing.assert_array_equal(
+        flagged.loc[above, "pp_drop_reason"].to_numpy(),
+        reference["drop_reason"].to_numpy(),
+    )
+    np.testing.assert_array_equal(
+        flagged.loc[above, "pp_reattributed"].to_numpy(),
+        reference["reattributed"].to_numpy(),
+    )
+    # one pass at the store threshold would not re-attribute copy 6
+    store = flag_detections(
+        _with_emitter_id(det, assignment), {"r": tracks}, postprocess_config(cfg)
+    )
+    assert store["reattributed"].tolist()[6] == ""
+    # the copies go to their fish
+    assigned = reattributed_assignment(
+        flagged, assignment, tracks, cfg, SIM_V4_DUALHEAD
+    )
+    assert assigned["assign_status"].tolist()[2] == "reattributed"
+    assert assigned["track_id"].tolist()[2] == 4.0
+    assert assigned["track_hz"].tolist()[2] == pytest.approx(700.0)
+    assert assigned["emitter_track_df_hz"].tolist()[2] == pytest.approx(0.25)
+    assert np.isnan(assigned["assign_confidence"].tolist()[2])
+    assert assigned["track_id"].tolist()[3] == 4.0  # in the gap, live for 10 s
+    assert assigned["assign_status"].tolist()[4] == "beyond_tolerance"
     chunks = pd.DataFrame(
         {"span_id": [0], "click_fraction": [0.0], "n_click_runs": [0]}
     )
-    table = build_table("r", flagged, assignment, chunks, 0.5)
-    assert table["kept"].tolist() == [True, False, True, False]  # sorted by time
+    table = build_table("r", flagged, assigned, chunks, 0.5)
+    by_time = table.sort_values("t_center_s")
     assert table.loc[
         table["pp_drop_reason"] == "duplicate", "pp_duplicate_of"
     ].tolist() == [0]
-    _, ids_out = legacy_arrays(table)
-    np.testing.assert_array_equal(ids_out, [4.0, 4.0])  # neither copy nor duplicate
+    times_out, ids_out = legacy_arrays(table)
+    # chirps of fish 4: rows 0, 3 and the re-attributed copies 2 and 6
+    np.testing.assert_array_equal(ids_out, [4.0, 4.0, 4.0, 4.0])
+    np.testing.assert_allclose(times_out, [10.1, 22.1, 30.1, 50.1])
+    assert int(by_time["chirp"].to_numpy().sum()) == 4
     off, off_info = _postprocess(
         det,
         assignment,
         tracks,
         "r",
         cfg.with_overrides(detection={"postprocess": False}),
+        0.5,
     )
     assert off_info["status"] == "off"
     assert (off["pp_drop_reason"].to_numpy() == "").all()
+    assert (off["pp_reattributed"].to_numpy() == "").all()
 
 
 def test_decoder_columns_appear_once_in_order(

@@ -12,7 +12,11 @@ assignment of the production output can be audited by hand:
   (``edge``, ``band``, ``size``, ``uncertain``): 2 x ``candidates_per_cell``
   per flag;
 - detections that post-processing flagged (``harmonic``, ``duplicate``):
-  3 x ``candidates_per_cell`` per reason.
+  3 x ``candidates_per_cell`` per reason;
+- harmonic copies re-attributed to their fish: up to 5 x
+  ``candidates_per_cell``. Their box is the table's, at the fundamental
+  (where the fish's missed chirp should be); the detected box at the
+  harmonic is in ``candidates_strata.csv`` (``pp_harmonic_*``).
 
 Within a stratum every recording is equally likely (rows are weighted by
 the inverse of their recording's count in the stratum), so dense
@@ -156,6 +160,9 @@ def write_candidates(run_dir: Path, config: PipelineConfig) -> dict[str, Any]:
     reasons = df["pp_drop_reason"].astype(str)
     for reason in ("harmonic", "duplicate"):
         add(df.loc[(reasons == reason).to_numpy()], 3 * k, f"postprocess={reason}")
+    if "pp_reattributed" in df.columns:
+        again = df["pp_reattributed"].astype(str).to_numpy() == "harmonic"
+        add(df.loc[again], 5 * k, "postprocess=reattributed")
     sample = pd.concat(parts, ignore_index=True)
     out = pd.DataFrame(
         {
@@ -189,7 +196,13 @@ def write_candidates(run_dir: Path, config: PipelineConfig) -> dict[str, Any]:
         "second_df_hz",
         "track_df_other_hz",
         "n_live_tracks",
+        "pp_reattributed",
+        "pp_harmonic_of_track",
+        "pp_harmonic_f_low_hz",
+        "pp_harmonic_f_high_hz",
+        "pp_harmonic_emitter_hz",
     ]
+    strata_cols = [c for c in strata_cols if c in sample.columns]
     if "params_flag" in sample.columns:
         strata_cols.append("params_flag")
     sample.loc[:, strata_cols].to_csv(run_dir / "candidates_strata.csv", index=False)

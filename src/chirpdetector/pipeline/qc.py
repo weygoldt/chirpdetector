@@ -15,6 +15,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from chirpdetector.pipeline.assign import ATTRIBUTED
+
 __all__ = ["write_qc"]
 
 _TOP_TRACKS = 6
@@ -24,7 +26,8 @@ def _rate_panel(ax: Any, table: pd.DataFrame, duration_s: float, bin_s: float) -
     chirps = table.loc[table["chirp"].to_numpy(dtype=bool)]
     edges = np.arange(0.0, max(duration_s, bin_s) + bin_s, bin_s)
     centres = 0.5 * (edges[:-1] + edges[1:]) / 3600
-    assigned = chirps.loc[chirps["assign_status"] == "assigned"]
+    attributed = np.isin(chirps["assign_status"].to_numpy(dtype=object), ATTRIBUTED)
+    assigned = chirps.loc[attributed]
     counts = assigned["track_id"].value_counts()
     top = counts.index[:_TOP_TRACKS].tolist()
     for tid in top:
@@ -43,7 +46,7 @@ def _rate_panel(ax: Any, table: pd.DataFrame, duration_s: float, bin_s: float) -
             color="0.5",
             label=f"other tracks (n={len(rest)})",
         )
-    un = chirps.loc[chirps["assign_status"] != "assigned", "t_center_s"].to_numpy()
+    un = chirps.loc[~attributed, "t_center_s"].to_numpy()
     if len(un):
         h, _ = np.histogram(un, edges)
         ax.plot(
@@ -56,7 +59,13 @@ def _rate_panel(ax: Any, table: pd.DataFrame, duration_s: float, bin_s: float) -
         )
     ax.set_xlabel("time (h)")
     ax.set_ylabel(f"chirps / min ({bin_s / 60:g}-min bins)")
-    ax.set_title("chirp rate per track (chirps = operating & kept)")
+    n_again = int(
+        np.sum(chirps["assign_status"].to_numpy(dtype=object) == "reattributed")
+    )
+    ax.set_title(
+        "chirp rate per track (chirps = operating & kept; "
+        f"{n_again} re-attributed harmonics included)"
+    )
     ax.legend(fontsize=7, frameon=False)
 
 
@@ -226,6 +235,11 @@ def _summary(table: pd.DataFrame, chunks: pd.DataFrame, op: float) -> dict[str, 
             str(k): int(v)
             for k, v in table.loc[chirp, "assign_status"].value_counts().items()
         },
+        "reattributed": int(
+            np.sum(table["pp_reattributed"].to_numpy(dtype=object) == "harmonic")
+        )
+        if "pp_reattributed" in table.columns
+        else 0,
     }
     d = table.loc[chirp, "nearest_df_hz"].to_numpy(dtype=float)
     d = d[np.isfinite(d)]
@@ -260,6 +274,9 @@ def _markdown(name: str, meta: dict[str, Any], s: dict[str, Any]) -> str:
         lines.append(f"| flagged as {k} (operating) | {v} |")
     for k, v in (s.get("status") or {}).items():
         lines.append(f"| chirps {k} | {v} |")
+    lines.append(
+        f"| harmonic copies re-attributed to their fish | {s.get('reattributed', 0)} |"
+    )
     for q, v in (s.get("nearest_df_hz_quantiles") or {}).items():
         lines.append(f"| nearest-track distance q{q} | {v:.2f} Hz |")
     if "click_fraction_mean" in s:
