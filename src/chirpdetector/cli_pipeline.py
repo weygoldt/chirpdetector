@@ -32,10 +32,12 @@ def run_command(
         ),
     ] = None,
     out: Annotated[
-        Path | None, typer.Option("--out", help="Output root (overrides [run] out).")
+        Path | None,
+        typer.Option("--out", help="Output root (overrides the config's run.out)."),
     ] = None,
     name: Annotated[
-        str | None, typer.Option("--name", help="Run name (overrides [run] name).")
+        str | None,
+        typer.Option("--name", help="Run name (overrides the config's run.name)."),
     ] = None,
     dry_run: Annotated[
         bool,
@@ -55,11 +57,16 @@ def run_command(
         bool, typer.Option("--redo", help="Recompute recordings that are complete.")
     ] = False,
     device: Annotated[
-        str | None, typer.Option("--device", help="Torch device (overrides [compute]).")
+        str | None,
+        typer.Option(
+            "--device", help="Torch device (overrides the config's compute.device)."
+        ),
     ] = None,
     vram: Annotated[
         float | None,
-        typer.Option("--vram", help="GPU memory fraction (overrides [compute])."),
+        typer.Option(
+            "--vram", help="GPU memory fraction (overrides compute.max_vram_fraction)."
+        ),
     ] = None,
     list_only: Annotated[
         bool,

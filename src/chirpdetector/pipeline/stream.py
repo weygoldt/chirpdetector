@@ -43,7 +43,8 @@ apart, so the result equals one global call).
 On the CPU the spectrogram of a chunk is bit-identical to the same frames of
 the whole recording, and so are the detections; on CUDA the spectrogram
 agrees within 1e-6 relative (`compute_spectrogram_span`), which can flip a
-pixel's rounding (see ``scripts/pipeline_equivalence.py``).
+pixel's rounding (``chirpdetector check-reference`` compares the two on a
+part of any recording).
 """
 
 from __future__ import annotations

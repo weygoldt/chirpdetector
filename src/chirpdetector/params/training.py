@@ -2,9 +2,9 @@
 
 Typical use::
 
-    chirpdetector train params params.toml \\
-        --scenes /mnt/data1/chirp_v2/scenes/train_v3 \\
-        --detector /mnt/data1/chirp_v2/runs/yolo26s_sim_v3_r1/final/bundle \\
+    chirpdetector train params examples/train_params.toml \\
+        --scenes /mnt/data1/chirp_v2/scenes/train_v4 \\
+        --detector /mnt/data1/chirp_v2/runs/dualhead_r18_sim_v4_r1/final/bundle \\
         --run-dir /mnt/data1/chirp_v2/params/runs/p1
 
 (run it through ``scripts/guarded``; the GPU is shared). `train_params`

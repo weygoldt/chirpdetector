@@ -21,10 +21,13 @@ Coupling of the error to the chirp's own parameters (`coupling`)
     absolute error with every true parameter. Answers whether, at equal
     SNR, small (or short, or long) chirps are measured worse.
 Template reuse (`template_reuse`)
-    The simulator draws chirps from one template library for all splits,
-    so most test chirps reuse a template (and every one an individual) that
-    the decoder was trained on, in another scene. The fractions are
-    reported and the breakdowns separate chirps on unseen templates.
+    Fractions of test chirps whose template, or whose individual (template
+    group), also occurs among the decoder's training chirps; the breakdowns
+    separate chirps on unseen templates. Without fish-disjoint template
+    splits (`gridtools.templates.splits`) the simulator draws every split
+    from one template pool, so most test chirps reuse a training template;
+    with them (scenes ``train_v4``), none does and the test measures new
+    fish.
 Uncertainty (`coverage`)
     Fraction of chirps whose error is within ±1 sd and ±k95 sd, and the
     rank correlation of sd and |error|; calibration by sd quintile.

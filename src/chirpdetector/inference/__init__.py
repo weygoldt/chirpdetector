@@ -17,8 +17,8 @@ re-attributed to its fish at half the frequency instead.
 `detect_in_spectrogram` is the detection step on an already computed
 spectrogram (it makes the decoder's training boxes).
 
-Streaming inference over whole recordings (chunked, with global
-de-duplication and the legacy output tables) builds on this later.
+Whole recordings: `chirpdetector.pipeline` (``chirpdetector run``)
+computes the same result chunk by chunk and writes the output tables.
 """
 
 from chirpdetector.inference.spans import (
