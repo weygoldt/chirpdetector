@@ -222,6 +222,20 @@ two kinds of false positives:
   its chirps. Without tracks, a detection at half the frequency of a
   co-occurring, at least as confident one is only flagged
   (`harmonic_pair_of`), unless `PostprocessConfig(trackless="drop")`.
+  A copy whose fundamental was not detected (no kept box overlapping it in
+  time, temporal IoU >= 0.3, that spans the fish's frequency or is assigned
+  to it) is the only trace of a real chirp: it is kept and re-attributed
+  (`reattributed = "harmonic"`, `harmonic_of_id`, and `emitter_id` with an
+  emitter head), reported at half the frequency (`emitter_hz`, `f_low_hz`,
+  `f_high_hz` halved; the detected values in `harmonic_emitter_hz`,
+  `harmonic_f_low_hz`, `harmonic_f_high_hz`), with NaN decoder values
+  (`params_flag = "harmonic"`). `PostprocessConfig(reattribute_harmonics=False)`
+  drops these copies too. On the real labels nothing is re-attributed (every
+copy has its fundamental). On sim_v4 at 0.5, the dual-head re-attributes 1
+copy, which matches its missed chirp (TP 8,999 -> 9,000, FP unchanged);
+YOLO26s re-attributes 12, all false positives at tracks without a labelled
+chirp, 9 of them at a real background fish (FP 101 -> 113, F1 0.970 ->
+0.969). For box-only models, consider switching it off.
 - *duplicates*: two boxes on one chirp, the higher score is kept. With an
   emitter head: `emitter_hz` within 5 Hz, the same `emitter_id` and
   temporal IoU >= 0.7; box-only: lower edges within 2 Hz, temporal and

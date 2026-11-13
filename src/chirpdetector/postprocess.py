@@ -101,6 +101,12 @@ copies had no overlapping kept detection *assigned* to their track, but
 labelled chirp nearby. With the frequency criterion, 1 copy remained, on
 a chirp whose fundamental was missed.
 
+Measured at score 0.5 (detections above the threshold post-processed, as
+in `predict_span`): nothing re-attributed on the real labels; on sim_v4,
+the dual-head re-attributed 1 copy, which matched its missed chirp, and
+YOLO26s 12, all false positives at tracks without a labelled chirp (9 at
+a real background fish). For box-only models the gain is not shown.
+
 Re-attribution depends on which fundamentals are detected, so unlike the
 rest it does not commute with the score threshold: apply it to the
 detections that are reported (`predict_span` does, at its threshold).
