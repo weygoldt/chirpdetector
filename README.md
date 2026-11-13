@@ -135,6 +135,49 @@ stratified bootstrap CIs and a figure of recall against SNR.
 simulated true chirps with similar decoded height, FWHM and contrast
 (never from the benchmark's scenes).
 
+#### Benchmark v2: edge cases, several models, repeats
+
+`label-benchmark build-v2` (`chirpdetector.labeling.benchmark_v2`) samples
+from new simulated test scenes so that the report can say where a model
+works and where it does not. Every visible chirp falls into one stratum,
+rarest feature first (gap in the emitter's track, click nearby, baseline at
+another fish's 2nd harmonic, rippled/plateau, long, short, ΔF to the
+nearest fish 0-5 / 5-10 Hz, overlap with another fish's chirp, bout, drift
+or rise, few electrodes, ΔF 10-25 / 25-50 Hz), the rest into SNR quartile
+x excursion cells; weights reweight any group to all visible test chirps.
+Negatives: each model's false alarms across the whole score range,
+harmonic copies (fundamental detected or not), clicks, beats, rises,
+plain baselines; repeats of already labelled items (`retest_of`) measure
+test-retest agreement. Blind sessions show neither the box, nor the model,
+nor recording names or item ids.
+
+```sh
+B=/mnt/data1/chirp_v2/labels/benchmark
+uv run chirpdetector label-benchmark features SCENE... --out $B/features \
+    --templates /mnt/data1/chirp_v2/templates/v4/templates.parquet
+uv run chirpdetector label-benchmark gaps --scenes SCENES --features $B/features --out GAPS
+uv run chirpdetector label-benchmark build-v2 --scenes SCENES --features $B/features \
+    --gap-root GAPS --repeat-from $B/human_benchmark_v1_truth.parquet \
+    --model dualhead=$B/models/dualhead --model yolo26s=$B/models/yolo26s --model v1=$B/models/v1:v1 \
+    --candidates .../human_benchmark_v2_extra.parquet --truth $B/human_benchmark_v2_extra_truth.parquet
+uv run chirpdetector label-benchmark score --out REPORT \
+    --set v1_final=$B/human_benchmark_v1_truth.parquet:LABELS_V1 \
+    --set v2_extra=$B/human_benchmark_v2_extra_truth.parquet:LABELS_V2 \
+    --model dualhead=$B/models/dualhead --model yolo26s=$B/models/yolo26s --model v1=$B/models/v1:v1 \
+    --features $B/features
+```
+
+Model directories hold one `<scene>.parquet` of `predict_span` (tracks,
+post-processing on, `keep_dropped=True`, score >= 0.05), or the v1 runner's
+`<dataset>/<scene>.csv` (`:v1`). A true chirp counts as detected if a
+reported detection (kept or re-attributed) at score >= the threshold matches
+it one-to-one, as in the evaluation. The report (`report.md`, figures as PNG
+and PDF, tables as CSV) gives recall by SNR, excursion, ΔF and edge case,
+false alarms per negative type, harmonic outcomes, emitter accuracy by ΔF,
+invisible chirps, human time and test-retest agreement, with bootstrap CIs
+and exact McNemar tests, and a table of where the production model is
+better, equal or worse than the human.
+
 ## Evaluating detections
 
 `chirpdetector evaluate` scores predictions against hand labels (audian files

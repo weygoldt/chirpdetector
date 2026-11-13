@@ -355,7 +355,7 @@ class SingleLabeller:
             else f"{item.t_start_s:.3f}-{item.t_end_s:.3f} s"
         )
         text = (
-            f"{item.trial}   {when}   {delta} "
+            f"{'' if session.blind else item.trial + '   '}{when}   {delta} "
             f"({item.df_bin})   tracks {listed or 'none'}   [{state}]"
         )
         prediction = None if session.blind else prediction_of(item)
