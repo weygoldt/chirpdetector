@@ -26,7 +26,7 @@ from chirpdetector.params.truth import PARAMETERS
 if TYPE_CHECKING:
     from chirpdetector.params.evaluation import ParamsEvaluation
 
-__all__ = ["write_report"]
+__all__ = ["real_section", "write_report"]
 
 _LABELS = {
     "height_hz": "height (Hz)",
@@ -591,6 +591,51 @@ def _fidelity_table(table: pd.DataFrame) -> str:
     return _table(pd.DataFrame(rows))
 
 
+def real_section(real: dict[str, Any], *, figure: bool = False) -> list[str]:
+    """Markdown of the real-data agreement (`agreement_summary` output)."""
+    rows = []
+    for p in PARAMETERS:
+        v = real.get(p)
+        if not isinstance(v, dict):
+            continue
+        rows.append(
+            {
+                "parameter": p,
+                "n": v["n"],
+                "median abs. difference": _err(v["median_abs_difference"], p),
+                "median rel. difference": f"{100 * v['median_rel_difference']:.0f} %",
+                "median difference": _err(v["median_difference"], p),
+                "Pearson r": f"{v['pearson_r']:.2f}",
+                "Spearman r": f"{v['spearman_r']:.2f}",
+                "reference median": _err(v["ref_median"], p),
+                "reference sd": _err(v["ref_sd"], p) if "ref_sd" in v else "-",
+                "sim r, same range": f"{v['sim_pearson_r']:.2f} (n {v['sim_n']})"
+                if "sim_pearson_r" in v
+                else "-",
+                "sim median abs. error, same range": _err(v["sim_median_abs_error"], p)
+                if "sim_median_abs_error" in v
+                else "-",
+            }
+        )
+    return [
+        "## Real data: agreement with an independent trace estimate",
+        "",
+        f"{real.get('detected')} of {real.get('n')} harvested long chirps of the "
+        "competition recordings were detected (and matched) by the detector. The "
+        "reference is the per-period parameters of each chirp's extracted "
+        "frequency trace; differences are agreement, not error. These chirps are "
+        "also templates of the simulation library (the decoder trained on them in "
+        "simulated scenes), and all are big chirps: real small chirps are not "
+        "checked here.",
+        "",
+        _table(pd.DataFrame(rows)) if rows else "(too few detected)",
+        "",
+        *_real_context(real),
+        "![real](fig_real.png)" if figure else "",
+        "",
+    ]
+
+
 def _real_context(real: dict[str, Any]) -> list[str]:
     lines = [
         "How to read r: the harvested chirps cover a narrow range of values, so a "
@@ -796,45 +841,9 @@ def write_report(result: ParamsEvaluation, out_dir: str | Path) -> Path:
         "",
     ]
     if result.real is not None:
-        real = metrics.get("real_agreement", {})
-        rows = [
-            {
-                "parameter": p,
-                "n": v["n"],
-                "median abs. difference": _err(v["median_abs_difference"], p),
-                "median rel. difference": f"{100 * v['median_rel_difference']:.0f} %",
-                "median difference": _err(v["median_difference"], p),
-                "Pearson r": f"{v['pearson_r']:.2f}",
-                "Spearman r": f"{v['spearman_r']:.2f}",
-                "reference median": _err(v["ref_median"], p),
-                "reference sd": _err(v["ref_sd"], p) if "ref_sd" in v else "-",
-                "sim r, same range": f"{v['sim_pearson_r']:.2f} (n {v['sim_n']})"
-                if "sim_pearson_r" in v
-                else "-",
-                "sim median abs. error, same range": _err(v["sim_median_abs_error"], p)
-                if "sim_median_abs_error" in v
-                else "-",
-            }
-            for p, v in real.items()
-            if isinstance(v, dict)
-        ]
-        lines += [
-            "## Real data: agreement with an independent trace estimate",
-            "",
-            f"{real.get('detected')} of {real.get('n')} harvested long chirps of the "
-            "competition recordings were detected (and matched) by the detector. The "
-            "reference is the per-period parameters of each chirp's extracted "
-            "frequency trace; differences are agreement, not error. These chirps are "
-            "also templates of the simulation library (the decoder trained on them in "
-            "simulated scenes), and all are big chirps: real small chirps are not "
-            "checked here.",
-            "",
-            _table(pd.DataFrame(rows)) if rows else "(too few detected)",
-            "",
-            *_real_context(real),
-            "![real](fig_real.png)" if figures["real"] else "",
-            "",
-        ]
+        lines += real_section(
+            metrics.get("real_agreement", {}), figure=figures["real"] is not None
+        )
     background = bundle.training.get("config", {}).get("scene_background", "any")
     scenes_used = {
         "hybrid": "real background segments (hybrid scenes) only",

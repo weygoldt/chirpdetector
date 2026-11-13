@@ -17,6 +17,7 @@ from chirpdetector.inference import predict_span
 from chirpdetector.params import PARAM_COLUMNS, ParamsEstimator, load_params_bundle
 from chirpdetector.params.bundle import ParamsBundle
 from chirpdetector.params.evaluation import agreement_summary
+from chirpdetector.params.report import real_section
 from chirpdetector.params.samples import discover_scenes
 from chirpdetector.params.training import ParamsTrainingConfig, train_params
 
@@ -377,6 +378,9 @@ def test_agreement_summary_gives_the_simulated_correlation_over_the_same_range()
         }
     )
     summary = agreement_summary(real, sim=sim)
+    text = "\n".join(real_section(summary))  # nested entries are not parameters
+    assert "| height_hz | 300 |" in text
+    assert "individuals; the largest contributes 83 %" in text
     h = summary["height_hz"]
     assert np.corrcoef(sim["true_height_hz"], sim["cal_height_hz"])[0, 1] > 0.9
     assert h["sim_pearson_r"] < 0.6  # the same error over the narrow range
