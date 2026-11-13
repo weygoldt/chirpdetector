@@ -1,7 +1,8 @@
 """The Markdown documentation's relative links resolve.
 
 Every link and image in ``README.md`` and ``docs/*.md`` that is not a URL
-must point to an existing file or directory of the repository, and a
+(Markdown links and images, and the ``src``/``srcset`` of HTML tags such as
+``<picture>``) must point to an existing file or directory of the repository, and a
 ``#fragment`` must name a heading of the target page (GitHub's anchors).
 """
 
@@ -15,6 +16,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 PAGES = sorted([ROOT / "README.md", *(ROOT / "docs").glob("*.md")])
 LINK = re.compile(r"!?\[[^\]]*\]\(<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\)")
+HTML_SRC = re.compile(r"\b(?:src|srcset)=\"([^\"\s]+)")
 FENCE = re.compile(r"^(```|~~~)")
 
 
@@ -54,7 +56,7 @@ def links(page: Path) -> list[str]:
     """Relative link targets of a page (URLs and mail links excluded)."""
     targets = []
     for line in _prose(page.read_text()):
-        for target in LINK.findall(line):
+        for target in [*LINK.findall(line), *HTML_SRC.findall(line)]:
             if not re.match(r"^[a-z][a-z0-9+.-]*:", target):
                 targets.append(target)
     return targets
