@@ -17,6 +17,7 @@ from chirpdetector.postprocess import (
     duplicates,
     flag_detections,
     postprocess,
+    reattribution_enabled,
     summarize,
 )
 
@@ -339,10 +340,28 @@ def test_reattribution_keeps_a_fish_at_twice_the_frequency() -> None:
     assert flagged.loc[0, "emitter_hz"] == 1201.0
 
 
+def test_reattribution_is_automatic_by_emitter_head() -> None:
+    tracks = {"r": constant_tracks({1: 640.0})}
+    head = pd.DataFrame([box(5.0, 1250, 1450, 0.8, emitter=1283.0)])
+    edge = pd.DataFrame([box(5.0, 1255, 1450, 0.8)])
+    auto = PostprocessConfig()
+    assert auto.reattribute_harmonics is None
+    assert reattribution_enabled(auto, head)
+    assert not reattribution_enabled(auto, edge)
+    # auto: on with an emitter head, off for box-only models
+    assert flag_detections(head, tracks)["reattributed"].tolist() == ["harmonic"]
+    assert reasons(flag_detections(edge, tracks)) == ["harmonic"]
+    # explicit values override
+    on = PostprocessConfig(reattribute_harmonics=True)
+    assert flag_detections(edge, tracks, on)["reattributed"].tolist() == ["harmonic"]
+    assert reasons(flag_detections(head, tracks, FLAG_ONLY)) == ["harmonic"]
+
+
 def test_box_only_copies_are_halved_without_assignment() -> None:
     tracks = {"r": constant_tracks({1: 645.0, 2: 760.0})}
     table = pd.DataFrame([box(5.0, 1258, 1430, 0.8), box(9.0, 700, 820, 0.9)])
-    flagged = flag_detections(table, tracks)
+    on = PostprocessConfig(reattribute_harmonics=True)
+    flagged = flag_detections(table, tracks, on)
     assert reasons(flagged) == ["", ""]
     assert flagged["reattributed"].tolist() == ["harmonic", ""]
     assert (flagged.loc[0, "f_low_hz"], flagged.loc[0, "f_high_hz"]) == (629.0, 715.0)
@@ -351,7 +370,7 @@ def test_box_only_copies_are_halved_without_assignment() -> None:
     assert np.isnan(flagged.loc[0, "harmonic_emitter_hz"])
     # with its fundamental detected, the copy is dropped
     both = pd.concat([table, pd.DataFrame([box(5.0, 600, 760, 0.95)])])
-    assert reasons(flag_detections(both, tracks)) == ["harmonic", "", ""]
+    assert reasons(flag_detections(both, tracks, on)) == ["harmonic", "", ""]
 
 
 def test_reattributed_copies_lose_their_decoder_values() -> None:

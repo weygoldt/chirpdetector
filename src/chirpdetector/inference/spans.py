@@ -63,6 +63,7 @@ from chirpdetector.postprocess import (
     PostprocessConfig,
     drop_flagged,
     flag_detections,
+    reattribution_enabled,
     summarize,
 )
 from chirpdetector.prediction import load_detector, predict_images
@@ -541,6 +542,7 @@ def predict_span(
         flagged = flag_detections(detections, by_name, config)
         provenance["postprocess"] = {
             **config.to_dict(),
+            "reattribute_harmonics_resolved": reattribution_enabled(config, detections),
             "keep_dropped": keep_dropped,
             "counts": summarize(flagged),
         }

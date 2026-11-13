@@ -76,7 +76,8 @@ fish). Wide windows trade precision for recall, on purpose.
 Re-attribution
 --------------
 A copy whose fundamental was not detected is the only trace of a real
-chirp. With ``reattribute_harmonics`` (default), such a copy is kept and
+chirp. With ``reattribute_harmonics`` (default: on for emitter-head
+detections, off for box-only ones, see below), such a copy is kept and
 reported at the fundamental instead of dropped: ``emitter_hz``,
 ``f_low_hz`` and ``f_high_hz`` are halved (the detected values move to
 ``harmonic_emitter_hz``, ``harmonic_f_low_hz``, ``harmonic_f_high_hz``),
@@ -105,7 +106,8 @@ Measured at score 0.5 (detections above the threshold post-processed, as
 in `predict_span`): nothing re-attributed on the real labels; on sim_v4,
 the dual-head re-attributed 1 copy, which matched its missed chirp, and
 YOLO26s 12, all false positives at tracks without a labelled chirp (9 at
-a real background fish). For box-only models the gain is not shown.
+a real background fish). Hence the automatic default: on with an
+emitter head, off for box-only models (``reattribute_harmonics=None``).
 
 Re-attribution depends on which fundamentals are detected, so unlike the
 rest it does not commute with the score threshold: apply it to the
@@ -226,6 +228,7 @@ __all__ = [
     "harmonic_pairs",
     "postprocess",
     "reattributable_copies",
+    "reattribution_enabled",
     "summarize",
 ]
 
@@ -305,7 +308,9 @@ class PostprocessConfig:
     reattribute_harmonics
         Keep a harmonic copy without a detected fundamental, re-attributed
         to its fish at half the frequency (module docstring), instead of
-        dropping it.
+        dropping it. None (default): automatic, on for detections with an
+        emitter head (an ``emitter_hz`` column), off for box-only models;
+        True or False overrides (`reattribution_enabled`).
     reattribute_min_tiou
         Temporal IoU from which a kept detection counts as the copy's
         fundamental.
@@ -328,7 +333,7 @@ class PostprocessConfig:
     duplicate_edge_tolerance_hz: float = 2.0
     duplicate_edge_min_tiou: float = 0.5
     duplicate_edge_min_fiou: float = 0.5
-    reattribute_harmonics: bool = True
+    reattribute_harmonics: bool | None = None
     reattribute_min_tiou: float = 0.3
 
     def __post_init__(self) -> None:
@@ -642,6 +647,18 @@ def duplicates(
     return twin
 
 
+def reattribution_enabled(config: PostprocessConfig, predictions: pd.DataFrame) -> bool:
+    """``config.reattribute_harmonics``, resolved for a table.
+
+    None means automatic: on if the detections carry an emitter frequency
+    (``emitter_hz`` column, an emitter-head model), off for box-only
+    models, where all simulated re-attributions were false positives.
+    """
+    if config.reattribute_harmonics is None:
+        return "emitter_hz" in predictions.columns
+    return bool(config.reattribute_harmonics)
+
+
 def reattributable_copies(
     predictions: pd.DataFrame,
     tracks: Tracks,
@@ -762,6 +779,7 @@ def flag_detections(
     pair_of = np.full(n, -1, dtype=np.int64)
     duplicate_of = np.full(n, -1, dtype=np.int64)
     groups = _recording_rows(out) if n else []
+    reattribute = config.harmonic and reattribution_enabled(config, out)
     for name, rows in groups:
         part = out.iloc[rows]
         rec_tracks = None if tracks is None or name is None else tracks.get(name)
@@ -782,7 +800,7 @@ def flag_detections(
             has = twin >= 0
             reason[rows[has]] = "duplicate"
             duplicate_of[rows[has]] = rows[twin[has]]
-        if config.harmonic and config.reattribute_harmonics and rec_tracks is not None:
+        if reattribute and rec_tracks is not None:
             again = reattributable_copies(
                 part, rec_tracks, config, reason[rows], harmonic_of[rows]
             )
