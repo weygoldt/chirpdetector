@@ -792,7 +792,11 @@ def evaluate_params_command(
 @app.command("showcase")
 def showcase_command(
     snippets: Annotated[
-        Path, typer.Option(exists=True, help="TOML file with [[snippet]] entries.")
+        Path,
+        typer.Option(
+            exists=True,
+            help="TOML file of snippet tables (chirpdetector.evaluation.showcase).",
+        ),
     ],
     out: Annotated[Path, typer.Option(help="Output directory (sheet, panels, index).")],
     bundle: Annotated[

@@ -13,7 +13,8 @@ it into a track id.
 
 `predict_dataset` does the same for images of a detector dataset (each
 image is one "recording", as in `chirpdetector.data.dataset_ground_truth`).
-Streaming inference on whole recordings comes later.
+Spans of recordings: `chirpdetector.inference.predict_span`; whole
+recordings: `chirpdetector.pipeline`.
 """
 
 from __future__ import annotations

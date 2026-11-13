@@ -19,13 +19,30 @@ from chirpdetector.training import (
 
 
 def test_defaults_resolve_the_model_section() -> None:
+    # The dual-head RT-DETRv2 is the default model; YOLO26 is the box-only option.
     config = DetectorTrainingConfig()
-    assert config.model_type == "ultralytics-yolo"
-    assert config.model["architecture"] == "yolo26s"
+    assert config.model_type == "dualhead"
+    assert config.model["architecture"] == "rtdetr_v2_r18vd"
+    assert config.model["pretrained"] is True
     assert config.augment.time_flip == 0.0
     data = config.to_dict()
-    assert data["model"]["type"] == "ultralytics-yolo"
+    assert data["model"]["type"] == "dualhead"
     assert DetectorTrainingConfig.from_dict(data) == config
+    assert DetectorTrainingConfig.from_dict({}) == config
+
+
+def test_a_model_table_without_type_is_the_dualhead() -> None:
+    config = DetectorTrainingConfig.from_dict(
+        {"model": {"architecture": "tiny", "pretrained": False}}
+    )
+    assert config.model_type == "dualhead"
+    assert config.model["architecture"] == "tiny"
+
+
+def test_yolo_is_selected_by_type() -> None:
+    config = DetectorTrainingConfig.from_dict({"model": {"type": "ultralytics-yolo"}})
+    assert config.model_type == "ultralytics-yolo"
+    assert config.model["architecture"] == "yolo26s"
 
 
 def test_toml_round_trip(tmp_path: Path) -> None:
@@ -74,6 +91,7 @@ n_folds = 3
         ({"augment": {"time_flip": 2.0}}, "time_flip"),
         ({"model": {"type": "ultralytics-yolo", "mosaic": 1.0}}, "unknown"),
         ({"model": {"architecture": "yolov8l"}}, "architecture"),
+        ({"model": {"architecture": "yolo26s"}}, "architecture"),
         ({"model": {"type": "detr"}}, "unknown model type"),
         ({"cv": {"n_folds": 1}}, "n_folds"),
         ({"device": "gpu"}, "device"),

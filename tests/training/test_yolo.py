@@ -200,7 +200,11 @@ def _smoke_config(device: str) -> DetectorTrainingConfig:
     return DetectorTrainingConfig.from_dict(
         {
             "device": device,
-            "model": {"architecture": "yolo26n", "pretrained": False},
+            "model": {
+                "type": "ultralytics-yolo",
+                "architecture": "yolo26n",
+                "pretrained": False,
+            },
             "optim": {"epochs": 1, "batch": 4, "workers": 0, "warmup_epochs": 0.0},
             "cv": {"n_folds": 0},
         }

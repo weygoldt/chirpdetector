@@ -4,555 +4,162 @@
 
 # chirpdetector
 
-Detect chirps of wave-type weakly electric fish in multi-electrode grid
-recordings and assign each chirp to the fish that emitted it. Ships with the
-tools to build training data from simulations, train and evaluate the models,
-and label real data.
+Detect the chirps of wave-type weakly electric fish (e.g. *Apteronotus
+leptorhynchus*) in multi-electrode grid recordings, assign each chirp to the
+fish that emitted it, and measure its height, duration and undershoot.
 
-> **Status:** version 2 is being rebuilt on the `v2` branch. The code used for
-> the chirp competition paper (2024) is available as tag
-> `paper-chirp-competition-v1`.
+A chirp is a brief excursion of a fish's electric organ discharge frequency
+(EODf), from about 10 ms to several hundred ms long. In a spectrogram of a
+grid recording it is a short, tall feature on top of the fish's baseline
+frequency, often among several fish a few Hz apart, clicks and power-line
+hum. chirpdetector finds these features with an object detector on a
+linear-frequency spectrogram and assigns each detection by predicting the
+emitter's baseline EODf and picking the nearest frequency track (wavetracker
+format) alive at the chirp.
+
+The package contains:
+
+- **The production pipeline** (`chirpdetector run`): whole recordings in,
+  one table of chirps per recording out (boxes, scores, emitter track and
+  assignment confidence, chirp parameters, quality flags), plus legacy
+  `chirp_times`/`chirp_ids` arrays, a QC report and annotated windows.
+- **The detector**: a dual-head RT-DETRv2-r18 that predicts each chirp's box
+  and its emitter's baseline EODf in one pass (the default); YOLO26 is
+  available as a box-only detector.
+- **The chirp-parameter decoder**: height, full width at half height, width
+  at 10 % of the height, and undershoot of every detected chirp, calibrated,
+  with uncertainties.
+- **Post-processing** of harmonic copies and duplicate boxes, and **click
+  removal** before the spectrogram.
+- **Training and evaluation**: detector datasets from simulated scenes
+  ([gridtools](https://github.com/weygoldt/gridtools)) and hand-labelled
+  recordings, training of both detectors and the decoder, model bundles with
+  provenance, and evaluation against hand labels and simulations.
+- **A labelling tool** (`chirpdetector label-emitters`, matplotlib window or
+  browser) for chirps and their emitters, and a blind human-against-model
+  benchmark (`chirpdetector label-benchmark`).
 
 ## Installation
 
 ```sh
+uv pip install "git+https://github.com/weygoldt/chirpdetector"
+# or
 pip install "git+https://github.com/weygoldt/chirpdetector"
+# with the labelling tool (matplotlib):
+uv pip install "chirpdetector[label] @ git+https://github.com/weygoldt/chirpdetector"
 ```
 
-(or `uv pip install` / `uv add` with the same URL). The pretrained models are
-downloaded on first use.
+Python 3.13 or later. A CUDA GPU is optional; everything also runs on the
+CPU, more slowly. The PyPI package named `gridtools` is unrelated to the
+[gridtools](https://github.com/weygoldt/gridtools) that chirpdetector
+depends on. [docs/installation.md](docs/installation.md) covers a project
+setup with `uv add`, the extras, and a fallback install command.
 
 ## Pretrained models
 
-The published detector and chirp-parameter decoder (release
-[`models-v1`](https://github.com/weygoldt/chirpdetector/releases/tag/models-v1))
-are downloaded on first use, checked against their sha256 and cached in
-`$CHIRPDETECTOR_CACHE`, else `$XDG_CACHE_HOME/chirpdetector`, else
-`~/.cache/chirpdetector`. `"default"` names them wherever a bundle is
-expected:
-
-```python
-from gridtools.io import load_tracks, open_recording
-from chirpdetector.inference import predict_span
-
-trial = "/mnt/data2/2019_tube_competition/2020-05-18-10_00"
-detections = predict_span(
-    "default",  # the pretrained detector
-    open_recording(trial),
-    9350.0,
-    9370.0,
-    name="2020-05-18-10_00",
-    tracks=load_tracks(trial),
-    params="default",  # the pretrained decoder
-)
-```
+The released dual-head detector and chirp-parameter decoder are the GitHub
+release [`models-v1`](https://github.com/weygoldt/chirpdetector/releases/tag/models-v1).
+chirpdetector downloads them on first use, verifies their checksums and
+caches them (`$CHIRPDETECTOR_CACHE`, else `$XDG_CACHE_HOME/chirpdetector`,
+else `~/.cache/chirpdetector`):
 
 ```sh
-chirpdetector models list                # models, aliases, cache state
-chirpdetector models download            # every model (e.g. before going offline)
-chirpdetector models path detector       # bundle directory (downloads if missing)
-chirpdetector run --out OUT REC_DIR...   # whole recordings, built-in default config
+chirpdetector models list
+chirpdetector models download          # both, e.g. before going offline
+chirpdetector models path detector
 ```
 
-| name | alias | model |
-|---|---|---|
-| `dualhead-rtdetrv2-r18-sim_v4` | `detector` | dual-head RT-DETRv2-r18: chirp boxes and the emitter's EOD frequency |
-| `decoder-dualhead-sim_v4` | `decoder` | chirp parameters (height, FWHM, width at 10 %, undershoot) for that detector's boxes |
+In Python: `chirpdetector.pretrained.download(name)`, `path(name)` and
+`list_models()`; `load_bundle("default")` and `predict_span(...,
+params="default")` use the released models. `CHIRPDETECTOR_OFFLINE=1`
+forbids downloads. Details: [docs/models.md](docs/models.md).
 
-`load_bundle("default")`, `load_params_bundle("default")`, `predict_span("default",
-..., params="default")` and a run config without `[models]` use them;
-`"pretrained:NAME"` names a model by name or alias (`chirpdetector.pretrained`
-has the Python API). `CHIRPDETECTOR_OFFLINE=1` forbids downloads: a missing
-model then raises an error that says how to get it and where to put it.
-`CHIRPDETECTOR_MODELS_URL` replaces the release URL (tests, mirrors).
-Loading and running the models never touches the network.
+## Quickstart
 
-## Labelling chirp emitters
+You need a recording directory with the raw data (fishgrid
+`traces-grid1.raw` with its `fishgrid.cfg`, or one multichannel wav file)
+and the wavetracker frequency tracks of its fish (`fund_v.npy`,
+`ident_v.npy`, `idx_v.npy`, `times.npy`). Write a run config:
 
-`chirpdetector label-emitters` shows one candidate box at a time: an
-overview of the whole chirp on top and, below it, a zoom on the baselines of
-the fish near the box (204.8 ms window; a few Hz span many pixels). Every
-live EOD frequency track is marked at both edges with its number (1, 2, ...
-from the lowest baseline); tracks are bridged across wavetracker gaps of up
-to `--track-gap-s` (10 s), and the gap is shown. Click on the baseline the chirp comes from: the click snaps to
-the highlighted track (the nearest one within `--tolerance-hz`, at the time
-you click); a click farther from every track is rejected, not guessed.
+```toml
+# run.toml
+[run]
+name = "first_run"
+out = "detections"      # relative to this file
+```
 
-| input | label |
+and run the pipeline:
+
+```sh
+chirpdetector run run.toml /path/to/recording               # on a GPU
+chirpdetector run run.toml /path/to/recording --device cpu  # without one
+```
+
+The detector and the decoder default to the released models. The output is
+in `detections/first_run/<recording>/`: `chirps_rtdetr.parquet` (one row per
+detection), `chirp_times_rtdetr.npy` and `chirp_ids_rtdetr.npy`,
+`meta.json`, `qc/qc.md` and a few annotated windows. Rows with `chirp ==
+True` are the chirps at the operating threshold (0.5); `track_id` is the
+emitter's track.
+
+[docs/quickstart.md](docs/quickstart.md) walks through this on a simulated
+recording, including reading the table and re-rendering a window.
+
+## Performance
+
+From the evaluation reports of the chirp competition project, for the
+released models (the reports are not part of this repository):
+
+| test | released dual-head | box-only YOLO26s | chirpdetector v1 (2024) |
+|---|---|---|---|
+| hand-labelled real recordings, 365 chirps in 4 recordings, threshold 0.5: precision / recall / F1 | 0.938 / 0.992 / 0.964 | 0.947 / 0.984 / 0.965 | 1.000 / 0.701 / 0.824 |
+| simulated test scenes (unseen fish and background recordings), after post-processing | 0.976 / 0.957 / 0.966 | 0.989 / 0.952 / 0.970 | |
+| emitter correct, detected simulated test chirps | 0.914 | no emitter head | |
+
+The real labels are the 335 hand-labelled chirps of the v1 benchmark plus 30
+chirps the labeller confirmed among the detectors' unmatched boxes. The
+assignment baseline without an emitter head (nearest track to the box's lower
+edge plus the median offset) reaches 0.648 on the same simulated chirps. In a
+blind benchmark on 1,010 simulated items, the dual-head detector found 0.963
+of the true chirps and an expert labeller 0.924; with the right emitter, 0.868
+and 0.812. The decoder's median absolute errors on simulated test chirps of
+unseen fish: height 9.5 Hz (6.7 %), FWHM 1.16 ms (9.8 %), 10 % width 1.58 ms
+(7.0 %), undershoot 1.52 Hz. Read [docs/limitations.md](docs/limitations.md)
+before relying on these numbers.
+
+## Documentation
+
+| page | contents |
 |---|---|
-| left click on a baseline, or `1`-`9` | chirp from that track |
-| `0` or middle click | chirp, emitter unclear |
-| `x` or right click | not a chirp |
-| `s` or space | skip (comes back after the open items) |
-| `u`, backspace, ctrl+z | undo the last action |
-| left / right arrow | previous / next candidate |
-| `w` | overview window 204.8 ms / 51.2 ms (chirp shape); the zoom stays at 204.8 ms |
-| `e` | show / hide the model's predicted emitter (hidden by default) |
-| `f`, `h` | full screen, help |
+| [Installation](docs/installation.md) | uv and pip, extras, GPU |
+| [Quickstart](docs/quickstart.md) | the pipeline on a recording in five minutes |
+| [Pretrained models](docs/models.md) | download, cache, offline use, bundles |
+| [The production pipeline](docs/pipeline.md) | run config, outputs, chirp table, legacy arrays, QC, windows, render |
+| [Python API](docs/api.md) | `predict_span`, bundles, reading the outputs |
+| [Post-processing](docs/postprocessing.md) | harmonic copies, duplicates, re-attribution |
+| [Chirp parameters](docs/decoder.md) | what the decoder estimates and how to use it |
+| [Click removal](docs/clicks.md) | when it runs and what it protects |
+| [Detector datasets](docs/datasets.md) | from simulated scenes and hand labels |
+| [Training a detector](docs/training.md) | dual-head (default) and YOLO26, bundles |
+| [Training the decoder](docs/decoder-training.md) | samples, calibration, evaluation |
+| [Evaluation](docs/evaluation.md) | matching rule, metrics, outputs |
+| [Labelling](docs/labelling.md) | `label-emitters`: frontends, keys, candidates, blind mode |
+| [Human against model](docs/benchmark.md) | `label-benchmark` |
+| [Design notes](docs/design.md) | linear frequency, footprint boxes, emitter head, calibration |
+| [Limitations](docs/limitations.md) | what the numbers do and do not show |
+| [Command line](docs/cli.md) | every command |
+| [Development](docs/development.md) | tests, checks, the docs site |
 
-Every action is saved at once (`<out>/events.jsonl`); running the same
-command again resumes the same queue, in either frontend.
+The same pages build as a site with `uvx --from mkdocs==1.6.1 --with
+mkdocs-material==9.8.1 mkdocs build --strict`.
 
-```sh
-uv sync --extra label
-# matplotlib window (maximised) on this machine
-uv run chirpdetector label-emitters --candidates candidates.parquet \
-    --out /mnt/data1/chirp_v2/labels/emitters --labeler pw
-# the same in a browser, e.g. from home
-uv run chirpdetector label-emitters --candidates candidates.parquet \
-    --out /mnt/data1/chirp_v2/labels/emitters --labeler pw --serve --port 8765
-#   on the laptop: ssh -N -L 8765:localhost:8765 USER@HOST, then open
-#   http://localhost:8765/ (the server only listens on 127.0.0.1)
-# counts by decision, source and ΔF bin
-uv run chirpdetector label-summary /mnt/data1/chirp_v2/labels/emitters
-```
+## Versions
 
-Instead of `--candidates`, trial directories sample v1 detections
-(`chirpdetector_bboxes.csv`) stratified by ΔF (`--per-bin`, `--seed`).
-`--view grid` shows the former grid of small cutouts (matplotlib only).
-
-### Candidates file
-
-A CSV or Parquet table, one row per box. This format is stable; the
-production pipeline writes its validation samples in it.
-
-| column | | meaning |
-|---|---|---|
-| `recording` | required | recording directory (relative paths: relative to the file) |
-| `t_start_s`, `t_end_s` | required | box in seconds from the recording start |
-| `f_low_hz`, `f_high_hz` | required | box in Hz |
-| `candidate_id` | optional | id of the box within its recording (no `#`); the same id in another file is the same item. Default: a hash of recording name and box |
-| `score` | optional | detector score |
-| `emitter_hz` | optional | the model's predicted emitter EODf |
-| `track_id` | optional | the model's predicted emitter track |
-| `source` | optional | free text: model, run, sample |
-| `tracks` | optional | wavetracker directory, if not the recording directory |
-
-Other columns are kept and stored with each label as `candidate_<name>`.
-The queue keeps every row (shuffled with `--seed`; `--keep-order` keeps the
-file order).
-
-### Label files
-
-`<out>/labels/<recording>.csv`, one row per labelled box and labeller,
-readable by `chirpdetector evaluate --labels`: the audian columns with the
-box, then `label` (`chirp`, `not_chirp`, `chirp_emitter_unclear`),
-`emitter_id` (track id), `clicked_hz`, `clicked_t_s`, `labeler`,
-`labeled_at`, `tool_version`, `queue_id`, `item_id`
-(`<recording>#<candidate_id>`), `det_index`, `df_bin`, then
-
-| column | meaning |
-|---|---|
-| `emitter_baseline_hz` | emitter track's frequency at the box start, from the track (not the click) |
-| `click_offset_hz` | click minus the emitter track's frequency at the click time |
-| `via` | `mouse` or `key` |
-| `frontend` | `mpl`, `mpl-grid` or `browser` |
-| `window_s` | spectrogram window shown |
-| `prediction_shown` | whether the model's prediction was visible |
-| `n_candidates`, `delta_f_hz` | live tracks at the box centre, ΔF of the closest two |
-| `recording_dir`, `tracks_dir` | where recording and tracks were read |
-| `candidate_id`, `candidate_score`, `candidate_emitter_hz`, `candidate_track_id`, `candidate_source`, `candidate_*` | the candidates-file columns |
-
-### Human against model (blind benchmark)
-
-`--blind` labels without hints: no box (only a time marker at its centre),
-no score, source or predicted emitter (`e` is disabled, and the server never
-sends them), and the time per item is stored (`elapsed_s`, `blind`).
-`chirpdetector label-benchmark` uses it to compare a human with the model
-on simulated scenes, where the truth is known:
-
-```sh
-# items: visible chirps (half from the lowest SNR quartile with excursion
-# < 60 Hz), model detections without a chirp, quiet baselines, a few
-# invisible chirps; candidates and truth go to different directories
-uv run chirpdetector label-benchmark build --scenes SCENES --detections DETS \
-    --candidates /mnt/data1/chirp_v2/labels/candidates/human_benchmark_v1.parquet \
-    --truth /mnt/data1/chirp_v2/labels/benchmark/human_benchmark_v1_truth.parquet
-uv run chirpdetector label-emitters --candidates .../human_benchmark_v1.parquet \
-    --out /mnt/data1/chirp_v2/labels/human_benchmark_v1 --blind --serve
-uv run chirpdetector label-benchmark score --truth .../human_benchmark_v1_truth.parquet \
-    --labels /mnt/data1/chirp_v2/labels/human_benchmark_v1 --out REPORT_DIR
-```
-
-`DETS` holds one `<scene>.parquet` of `predict_span` detections per scene
-(tracks given, post-filter on, score >= 0.05). The report gives recall on
-true chirps and false alarms on negatives (by stratum, SNR quartile and
-excursion), emitter accuracy, exact McNemar tests on the paired decisions,
-stratified bootstrap CIs and a figure of recall against SNR.
-`label-benchmark gallery` shows real boxes labelled `not_chirp` next to
-simulated true chirps with similar decoded height, FWHM and contrast
-(never from the benchmark's scenes).
-
-#### Benchmark v2: edge cases, several models, repeats
-
-`label-benchmark build-v2` (`chirpdetector.labeling.benchmark_v2`) samples
-from new simulated test scenes so that the report can say where a model
-works and where it does not. Every visible chirp falls into one stratum,
-rarest feature first (gap in the emitter's track, click nearby, baseline at
-another fish's 2nd harmonic, rippled/plateau, long, short, ΔF to the
-nearest fish 0-5 / 5-10 Hz, overlap with another fish's chirp, bout, drift
-or rise, few electrodes, ΔF 10-25 / 25-50 Hz), the rest into SNR quartile
-x excursion cells; weights reweight any group to all visible test chirps.
-Negatives: each model's false alarms across the whole score range,
-harmonic copies (fundamental detected or not), clicks, beats, rises,
-plain baselines; repeats of already labelled items (`retest_of`) measure
-test-retest agreement. Blind sessions show neither the box, nor the model,
-nor recording names or item ids.
-
-```sh
-B=/mnt/data1/chirp_v2/labels/benchmark
-uv run chirpdetector label-benchmark features SCENE... --out $B/features \
-    --templates /mnt/data1/chirp_v2/templates/v4/templates.parquet
-uv run chirpdetector label-benchmark gaps --scenes SCENES --features $B/features --out GAPS
-uv run chirpdetector label-benchmark build-v2 --scenes SCENES --features $B/features \
-    --gap-root GAPS --repeat-from $B/human_benchmark_v1_truth.parquet \
-    --model dualhead=$B/models/dualhead --model yolo26s=$B/models/yolo26s --model v1=$B/models/v1:v1 \
-    --candidates .../human_benchmark_v2_extra.parquet --truth $B/human_benchmark_v2_extra_truth.parquet
-uv run chirpdetector label-benchmark score --out REPORT \
-    --set v1_final=$B/human_benchmark_v1_truth.parquet:LABELS_V1 \
-    --set v2_extra=$B/human_benchmark_v2_extra_truth.parquet:LABELS_V2 \
-    --model dualhead=$B/models/dualhead --model yolo26s=$B/models/yolo26s --model v1=$B/models/v1:v1 \
-    --features $B/features
-```
-
-Model directories hold one `<scene>.parquet` of `predict_span` (tracks,
-post-processing on, `keep_dropped=True`, score >= 0.05), or the v1 runner's
-`<dataset>/<scene>.csv` (`:v1`). A true chirp counts as detected if a
-reported detection (kept or re-attributed) at score >= the threshold matches
-it one-to-one, as in the evaluation. The report (`report.md`, figures as PNG
-and PDF, tables as CSV) gives recall by SNR, excursion, ΔF and edge case,
-false alarms per negative type, harmonic outcomes, emitter accuracy by ΔF,
-invisible chirps, human time and test-retest agreement, with bootstrap CIs
-and exact McNemar tests, and a table of where the production model is
-better, equal or worse than the human.
-
-## Evaluating detections
-
-`chirpdetector evaluate` scores predictions against hand labels (audian files
-with `labeled_region` spans), `label-emitters` output, or simulated scenes
-(`chirps.csv`). The default matching rule is that of the v1 detector
-benchmark: centre times within 100 ms and overlapping frequency ranges,
-matched one-to-one (most pairs, then smallest total |Δt|); only predictions
-inside a labelled region and its frequency band count.
-
-```sh
-uv run chirpdetector evaluate /mnt/data2/2019_tube_competition/2019-12-09-10_00 \
-    --labels /mnt/data2/2019_tube_competition/2019-12-09-10_00/traces-grid1-editable-labels.csv \
-    --out /mnt/data1/chirp_v2/eval/v1-2019-12-09 --plot
-```
-
-The output directory holds `metrics.json` (with the sha256 of every input)
-and CSV tables: precision, recall and F1 per recording, dataset and pooled
-for thresholds 0.25-0.95; exact binomial and region-bootstrap CIs; PR curves
-and average precision; the outcome of every label and prediction; and
-emitter accuracy, coverage, calibration and end-to-end metrics by ΔF. v1's
-pre-NMS boxes need `--nms-iou 0.2`. From Python, use
-`chirpdetector.evaluation.evaluate`.
-
-## Detector datasets
-
-A detector dataset is a directory with `dataset.json` (front end, tiling,
-sources, group-wise splits, per-image geometry, content hashes),
-`boxes.parquet` (chirp boxes and ignore regions in absolute time and
-frequency, with the emitter's EOD frequency), `images/*.png` and YOLO
-`labels/*.txt`. Builders write it with `chirpdetector.data.DatasetWriter`;
-the contract is documented in `chirpdetector.data.contract`. Check a
-dataset with
-
-```sh
-uv run chirpdetector dataset validate /mnt/data1/chirp_v2/datasets/sim_v1
-```
-
-## Training a detector
-
-```sh
-scripts/guarded --name train-r1 --mem 24G --vram 0.6 -- \
-    uv run chirpdetector train detector train.toml \
-        --dataset /mnt/data1/chirp_v2/datasets/sim_v1 --run-dir /mnt/data1/chirp_v2/runs/r1
-```
-
-The config (`chirpdetector.training.config`) selects the model (default
-YOLO26s), optimisation, augmentation (only optional time reversal; no
-vertical flips, colour jitter, rotation, scaling, translation or mosaic,
-which break the time and frequency axes of a spectrogram) and grouped
-k-fold cross-validation over the `train` groups; a final model is trained
-on all `train` groups with the `val` groups for early stopping. `--fold k`
-or `--fold final` trains a single fit. The run directory holds the
-resolved config, git SHAs (with dirty flags) of chirpdetector and
-gridtools, the `uv.lock` hash, the dataset hash, versions, hardware, the
-epoch curves and one model bundle per fit.
-
-**Dual-head model.** `[model] type = "dualhead"` (needs `uv sync --extra
-dualhead`) trains an RT-DETRv2 detector (COCO weights, ResNet18-vd by
-default) whose queries predict each chirp's box *and* its emitter's
-baseline EOD frequency; `chirpdetector.evaluation.assign_by_frequency`
-then picks the nearest live track. Predictions (`predict_images`,
-`predict_span`) carry an `emitter_hz` column. See
-`chirpdetector.models.dualhead` for the design and the `[model]` keys.
-A dual-head fit that is stopped (`systemctl stop` on its guarded scope,
-Ctrl-C) ships its best validated epoch as the bundle; `[model] resume =
-"RUN/final/dualhead/state.pt"` continues it in a new run directory.
-
-**GPU memory.** The GPU is shared. Run training (and any GPU job) through
-the workspace's `scripts/guarded`: it caps RAM in a systemd scope and sets
-`CHIRP_MAX_VRAM_FRACTION`, which training and inference apply with
-`torch.cuda.set_per_process_memory_fraction` before building a model (the
-smaller of it and the config's `max_vram_fraction`). Batch sizes are fixed
-in the config; AutoBatch is not used.
-
-**Bundles.** `chirpdetector bundle inspect BUNDLE` verifies the weights'
-sha256 and prints the model, front end, tiling, preprocessing, training
-provenance and attached metrics. Metrics are attached with
-`chirpdetector.evaluation.attach_to_bundle` and only for predictions made
-by the bundle's own weights (`chirpdetector.prediction` records their
-hash).
-
-## Detecting chirps
-
-```python
-from gridtools.io import load_tracks, open_recording
-from chirpdetector.inference import predict_span
-
-trial = "/mnt/data2/2019_tube_competition/2019-12-09-10_00"
-detections = predict_span(
-    "/mnt/data1/chirp_v2/runs/dualhead_r18_sim_v4_r1/final/bundle",
-    open_recording(trial),
-    1140.0,
-    1420.0,
-    name="2019-12-09-10_00",
-    tracks=load_tracks(trial),
-    params="/mnt/data1/chirp_v2/params/runs/v4-dualhead-sim-v4/bundle",
-)
-```
-
-`predict_span` tiles the span as the detector datasets were tiled, runs the
-model, merges overlapping tiles, assigns each detection of an emitter-head
-model to the nearest live track (`emitter_id`, within 50 Hz of
-`emitter_hz`), adds the chirp parameters (with `params`) and post-processes
-the detections.
-
-**Post-processing** (`chirpdetector.postprocess`, on by default) removes
-two kinds of false positives:
-
-- *second-harmonic copies*: the second harmonic of a fish below 750 Hz lies
-  in the 500-1500 Hz band, and so does a copy of each of its chirps. A
-  detection is a copy if its emitter frequency (`emitter_hz`; for box-only
-  models a window above the box's lower edge) lies within 15 Hz of twice a
-  live track's frequency while no live track lies within 50 Hz of it (and it
-  has no assigned emitter). A fish at twice another fish's frequency keeps
-  its chirps. Without tracks, a detection at half the frequency of a
-  co-occurring, at least as confident one is only flagged
-  (`harmonic_pair_of`), unless `PostprocessConfig(trackless="drop")`.
-  A copy whose fundamental was not detected (no kept box overlapping it in
-  time, temporal IoU >= 0.3, that spans the fish's frequency or is assigned
-  to it) is the only trace of a real chirp: it is kept and re-attributed
-  (`reattributed = "harmonic"`, `harmonic_of_id`, and `emitter_id` with an
-  emitter head), reported at half the frequency (`emitter_hz`, `f_low_hz`,
-  `f_high_hz` halved; the detected values in `harmonic_emitter_hz`,
-  `harmonic_f_low_hz`, `harmonic_f_high_hz`), with NaN decoder values
-  (`params_flag = "harmonic"`). By default this is automatic: on with an
-  emitter head (`emitter_hz`), off for box-only models (resolved value in
-  the provenance); `PostprocessConfig(reattribute_harmonics=True/False)`
-  overrides. On the real labels nothing is re-attributed (every
-copy has its fundamental). On sim_v4 at 0.5, the dual-head re-attributes 1
-copy, which matches its missed chirp (TP 8,999 -> 9,000, FP unchanged);
-YOLO26s re-attributes 12, all false positives at tracks without a labelled
-chirp, 9 of them at a real background fish (FP 101 -> 113, F1 0.970 ->
-0.969), hence off for box-only models by default.
-- *duplicates*: two boxes on one chirp, the higher score is kept. With an
-  emitter head: `emitter_hz` within 5 Hz, the same `emitter_id` and
-  temporal IoU >= 0.7; box-only: lower edges within 2 Hz, temporal and
-  frequency IoU >= 0.5. Two chirps of one fish in quick succession, and
-  simultaneous chirps of two fish, are not merged.
-
-`postprocess=False` switches it off, `keep_dropped=True` returns the dropped
-detections as well, with `drop_reason` (`harmonic`, `duplicate`),
-`harmonic_of_id` and `duplicate_of`, and `postprocess=PostprocessConfig(...)`
-changes the tolerances; settings and counts are in
-`detections.attrs["provenance"]`. Tracks count as alive across gaps of up
-to 10 s (`track_max_gap_s`, the production pipeline's rule). The defaults
-and the data behind them are documented in `chirpdetector.postprocess`. Effect on the final detectors
-(hand labels: v1 benchmark rule at score 0.5; sim_v4 test tiles):
-
-| detector | data | stage | TP | FP | FN | precision | recall | F1 | best F1 (threshold) |
-|---|---|---|---|---|---|---|---|---|---|
-| dual-head | real labels | before | 335 | 51 | 0 | 0.868 | 1.000 | 0.929 | 0.952 (0.85) |
-| dual-head | real labels | after | 335 | 51 | 0 | 0.868 | 1.000 | 0.929 | 0.952 (0.85) |
-| dual-head | sim_v4 test | before | 9,000 | 336 | 401 | 0.964 | 0.957 | 0.961 | 0.964 (0.65) |
-| dual-head | sim_v4 test | after | 8,999 | 225 | 402 | 0.976 | 0.957 | 0.966 | 0.967 (0.60) |
-| YOLO26s | real labels | before | 335 | 47 | 0 | 0.877 | 1.000 | 0.934 | 0.955 (0.85) |
-| YOLO26s | real labels | after | 335 | 44 | 0 | 0.884 | 1.000 | 0.938 | 0.957 (0.85) |
-| YOLO26s | sim_v4 test | before | 8,949 | 173 | 452 | 0.981 | 0.952 | 0.966 | 0.966 (0.55) |
-| YOLO26s | sim_v4 test | after | 8,948 | 101 | 453 | 0.989 | 0.952 | 0.970 | 0.971 (0.45) |
-
-On the real labels, the copies (dual-head: 27 at score >= 0.5, YOLO26s: 10,
-e.g. at about 1,280 Hz above a 641 Hz fish) lie above the labelled regions'
-frequency bands and so do not count; no real true positive is lost at any
-threshold. On sim_v4, one true positive per detector and threshold (0.5,
-best F1, 0.05) is lost. Dual-head: three different ones, each a correctly
-dropped box (two harmonic copies, one duplicate of a fish's chirp) that
-the frequency-overlap matching had credited to another fish's chirp.
-YOLO26s: the same one at every threshold, two identical boxes on
-simultaneous chirps of two fish 23 Hz apart. All 6,749 visible test chirps, as perfect detections, survive with
-an emitter head (1,491 of them within 0.5 s of another chirp of the same
-fish); box only, one is merged. Run:
-`/mnt/data1/chirp_v2/runs/scripts/eval_postprocess.py`, output in
-`RUN/eval_postprocess/`.
-
-## Chirp parameters
-
-`chirpdetector.params` is a second-stage decoder that estimates, for every
-detected chirp, its **height** (largest frequency excursion above the
-emitter's baseline, Hz), its **duration** as full width at half height
-(`fwhm_s`) and width at 10 % of the height (`width10_s`), and its
-**undershoot** (deepest drop below the baseline after the peak, Hz), each with
-a calibrated standard deviation.
-
-**Ground truth** (`chirpdetector.params.truth`) is the simulator's
-noise-free instantaneous frequency of the emitter, one value per EOD period:
-cycle boundaries are the 2π crossings of the emitter's phase with only that
-chirp (its other chirps left out, so that a neighbour in a burst cannot lend
-its peak or undershoot), and each period gets `1/T_k` minus
-the period mean of the chirp-free baseline (with drift). Height is the
-largest of these excursions; the widths are the times between the crossings
-of 50 % and 10 % of the height that bracket the peak (interpolated between
-period midpoints); undershoot is the deepest excursion below zero after the
-peak. Nothing is read from a spectrogram.
-
-**Input** (`chirpdetector.params.crops.decoder_inputs`): the detector's own
-3-window spectrogram, normalised like a detector tile on a 3.2 s canvas
-centred on the box, resampled to 96 x 96 over the box plus 15 % margins,
-plus the log box duration and height. Training, evaluation and inference
-make it with this one function.
-
-**Training** (`chirpdetector train params`) runs the detector bundle over the
-simulated scenes, matches its boxes one-to-one to the true chirps (centre
-within 100 ms, overlapping frequency ranges) and trains on those *predicted*
-boxes: a params bundle is only valid with the detector it was trained with,
-whose weight hash it records (`predict_span` refuses another detector).
-A scene's split is the `train`/`val`/`test` directory it lies in (as
-`gridtools sim run` writes them, and as the detector datasets use them with
-`--split-dir`); `split = "train=0:1600,..."` assigns by seed instead. Only
-scenes on real background segments are used (`scene_background = "hybrid"`).
-
-```sh
-scripts/guarded --name params --mem 12G --vram 0.1 -- \
-    uv run chirpdetector train params params.toml \
-        --scenes /mnt/data1/chirp_v2/scenes/train_v4 \
-        --detector /mnt/data1/chirp_v2/runs/<detector run>/final/bundle \
-        --run-dir /mnt/data1/chirp_v2/params/runs/p1
-uv run chirpdetector evaluate params /mnt/data1/chirp_v2/params/runs/p1/bundle \
-    --scenes /mnt/data1/chirp_v2/scenes/train_v4
-```
-
-The config keys and their defaults are listed in `chirpdetector.params.training`
-(every key is optional); the sample set (crops, truth, matched boxes) lands in
-`RUN/samples` unless `--samples` points to one made with the same settings.
-
-**Calibration** (`chirpdetector.params.calibration`). A regressor shrinks
-toward the middle of its training population (small chirps overestimated,
-large ones underestimated), and how much depends on that population. The
-bundle stores, per parameter, the monotone bias curve
-`h(y) = median(estimate | true = y)` fitted on the validation scenes at the
-detector's threshold (bin medians smoothed by a local linear fit, slopes at
-least 0.5; one curve per tercile of the decoder's own sigma, because poorly
-seen chirps shrink more), and reports `h⁻¹(estimate)`: median-unbiased at
-every true value, so its meaning does not depend on the mix of chirps in a
-recording.
-The price is a wider per-chirp error than the raw estimate (the inverse of a
-curve with slope < 1 amplifies the noise) and a population distribution that
-is the true one blurred by that error; the evaluation report shows both. Standard deviations are propagated through `h⁻¹` and rescaled so
-that ±1 sd covers 68 % of the validation chirps (`k95` sd cover 95 %).
-
-**Inference.** `predict_span(..., params=BUNDLE)` (and `chirpdetector
-showcase --params BUNDLE`) adds `height_hz, height_sd_hz, fwhm_s, fwhm_sd_s,
-width10_s, width10_sd_s, undershoot_hz, undershoot_sd_hz` (sds are first
-order; the calibrated intervals are multiplicative, `(value + offset) *
-exp(±k95 * sd / (value + offset)) - offset` with offset 1 Hz for undershoot
-and 0 otherwise), plus `params_ok`
-and `params_flag` (`edge`: the crop crosses the recording's edge; `band`: the
-box reaches the edge of the front end's band; `size`: a box larger or smaller than any
-in training; `uncertain`: a sd above the 99.5th percentile of the validation
-chirps), and the uncalibrated estimates `height_raw_hz, fwhm_raw_s,
-width10_raw_s, undershoot_raw_hz` (`chirpdetector.params.RAW_COLUMNS`: the
-decoder's own estimate, without the inverse bias curve; no sds). Use the
-calibrated columns per chirp; for population distributions, the raw ones
-are pulled toward the training mix and the calibrated ones blurred by the
-amplified error, so compare both (the evaluation report measures each
-against the truth).
-
-**Evaluation** (`chirpdetector evaluate params`, report in `BUNDLE/eval/`):
-errors by family, SNR, ΔF, overlap, template reuse and decile of the true
-value, before and after calibration (shrinkage slopes); whether the error is
-coupled to the chirp's own parameters *within* SNR strata (quintiles of each
-true parameter, rank correlations of every error with every true parameter);
-coverage of the sds; whether the *distribution* of estimates over a
-population matches the true one (KS/Wasserstein distances, quantiles, joint
-height x FWHM histograms), also after re-weighting the test chirps to the
-library's template mix (training scenes over-sample big and long chirps);
-whether separated chirp types stay separated and a continuum stays a
-continuum; and agreement with the independently extracted frequency traces of
-533 harvested real chirps, next to the correlation the simulation predicts
-over the same narrow range.
-
-**Caveats.** Accuracy is measured on simulations (real chirp templates on
-real background segments); on real recordings only the agreement on big,
-long harvested chirps is checked, not small chirps. The simulator draws every
-split from one template library, so test chirps reuse training templates
-(and individuals): the error on chirps of new fish is not measured. The
-parameters are only valid for boxes of the detector recorded in the bundle.
-For population distributions, calibrated estimates are wider than the truth
-(blurred by the error) and uncalibrated ones are pulled toward the training
-mix; the report measures both against the truth.
-
-## Detecting chirps in recordings
-
-`chirpdetector run` runs a detector bundle (and optionally a chirp-parameter
-decoder) over whole recordings and assigns the detections to the recordings'
-wavetracker tracks:
-
-```sh
-chirpdetector run CONFIG.toml REC_DIR...            # some recordings
-chirpdetector run CONFIG.toml --dataset ROOT         # every recording in ROOT
-chirpdetector run CONFIG.toml REC_DIR --dry-run      # 300 s per recording
-chirpdetector run CONFIG.toml --dataset ROOT --list  # what is done / to do
-```
-
-The config names the bundles, the store threshold (every detection down to
-it is kept, so the operating threshold can change later), the operating
-threshold, the track source and tolerance, and the compute budget; see
-`chirpdetector.pipeline.config` for every key. Runs are resumable (finished
-recordings are skipped; each recording's directory appears only when
-complete), a failing recording is logged and skipped, and the GPU share is
-capped by the config and by `CHIRP_MAX_VRAM_FRACTION`. Outputs go to
-`OUT/<run>/<recording>/`: `chirps_<model>.parquet` (one row per detection:
-box, score, emitter frequency, track assignment with confidence, chirp
-parameters, post-processing flags, click statistics; `columns.md` in the run
-directory documents every column), `meta.json` (inputs, models, code, config,
-counts, timings), legacy `chirp_times_<model>.npy`/`chirp_ids_<model>.npy`
-(the semantics of v1's `_rcnn` arrays), a QC report and annotated sample
-windows; plus `run.json`, `run.log` and `candidates.csv` (validation sample
-for `label-emitters --candidates`) per run.
-
-Inference is chunked on the recording's global tile grid, so the result equals
-`predict_span` on the whole recording; `chirpdetector check-reference CONFIG
-REC_DIR` compares the two on a part of a recording. `chirpdetector render RUN
-RECORDING T0 T1` re-renders any window from a run's outputs (spectrogram
-recomputed from the raw data; PNG plus an NPZ with the data to redraw it).
-
-## Development
-
-chirpdetector depends on [gridtools](https://github.com/weygoldt/gridtools),
-installed from GitHub (branch `main`). To work on both, install a gridtools
-checkout over it: `uv pip install -e ../gridtools`.
-
-```sh
-uv sync
-uv run pytest
-uv run ruff check . && uv run ruff format --check .
-uv run pyright
-```
+This is version 2. The detector used for the chirp competition paper (2024)
+is tag `paper-chirp-competition-v1`. v2 shares no models or data formats
+with v1; `chirpdetector evaluate` still reads v1's `chirpdetector_bboxes.csv`.
 
 ## License
 
-MIT
+MIT. `chirpdetector.preprocessing.clicks` is ported from audian and
+wavetracker (GPL); see its module docstring.
