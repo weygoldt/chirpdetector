@@ -34,8 +34,10 @@ With the recording's tracks, detections of a model with an emitter head
 (`chirpdetector.evaluation.assign_by_frequency`). Then
 `chirpdetector.postprocess` flags second-harmonic copies of chirps and
 duplicate boxes on one chirp (within a tile or across tiles); flagged
-detections are dropped unless ``keep_dropped``. The settings and counts
-are recorded in the output's ``attrs["provenance"]``.
+detections are dropped unless ``keep_dropped``. A copy whose fundamental
+was not detected is kept instead, re-attributed to its fish at half the
+frequency (``reattributed == "harmonic"``, decoder values NaN). The
+settings and counts are recorded in the output's ``attrs["provenance"]``.
 """
 
 from __future__ import annotations
@@ -443,7 +445,8 @@ def predict_span(
         defaults, False or None to switch it off (no columns added).
     keep_dropped
         Return the detections that post-processing drops as well, with
-        their ``drop_reason`` (flag only, no filter).
+        their ``drop_reason`` (flag only, no filter). Re-attributed
+        harmonic copies are kept either way (``reattributed``).
 
     Returns
     -------

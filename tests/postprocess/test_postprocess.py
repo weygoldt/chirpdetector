@@ -62,6 +62,10 @@ def reasons(flagged: pd.DataFrame) -> list[str]:
     return flagged["drop_reason"].astype(str).tolist()
 
 
+FLAG_ONLY = PostprocessConfig(reattribute_harmonics=False)
+"""Copies without a detected fundamental are dropped, not re-attributed."""
+
+
 # ------------------------------------------------------------ harmonic copies
 
 
@@ -99,9 +103,11 @@ def test_fish_at_twice_another_fish_keeps_its_chirps() -> None:
 def test_an_assigned_emitter_is_never_a_harmonic_copy() -> None:
     tracks = {"r": constant_tracks({1: 640.0})}
     table = pd.DataFrame([box(5.0, 1250, 1450, emitter=1281.0)])
-    assert reasons(flag_detections(table, tracks)) == ["harmonic"]
+    assert reasons(flag_detections(table, tracks, FLAG_ONLY)) == ["harmonic"]
     assigned = table.assign(emitter_id=pd.array([7], dtype="Int64"))
-    assert reasons(flag_detections(assigned, tracks)) == [""]
+    flagged = flag_detections(assigned, tracks, FLAG_ONLY)
+    assert reasons(flagged) == [""]
+    assert flagged["harmonic_of_id"].isna().to_numpy().all()
 
 
 def test_dead_tracks_do_not_count() -> None:
@@ -121,8 +127,8 @@ def test_tracks_are_alive_across_gaps_up_to_max_gap() -> None:
     )
     copy = pd.DataFrame([box(5.0, 1250, 1450, emitter=1281.0)])
     assert PostprocessConfig().max_gap_s == 10.0
-    assert reasons(flag_detections(copy, {"r": gappy})) == ["harmonic"]
-    short = PostprocessConfig(max_gap_s=1.0)
+    assert reasons(flag_detections(copy, {"r": gappy}, FLAG_ONLY)) == ["harmonic"]
+    short = PostprocessConfig(max_gap_s=1.0, reattribute_harmonics=False)
     assert reasons(flag_detections(copy, {"r": gappy}, short)) == [""]
     # a fish at 1280 Hz protects the box only while its own (gappy) track
     # is alive; fish 2 at 640 Hz is tracked throughout
@@ -137,7 +143,7 @@ def test_tracks_are_alive_across_gaps_up_to_max_gap() -> None:
             [np.searchsorted(full, times - 1e-9), np.arange(len(full))]
         ),
     )
-    assert reasons(flag_detections(copy, {"r": own})) == [""]
+    assert reasons(flag_detections(copy, {"r": own}, FLAG_ONLY)) == [""]
     assert reasons(flag_detections(copy, {"r": own}, short)) == ["harmonic"]
 
 
@@ -240,7 +246,8 @@ def test_duplicates_respect_recordings_and_inactive_rows() -> None:
 
 
 def test_postprocessing_commutes_with_the_score_threshold() -> None:
-    """Flagging all detections, then thresholding, equals the reverse."""
+    """Flagging all detections, then thresholding, equals the reverse
+    (without re-attribution, which depends on the detected fundamentals)."""
     rng = np.random.default_rng(3)
     tracks = {"r": constant_tracks({1: 640.0, 2: 700.0, 3: 900.0})}
     rows = []
@@ -259,14 +266,111 @@ def test_postprocessing_commutes_with_the_score_threshold() -> None:
         )
     table = pd.DataFrame(rows)
     for threshold in (0.3, 0.5, 0.8):
-        late = postprocess(table, tracks)
+        late = postprocess(table, tracks, FLAG_ONLY)
         late = pd.DataFrame(late.loc[late["score"] >= threshold]).reset_index(drop=True)
         early = postprocess(
-            pd.DataFrame(table.loc[table["score"] >= threshold]), tracks
+            pd.DataFrame(table.loc[table["score"] >= threshold]), tracks, FLAG_ONLY
         )
         pd.testing.assert_frame_equal(
             late.drop(columns=list(COLUMNS)), early.drop(columns=list(COLUMNS))
         )
+
+
+# ------------------------------------------------------------ re-attribution
+
+
+def test_copy_without_fundamental_is_reattributed() -> None:
+    tracks = {"r": constant_tracks({1: 640.0, 2: 760.0})}
+    table = pd.DataFrame(
+        [
+            box(5.0, 1250, 1450, 0.8, emitter=1283.0),  # fundamental missed
+            box(5.02, 1252, 1440, 0.6, emitter=1281.0),  # a second box on it
+            box(8.0, 730, 850, 0.9, emitter=759.0),  # fish 2, kept as is
+        ]
+    ).assign(
+        emitter_id=pd.array([pd.NA, pd.NA, 2], dtype="Int64"),
+        emitter_df_hz=[np.nan, np.nan, 1.0],
+    )
+    flagged = flag_detections(table, tracks)
+    assert reasons(flagged) == ["", "harmonic", ""]
+    assert flagged["reattributed"].tolist() == ["harmonic", "", ""]
+    row = flagged.iloc[0]
+    assert row["emitter_hz"] == 641.5
+    assert (row["f_low_hz"], row["f_high_hz"]) == (625.0, 725.0)
+    assert (row["harmonic_emitter_hz"], row["harmonic_f_low_hz"]) == (1283.0, 1250)
+    assert row["harmonic_f_high_hz"] == 1450
+    assert row["emitter_id"] == 1
+    assert row["harmonic_of_id"] == 1
+    assert row["emitter_df_hz"] == pytest.approx(1.5)
+    # the other rows are untouched
+    assert flagged.loc[2, "emitter_hz"] == 759.0
+    assert np.isnan(flagged.loc[2, "harmonic_emitter_hz"])
+    assert summarize(flagged)["reattributed"] == 1
+    # switched off: today's behaviour, both copies dropped
+    off = flag_detections(table, tracks, FLAG_ONLY)
+    assert reasons(off) == ["harmonic", "harmonic", ""]
+    assert off["emitter_hz"].tolist() == table["emitter_hz"].tolist()
+
+
+@pytest.mark.parametrize("assigned", [True, False])
+def test_copy_with_detected_fundamental_is_dropped(assigned: bool) -> None:
+    tracks = {"r": constant_tracks({1: 640.0, 2: 652.0})}
+    # the fundamental's box spans 640 Hz; assigned to fish 1, or (close
+    # fish) to fish 2: either way the chirp is detected
+    table = pd.DataFrame(
+        [
+            box(5.0, 610, 780, 0.6, emitter=641.0 if assigned else 651.0),
+            box(5.0, 1250, 1450, 0.9, emitter=1283.0),
+        ]
+    ).assign(emitter_id=pd.array([1 if assigned else 2, pd.NA], dtype="Int64"))
+    flagged = flag_detections(table, tracks)
+    assert reasons(flagged) == ["", "harmonic"]
+    assert flagged["reattributed"].tolist() == ["", ""]
+    # a fundamental that does not overlap the copy in time does not count
+    late = table.assign(t_start_s=[5.5, 4.89], t_end_s=[5.72, 5.11])
+    assert flag_detections(late, tracks)["reattributed"].tolist() == ["", "harmonic"]
+
+
+def test_reattribution_keeps_a_fish_at_twice_the_frequency() -> None:
+    table = pd.DataFrame([box(5.0, 1170, 1300, 0.9, emitter=1201.0)])
+    flagged = flag_detections(table, {"r": constant_tracks({1: 600.0, 2: 1200.0})})
+    assert reasons(flagged) == [""]
+    assert flagged["reattributed"].tolist() == [""]
+    assert flagged.loc[0, "emitter_hz"] == 1201.0
+
+
+def test_box_only_copies_are_halved_without_assignment() -> None:
+    tracks = {"r": constant_tracks({1: 645.0, 2: 760.0})}
+    table = pd.DataFrame([box(5.0, 1258, 1430, 0.8), box(9.0, 700, 820, 0.9)])
+    flagged = flag_detections(table, tracks)
+    assert reasons(flagged) == ["", ""]
+    assert flagged["reattributed"].tolist() == ["harmonic", ""]
+    assert (flagged.loc[0, "f_low_hz"], flagged.loc[0, "f_high_hz"]) == (629.0, 715.0)
+    assert flagged.loc[0, "harmonic_of_id"] == 1
+    assert "emitter_id" not in flagged.columns
+    assert np.isnan(flagged.loc[0, "harmonic_emitter_hz"])
+    # with its fundamental detected, the copy is dropped
+    both = pd.concat([table, pd.DataFrame([box(5.0, 600, 760, 0.95)])])
+    assert reasons(flag_detections(both, tracks)) == ["harmonic", "", ""]
+
+
+def test_reattributed_copies_lose_their_decoder_values() -> None:
+    from chirpdetector.params import ESTIMATE_COLUMNS
+
+    tracks = {"r": constant_tracks({1: 640.0})}
+    table = pd.DataFrame(
+        [box(5.0, 1250, 1450, 0.8, emitter=1283.0), box(9.0, 610, 780, emitter=641.0)]
+    )
+    for column in ESTIMATE_COLUMNS:
+        table[column] = 1.0
+    table["params_ok"] = True
+    table["params_flag"] = pd.Series(["", "size"], dtype=object)
+    flagged = flag_detections(table, tracks)
+    values = [c for c in ESTIMATE_COLUMNS if c not in ("params_ok", "params_flag")]
+    assert flagged.loc[0, values].isna().all()
+    assert flagged.loc[1, values].eq(1.0).all()
+    assert flagged["params_ok"].tolist() == [False, True]
+    assert flagged["params_flag"].tolist() == ["harmonic", "size"]
 
 
 # ------------------------------------------------------------- without tracks
@@ -318,7 +422,9 @@ def test_switch_off_and_drop_flagged_renumbers() -> None:
         table, config=PostprocessConfig(harmonic=False, duplicate=False)
     )
     assert reasons(off) == ["", "", "", ""]
-    assert off.loc[:, list(COLUMNS[1:])].isna().to_numpy().all()
+    assert off["reattributed"].tolist() == ["", "", "", ""]
+    refs = [c for c in COLUMNS if c not in ("drop_reason", "reattributed")]
+    assert off.loc[:, refs].isna().to_numpy().all()
     flagged = flag_detections(table)
     assert reasons(flagged) == ["", "duplicate", "", ""]
     assert summarize(flagged) == {
@@ -327,6 +433,7 @@ def test_switch_off_and_drop_flagged_renumbers() -> None:
         "harmonic": 0,
         "duplicate": 1,
         "harmonic_pair_flagged": 1,
+        "reattributed": 0,
     }
     kept = drop_flagged(flagged)
     assert len(kept) == 3

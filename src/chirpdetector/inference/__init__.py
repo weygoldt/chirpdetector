@@ -12,7 +12,8 @@ height, widths and undershoot (`chirpdetector.params`). Given the
 recording's tracks, it assigns emitter-head detections to the nearest live
 track. It then drops second-harmonic copies of chirps and duplicate boxes
 (`chirpdetector.postprocess`; on by default, ``keep_dropped=True`` keeps
-them with their reason).
+them with their reason); a copy whose fundamental was not detected is
+re-attributed to its fish at half the frequency instead.
 `detect_in_spectrogram` is the detection step on an already computed
 spectrogram (it makes the decoder's training boxes).
 
