@@ -73,6 +73,46 @@ simulated copies at score >= 0.5, whose scenes hold fish up to 1,100 Hz;
 in the competition recordings, harmonic copies lie > 400 Hz above every
 fish). Wide windows trade precision for recall, on purpose.
 
+Re-attribution
+--------------
+A copy whose fundamental was not detected is the only trace of a real
+chirp. With ``reattribute_harmonics`` (default: on for emitter-head
+detections, off for box-only ones, see below), such a copy is kept and
+reported at the fundamental instead of dropped: ``emitter_hz``,
+``f_low_hz`` and ``f_high_hz`` are halved (the detected values move to
+``harmonic_emitter_hz``, ``harmonic_f_low_hz``, ``harmonic_f_high_hz``),
+``emitter_id`` (if the table has one) and ``harmonic_of_id`` are the
+track, ``emitter_df_hz`` is recomputed, and ``reattributed`` is
+``"harmonic"``. The chirp-parameter decoder never saw harmonic crops, so
+its values on these rows are NaN (calibrated and raw), with ``params_ok``
+False and ``params_flag`` ``"harmonic"``. Box-only rows are kept and
+halved the same way, without an assignment.
+
+A copy of track ``k`` counts as detected at the fundamental if a kept
+detection overlaps it in time (temporal IoU >= ``reattribute_min_tiou``,
+0.3) and either spans ``k``'s frequency (``f_low <= f_k <= f_high``) or is
+assigned to ``k``; copies are visited by decreasing score, so the second
+copy of one chirp finds the first re-attributed one. On the sim_v4 test
+tiles (dual-head, score >= 0.5), kept fundamentals overlapped their
+copies with temporal IoU > 0.5 or not at all (< 0.1), so the threshold
+is not critical. The assignment alone is not enough: 128 of the 1,399
+copies had no overlapping kept detection *assigned* to their track, but
+44 of these chirps had been detected and assigned to another, close fish
+(re-attribution would count them twice) and 64 lay at tracks with no
+labelled chirp nearby. With the frequency criterion, 1 copy remained, on
+a chirp whose fundamental was missed.
+
+Measured at score 0.5 (detections above the threshold post-processed, as
+in `predict_span`): nothing re-attributed on the real labels; on sim_v4,
+the dual-head re-attributed 1 copy, which matched its missed chirp, and
+YOLO26s 12, all false positives at tracks without a labelled chirp (9 at
+a real background fish). Hence the automatic default: on with an
+emitter head, off for box-only models (``reattribute_harmonics=None``).
+
+Re-attribution depends on which fundamentals are detected, so unlike the
+rest it does not commute with the score threshold: apply it to the
+detections that are reported (`predict_span` does, at its threshold).
+
 Live tracks
 -----------
 A track is alive at a time if its detections around it are at most
@@ -153,6 +193,10 @@ Columns
     (Int64, NA otherwise); set whether the row is dropped or only flagged.
 ``duplicate_of``
     Duplicates: row of the kept twin (Int64, NA otherwise).
+``reattributed``
+    ``"harmonic"`` for a re-attributed copy (kept), ``""`` otherwise.
+``harmonic_emitter_hz``, ``harmonic_f_low_hz``, ``harmonic_f_high_hz``
+    The detected values of a re-attributed copy (NaN otherwise).
 
 Rows refer to positions in the same table. `drop_flagged` removes the
 dropped rows and renumbers these references (NA where the referenced row
@@ -183,6 +227,8 @@ __all__ = [
     "harmonic_copies",
     "harmonic_pairs",
     "postprocess",
+    "reattributable_copies",
+    "reattribution_enabled",
     "summarize",
 ]
 
@@ -202,6 +248,10 @@ COLUMNS: tuple[str, ...] = (
     "harmonic_of_id",
     "harmonic_pair_of",
     "duplicate_of",
+    "reattributed",
+    "harmonic_emitter_hz",
+    "harmonic_f_low_hz",
+    "harmonic_f_high_hz",
 )
 """Columns added by `flag_detections` (module docstring)."""
 
@@ -255,6 +305,15 @@ class PostprocessConfig:
         Duplicates of head rows: smallest temporal IoU.
     duplicate_edge_min_tiou, duplicate_edge_min_fiou
         Duplicates of edge rows: smallest temporal and frequency IoU.
+    reattribute_harmonics
+        Keep a harmonic copy without a detected fundamental, re-attributed
+        to its fish at half the frequency (module docstring), instead of
+        dropping it. None (default): automatic, on for detections with an
+        emitter head (an ``emitter_hz`` column), off for box-only models;
+        True or False overrides (`reattribution_enabled`).
+    reattribute_min_tiou
+        Temporal IoU from which a kept detection counts as the copy's
+        fundamental.
     """
 
     harmonic: bool = True
@@ -274,6 +333,8 @@ class PostprocessConfig:
     duplicate_edge_tolerance_hz: float = 2.0
     duplicate_edge_min_tiou: float = 0.5
     duplicate_edge_min_fiou: float = 0.5
+    reattribute_harmonics: bool | None = None
+    reattribute_min_tiou: float = 0.3
 
     def __post_init__(self) -> None:
         if self.trackless not in get_args(TracklessMode):
@@ -284,6 +345,7 @@ class PostprocessConfig:
             "duplicate_head_min_tiou",
             "duplicate_edge_min_tiou",
             "duplicate_edge_min_fiou",
+            "reattribute_min_tiou",
         ):
             value = float(getattr(self, name))
             if not 0 < value <= 1:
@@ -339,8 +401,9 @@ class PostprocessConfig:
 
 
 def _floats(df: pd.DataFrame, column: str) -> FloatArray:
+    """A column as a fresh float64 array (never a view of ``df``)."""
     values = pd.Series(df[column]).astype("Float64")
-    return values.to_numpy(dtype=np.float64, na_value=np.nan)
+    return np.array(values.to_numpy(dtype=np.float64, na_value=np.nan), copy=True)
 
 
 def _centres(df: pd.DataFrame) -> FloatArray:
@@ -584,6 +647,81 @@ def duplicates(
     return twin
 
 
+def reattribution_enabled(config: PostprocessConfig, predictions: pd.DataFrame) -> bool:
+    """``config.reattribute_harmonics``, resolved for a table.
+
+    None means automatic: on if the detections carry an emitter frequency
+    (``emitter_hz`` column, an emitter-head model), off for box-only
+    models, where all simulated re-attributions were false positives.
+    """
+    if config.reattribute_harmonics is None:
+        return "emitter_hz" in predictions.columns
+    return bool(config.reattribute_harmonics)
+
+
+def reattributable_copies(
+    predictions: pd.DataFrame,
+    tracks: Tracks,
+    config: PostprocessConfig,
+    reason: npt.ArrayLike,
+    harmonic_of: npt.ArrayLike,
+) -> BoolArray:
+    """Harmonic copies of one recording without a detected fundamental.
+
+    Copies (``reason == "harmonic"`` with a track in ``harmonic_of``) are
+    visited by decreasing score. A copy of track ``k`` is re-attributable
+    if no kept detection (``reason == ""``, or a copy re-attributed before
+    it) overlaps it in time with temporal IoU >= ``reattribute_min_tiou``
+    while spanning ``k``'s frequency at the copy's centre (``f_low <= f_k
+    <= f_high``, the halved box for a re-attributed copy) or being
+    assigned to ``k`` (``emitter_id``; edge rows: ``f_k`` in the
+    fundamental window). Of two copies of one chirp, the second finds the
+    first.
+
+    Returns
+    -------
+    Per row, whether to re-attribute it.
+    """
+    n = len(predictions)
+    out = np.zeros(n, dtype=np.bool_)
+    reason = np.asarray(reason, dtype=object)
+    harmonic_of = np.asarray(harmonic_of, dtype=np.int64)
+    copies = np.flatnonzero((reason == "harmonic") & (harmonic_of >= 0))
+    if not copies.size:
+        return out
+    t0, t1 = _floats(predictions, "t_start_s"), _floats(predictions, "t_end_s")
+    f0, f1 = _floats(predictions, "f_low_hz"), _floats(predictions, "f_high_hz")
+    head = _head(predictions)
+    ids = _emitter_ids(predictions)
+    centre = _centres(predictions)
+    score = _floats(predictions, "score")
+    w_lo, w_hi = config.edge_fundamental_window_hz
+    kept = reason == KEPT
+    for i in _score_order(score, copies).tolist():
+        k = int(harmonic_of[i])
+        f_k = float(tracks.track(k).frequency_at(centre[i], config.max_gap_s)[0])
+        others = np.flatnonzero(kept | out)
+        if others.size and np.isfinite(f_k):
+            lo = np.where(out[others], 0.5 * f0[others], f0[others])
+            hi = np.where(out[others], 0.5 * f1[others], f1[others])
+            belongs = ((lo <= f_k) & (hi >= f_k)) | (
+                out[others] & (harmonic_of[others] == k)
+            )
+            if ids is not None:
+                belongs |= head[others] & (ids[others] == k)
+            belongs |= (
+                ~head[others]
+                & (f0[others] + w_lo <= f_k)
+                & (f0[others] + w_hi >= f_k)
+                & ~out[others]
+            )
+            overlap = _iou_1d(t0, t1, i, others) >= config.reattribute_min_tiou
+            if np.any(belongs & overlap):
+                continue
+        out[i] = np.isfinite(f_k)
+    return out
+
+
 # ---------------------------------------------------------------- the table
 
 
@@ -636,10 +774,12 @@ def flag_detections(
     out = out.reset_index(drop=True)
     n = len(out)
     reason = np.full(n, KEPT, dtype=object)
+    reattributed = np.full(n, KEPT, dtype=object)
     harmonic_of = np.full(n, -1, dtype=np.int64)
     pair_of = np.full(n, -1, dtype=np.int64)
     duplicate_of = np.full(n, -1, dtype=np.int64)
     groups = _recording_rows(out) if n else []
+    reattribute = config.harmonic and reattribution_enabled(config, out)
     for name, rows in groups:
         part = out.iloc[rows]
         rec_tracks = None if tracks is None or name is None else tracks.get(name)
@@ -660,12 +800,90 @@ def flag_detections(
             has = twin >= 0
             reason[rows[has]] = "duplicate"
             duplicate_of[rows[has]] = rows[twin[has]]
+        if reattribute and rec_tracks is not None:
+            again = reattributable_copies(
+                part, rec_tracks, config, reason[rows], harmonic_of[rows]
+            )
+            reattributed[rows[again]] = "harmonic"
+            reason[rows[again]] = KEPT
     out["drop_reason"] = pd.Series(reason, dtype=object)
     out["harmonic_of_id"] = _int64(harmonic_of)
     out["harmonic_pair_of"] = _int64(pair_of)
     out["duplicate_of"] = _int64(duplicate_of)
+    _reattribute(out, reattributed, harmonic_of, tracks, config)
     out.attrs = {**predictions.attrs}
     return out
+
+
+_HARMONIC_COLUMNS = {
+    "emitter_hz": "harmonic_emitter_hz",
+    "f_low_hz": "harmonic_f_low_hz",
+    "f_high_hz": "harmonic_f_high_hz",
+}
+
+
+def _reattribute(
+    out: pd.DataFrame,
+    reattributed: npt.NDArray[np.object_],
+    harmonic_of: IntArray,
+    tracks: Mapping[str, Tracks] | None,
+    config: PostprocessConfig,
+) -> None:
+    """Report re-attributed copies at the fundamental (in place)."""
+    rows = np.flatnonzero(reattributed == "harmonic")
+    out["reattributed"] = pd.Series(reattributed, dtype=object)
+    for column, saved in _HARMONIC_COLUMNS.items():
+        values = np.full(len(out), np.nan)
+        if column in out.columns and rows.size:
+            values[rows] = _floats(out, column)[rows]
+            halved = _floats(out, column)
+            halved[rows] = 0.5 * values[rows]
+            out[column] = halved
+        out[saved] = values
+    if not rows.size:
+        return
+    ids = harmonic_of[rows]
+    if "emitter_id" in out.columns:
+        emitter = _emitter_ids(out)
+        assert emitter is not None
+        emitter = np.array(emitter, copy=True)
+        emitter[rows] = ids
+        out["emitter_id"] = _int64(emitter)
+    if "emitter_df_hz" in out.columns and tracks is not None:
+        df_hz = _floats(out, "emitter_df_hz")
+        centre = _centres(out)
+        names = out["recording"].astype(str).to_numpy() if "recording" in out else None
+        e = _floats(out, "emitter_hz") if "emitter_hz" in out.columns else None
+        for r, k in zip(rows.tolist(), ids.tolist(), strict=True):
+            rec = tracks.get(str(names[r])) if names is not None else None
+            if rec is None or e is None:
+                continue
+            f_k = rec.track(int(k)).frequency_at(centre[r], config.max_gap_s)[0]
+            df_hz[r] = abs(e[r] - f_k)
+        out["emitter_df_hz"] = df_hz
+    if "params_ok" in out.columns:
+        _invalidate_params(out, rows)
+
+
+def _invalidate_params(out: pd.DataFrame, rows: IntArray) -> None:
+    """Decoder values of re-attributed copies: NaN, flagged ``harmonic``."""
+    from chirpdetector.params.inference import ESTIMATE_COLUMNS
+
+    for column in ESTIMATE_COLUMNS:
+        if column in ("params_ok", "params_flag") or column not in out.columns:
+            continue
+        values = _floats(out, column)
+        values[rows] = np.nan
+        out[column] = values
+    ok = np.array(pd.Series(out["params_ok"]).astype(bool).to_numpy(), copy=True)
+    ok[rows] = False
+    out["params_ok"] = ok
+    if "params_flag" in out.columns:
+        flag = np.array(
+            pd.Series(out["params_flag"]).astype(object).to_numpy(), copy=True
+        )
+        flag[rows] = "harmonic"
+        out["params_flag"] = pd.Series(flag, dtype=object)
 
 
 def drop_flagged(flagged: pd.DataFrame) -> pd.DataFrame:
@@ -693,12 +911,16 @@ def drop_flagged(flagged: pd.DataFrame) -> pd.DataFrame:
 
 
 def summarize(flagged: pd.DataFrame) -> dict[str, int]:
-    """Counts: ``n``, ``kept``, one per reason, and ``harmonic_pair_flagged``."""
+    """Counts: ``n``, ``kept``, one per reason, ``harmonic_pair_flagged`` and
+    ``reattributed``."""
     reason = flagged["drop_reason"].astype(str).to_numpy()
     counts = {"n": len(flagged), "kept": int(np.sum(reason == KEPT))}
     counts.update({r: int(np.sum(reason == r)) for r in REASONS})
     pairs = pd.Series(flagged["harmonic_pair_of"]).notna().to_numpy(dtype=np.bool_)
     counts["harmonic_pair_flagged"] = int(pairs.sum())
+    if "reattributed" in flagged.columns:
+        again = flagged["reattributed"].astype(str).to_numpy() == "harmonic"
+        counts["reattributed"] = int(again.sum())
     return counts
 
 

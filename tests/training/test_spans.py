@@ -222,6 +222,8 @@ def test_predict_span_assigns_then_drops_copies_and_duplicates(
     assert short["postprocess"]["max_gap_s"] == 1.0
     assert provenance["postprocess"]["counts"]["harmonic"] == n_tiles
     assert provenance["postprocess"]["harmonic_tolerance_hz"] == 15.0
+    assert provenance["postprocess"]["reattribute_harmonics"] is None
+    assert provenance["postprocess"]["reattribute_harmonics_resolved"] is True
 
     kept = predict_span(span_bundle, recording, 2.0, 5.0, **kwargs)
     assert len(kept) == n_tiles
