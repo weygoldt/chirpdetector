@@ -13,7 +13,9 @@ Each panel shows
   background in every column);
 * the wavetracker tracks, one colour per fish;
 * the model's boxes with their scores, in the colour of the assigned fish
-  if the model assigns an emitter, grey otherwise;
+  if the model assigns an emitter, grey otherwise; boxes as `predict_span`
+  returns them, with the recording's tracks: second-harmonic copies and
+  duplicate boxes dropped (`chirpdetector.postprocess`);
 * the emitter's EOD frequency at the chirp centre as a marker, when the
   model predicts it (``emitter_hz``; matched to the nearest live track with
   `assign_by_frequency`) or, for v1, its assigned emitter;
@@ -56,7 +58,6 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from chirpdetector.evaluation.assignment import assign_by_frequency
 from chirpdetector.evaluation.predictions import V1_DETECTIONS_FILE, read_predictions
 from chirpdetector.evaluation.schema import read_ground_truth
 
@@ -301,11 +302,9 @@ def _detections(
             detector=detectors[column.id],
             device=device,
             params=column.params,
+            tracks=ctx.tracks,
+            emitter_tolerance_hz=EMITTER_TOLERANCE_HZ,
         )
-        if "emitter_hz" in preds.columns and ctx.tracks is not None:
-            preds = assign_by_frequency(
-                preds, {name: ctx.tracks}, tolerance_hz=EMITTER_TOLERANCE_HZ
-            )
     centre = 0.5 * (preds["t_start_s"].to_numpy() + preds["t_end_s"].to_numpy())
     keep = (
         (preds["score"].to_numpy() >= column.threshold)

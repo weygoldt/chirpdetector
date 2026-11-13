@@ -9,15 +9,23 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from gridtools.io import open_recording
+from gridtools.io import load_tracks, open_recording
 
 from chirpdetector.bundle import Bundle, load_bundle, write_bundle
 from chirpdetector.data import Tiling
-from chirpdetector.inference import merge_tiles, predict_span, render_tiles, tile_starts
+from chirpdetector.inference import (
+    merge_tiles,
+    predict_span,
+    render_span,
+    render_tiles,
+    tile_starts,
+)
+from chirpdetector.postprocess import COLUMNS, PostprocessConfig
 from chirpdetector.spectrogram import (
     SpectrogramConfig,
     compute_spectrogram,
     normalize,
+    timefreq_to_pixel,
     to_image,
 )
 
@@ -158,6 +166,77 @@ def test_predict_span_maps_each_tile(
     # a short span is widened to one tile
     short = predict_span(span_bundle, recording, 4.0, 4.1, name="trial")
     assert set(short["tile"]) == {0}
+
+
+def test_predict_span_assigns_then_drops_copies_and_duplicates(
+    span_bundle: Bundle,
+    stub_backend: StubBackend,
+    make_synthetic_trial: Callable[[Path], Path],
+    tmp_path: Path,
+) -> None:
+    """Per tile: a chirp of fish 0 (700 Hz), its second harmonic and a second,
+    narrower box on the chirp; the emitter head predicts their baselines."""
+    trial = make_synthetic_trial(tmp_path / "trial")
+    recording = open_recording(trial / "recording.wav")
+    tracks = load_tracks(trial)
+    geometry = render_span(span_bundle, recording, 2.0, 5.0).geometries[0]
+
+    def rows(*freqs: float) -> list[float]:
+        return [float(timefreq_to_pixel(0.0, f, geometry)[1]) for f in freqs]
+
+    lo, hi = rows(670.0, 1370.0, 670.0), rows(800.0, 1500.0, 790.0)
+    stub_backend.output = pd.DataFrame(
+        {
+            "x_min": [60.0, 60.0, 61.0],
+            "y_min": np.minimum(lo, hi),
+            "x_max": [70.0, 70.0, 70.0],
+            "y_max": np.maximum(lo, hi),
+            "score": [0.9, 0.8, 0.7],
+            "emitter_y": rows(700.0, 1400.0, 701.0),
+        }
+    )
+    kwargs = {"name": "trial", "tracks": tracks}
+    off = predict_span(span_bundle, recording, 2.0, 5.0, postprocess=False, **kwargs)
+    n_tiles = len(off) // 3
+    assert len(off) == 3 * n_tiles
+    assert not set(COLUMNS) & set(off.columns)
+    assert off.attrs["provenance"]["postprocess"] is None
+    # the chirp and its narrower twin are assigned to fish 0, the copy to none
+    assert off["emitter_id"].tolist() == [0, pd.NA, 0] * n_tiles
+
+    flagged = predict_span(
+        span_bundle, recording, 2.0, 5.0, keep_dropped=True, **kwargs
+    )
+    pd.testing.assert_frame_equal(flagged.drop(columns=list(COLUMNS)), off)
+    assert flagged["drop_reason"].tolist() == ["", "harmonic", "duplicate"] * n_tiles
+    assert flagged["harmonic_of_id"].dropna().unique().tolist() == [0]
+    provenance = flagged.attrs["provenance"]
+    assert provenance["tracks"] is True
+    assert provenance["emitter_tolerance_hz"] == 50.0
+    assert provenance["postprocess"]["counts"]["harmonic"] == n_tiles
+    assert provenance["postprocess"]["harmonic_tolerance_hz"] == 15.0
+
+    kept = predict_span(span_bundle, recording, 2.0, 5.0, **kwargs)
+    assert len(kept) == n_tiles
+    assert (kept["score"].to_numpy() == 0.9).all()
+    assert (kept["emitter_id"].to_numpy() == 0).all()
+
+    # without tracks: the copy is only flagged (pair rule), the twin dropped
+    trackless = predict_span(span_bundle, recording, 2.0, 5.0, name="trial")
+    assert "emitter_id" not in trackless.columns
+    assert trackless["score"].tolist() == [0.9, 0.8] * n_tiles
+    assert trackless["harmonic_pair_of"].tolist() == [
+        x for k in range(n_tiles) for x in (pd.NA, 2 * k)
+    ]
+    dropping = predict_span(
+        span_bundle,
+        recording,
+        2.0,
+        5.0,
+        name="trial",
+        postprocess=PostprocessConfig(trackless="drop"),
+    )
+    assert len(dropping) == n_tiles
 
 
 def test_tiling_equals_the_dataset_builders() -> None:

@@ -26,6 +26,16 @@ of two whose centres are within `DUPLICATE_TOLERANCE_S` (50 ms) and whose
 frequency ranges overlap, the lower-scoring one is dropped. That catches a
 chirp centred right at a boundary that both tiles localise on their own
 side of it.
+
+Emitters and post-processing
+----------------------------
+With the recording's tracks, detections of a model with an emitter head
+(``emitter_hz``) are assigned to the nearest live track
+(`chirpdetector.evaluation.assign_by_frequency`). Then
+`chirpdetector.postprocess` flags second-harmonic copies of chirps and
+duplicate boxes on one chirp (within a tile or across tiles); flagged
+detections are dropped unless ``keep_dropped``. The settings and counts
+are recorded in the output's ``attrs["provenance"]``.
 """
 
 from __future__ import annotations
@@ -45,6 +55,13 @@ from numpy.typing import NDArray
 from chirpdetector.bundle import Bundle, load_bundle
 from chirpdetector.data.contract import Tiling
 from chirpdetector.models import Detector
+from chirpdetector.postprocess import (
+    DEFAULT_FUNDAMENTAL_TOLERANCE_HZ,
+    PostprocessConfig,
+    drop_flagged,
+    flag_detections,
+    summarize,
+)
 from chirpdetector.prediction import load_detector, predict_images
 from chirpdetector.preprocessing import ClickRemoval, can_remove_clicks, read_clean
 from chirpdetector.resources import apply_vram_limit
@@ -60,6 +77,8 @@ from chirpdetector.spectrogram import (
 )
 
 if TYPE_CHECKING:
+    from gridtools.io import Tracks
+
     from chirpdetector.params.inference import ParamsEstimator
 
 __all__ = [
@@ -362,6 +381,10 @@ def predict_span(
     tolerance_s: float = DUPLICATE_TOLERANCE_S,
     params: ParamsEstimator | str | Path | None = None,
     allow_detector_mismatch: bool = False,
+    tracks: Tracks | None = None,
+    emitter_tolerance_hz: float | None = None,
+    postprocess: PostprocessConfig | bool | None = True,
+    keep_dropped: bool = False,
 ) -> pd.DataFrame:
     """Detect chirps in ``[t_start_s, t_end_s]`` of a recording.
 
@@ -399,13 +422,34 @@ def predict_span(
     allow_detector_mismatch
         Use a params bundle trained on another detector's boxes (its
         parameters are not validated for these boxes).
+    tracks
+        The recording's EOD frequency tracks (time 0 = first sample). With
+        an emitter head, detections are assigned to the nearest live track
+        (``emitter_id``, ``emitter_df_hz``); post-processing uses them to
+        find harmonic copies.
+    emitter_tolerance_hz
+        Largest distance of ``emitter_hz`` to the assigned track. Default:
+        the post-processing's ``fundamental_tolerance_hz`` (50 Hz), so that
+        a detection with an assigned emitter is never a harmonic copy.
+    postprocess
+        `chirpdetector.postprocess` settings; True (default) for the
+        defaults, False or None to switch it off (no columns added).
+    keep_dropped
+        Return the detections that post-processing drops as well, with
+        their ``drop_reason`` (flag only, no filter).
 
     Returns
     -------
     DataFrame
         Detections in absolute time and frequency (`predict_images`
-        columns, ``tile`` instead of ``image_index``), de-duplicated, plus
-        the parameter columns if ``params`` is given.
+        columns, ``tile`` instead of ``image_index``), de-duplicated
+        across tiles; ``emitter_id`` and ``emitter_df_hz`` with tracks and
+        an emitter head; the parameter columns
+        (`chirpdetector.params.PARAM_COLUMNS`, then the uncalibrated
+        `chirpdetector.params.RAW_COLUMNS`) if ``params`` is given; the
+        post-processing columns (`chirpdetector.postprocess.COLUMNS`)
+        unless it is off. ``attrs["provenance"]`` holds the model hash,
+        threshold, tolerances and post-processing settings and counts.
     """
     bundle = bundle if isinstance(bundle, Bundle) else load_bundle(bundle)
     source = _Channels(recording, channels)
@@ -418,31 +462,88 @@ def predict_span(
         "device": device,
         "tolerance_s": tolerance_s,
     }
+    config = _postprocess_config(postprocess)
+    if emitter_tolerance_hz is None:
+        emitter_tolerance_hz = (
+            DEFAULT_FUNDAMENTAL_TOLERANCE_HZ
+            if config is None
+            else config.fundamental_tolerance_hz
+        )
+    estimator, values = None, None
     if params is None:
         spec = span_spectrogram(
             bundle, recording, start, stop, channels=channels, device=device
         )
-        return detect_in_spectrogram(bundle, spec, **detect)
-    from chirpdetector.params.inference import ParamsEstimator
+        detections = detect_in_spectrogram(bundle, spec, **detect)
+    else:
+        from chirpdetector.params.inference import ParamsEstimator
 
-    estimator = (
-        params
-        if isinstance(params, ParamsEstimator)
-        else ParamsEstimator(params, device=device)
-    )
-    estimator.check_detector(bundle, allow_mismatch=allow_detector_mismatch)
-    hop = bundle.spectrogram.layout(fs).hop_samples
-    context = math.ceil(estimator.context_s * fs / hop) * hop
-    wide = span_spectrogram(
-        bundle,
-        recording,
-        max(0, start - context),
-        min(total, stop + context),
-        channels=channels,
-        device=device,
-    )
-    first = math.ceil(start / hop) - wide.frame_start
-    last = math.ceil(stop / hop) - wide.frame_start
-    detections = detect_in_spectrogram(bundle, _slice(wide, first, last), **detect)
-    values = estimator.estimate(wide, detections)
-    return pd.concat([detections, values], axis=1)
+        estimator = (
+            params
+            if isinstance(params, ParamsEstimator)
+            else ParamsEstimator(params, device=device)
+        )
+        estimator.check_detector(bundle, allow_mismatch=allow_detector_mismatch)
+        hop = bundle.spectrogram.layout(fs).hop_samples
+        context = math.ceil(estimator.context_s * fs / hop) * hop
+        wide = span_spectrogram(
+            bundle,
+            recording,
+            max(0, start - context),
+            min(total, stop + context),
+            channels=channels,
+            device=device,
+        )
+        first = math.ceil(start / hop) - wide.frame_start
+        last = math.ceil(stop / hop) - wide.frame_start
+        detections = detect_in_spectrogram(bundle, _slice(wide, first, last), **detect)
+        values = estimator.estimate(wide, detections)
+    by_name = None if tracks is None else {name: tracks}
+    assigned = by_name is not None and "emitter_hz" in detections.columns
+    if assigned:
+        from chirpdetector.evaluation.assignment import assign_by_frequency
+
+        detections = assign_by_frequency(
+            detections, by_name or {}, emitter_tolerance_hz
+        )
+    if values is not None:
+        detections = pd.concat([detections, values], axis=1)
+    provenance: dict[str, object] = {
+        "model_sha256": bundle.weights_sha256,
+        "score_threshold": float(
+            bundle.score_threshold if score_threshold is None else score_threshold
+        ),
+        "tile_duplicate_tolerance_s": float(tolerance_s),
+        "tracks": tracks is not None,
+        "emitter_tolerance_hz": float(emitter_tolerance_hz) if assigned else None,
+        "params_sha256": None if estimator is None else _params_sha256(estimator),
+        "postprocess": None,
+    }
+    if config is not None:
+        flagged = flag_detections(detections, by_name, config)
+        provenance["postprocess"] = {
+            **config.to_dict(),
+            "keep_dropped": keep_dropped,
+            "counts": summarize(flagged),
+        }
+        detections = flagged if keep_dropped else drop_flagged(flagged)
+    detections.attrs["provenance"] = provenance
+    return detections
+
+
+def _postprocess_config(
+    postprocess: PostprocessConfig | bool | None,
+) -> PostprocessConfig | None:
+    if postprocess is None or postprocess is False:
+        return None
+    if postprocess is True:
+        return PostprocessConfig()
+    if isinstance(postprocess, PostprocessConfig):
+        return postprocess
+    msg = f"postprocess must be a PostprocessConfig, True, False or None, got {postprocess!r}"
+    raise TypeError(msg)
+
+
+def _params_sha256(estimator: object) -> str | None:
+    bundle = getattr(estimator, "bundle", None)
+    return getattr(bundle, "weights_sha256", None)
