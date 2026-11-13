@@ -1,6 +1,6 @@
 [project]
 name = "chirpdetector"
-version = "2.0.0.dev0"
+version = "2.0.0"
 description = "Detect chirps of wave-type weakly electric fish in grid recordings and assign them to their emitters."
 readme = "README.md"
 license = "MIT"
@@ -15,10 +15,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
-    # A direct reference: "gridtools" on PyPI is an unrelated package. The
-    # root project of chirp_competition_upgrade overrides it with the
-    # editable submodule for development.
-    "gridtools @ git+https://github.com/weygoldt/gridtools@main",
+    # A direct reference, pinned to a gridtools release tag: "gridtools" on
+    # PyPI is an unrelated package. The root project of
+    # chirp_competition_upgrade overrides it with the editable submodule for
+    # development.
+    "gridtools @ git+https://github.com/weygoldt/gridtools@v2.0.0",
     "numpy>=2.5",
     "opencv-python>=4.12",
     "pandas>=3.1.1",

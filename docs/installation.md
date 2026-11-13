@@ -13,8 +13,15 @@ pip install "git+https://github.com/weygoldt/chirpdetector"
 ```
 
 This installs [gridtools](https://github.com/weygoldt/gridtools) (recording
-I/O and the simulator) from GitHub as well. Do not install `gridtools` from
-PyPI: that name belongs to an unrelated package.
+I/O and the simulator) from GitHub as well, at the release tag that
+chirpdetector requires (`v2.0.0`). Do not install `gridtools` from PyPI: that
+name belongs to an unrelated package.
+
+These commands install the latest `main`. To pin a release, add its tag:
+
+```sh
+uv pip install "chirpdetector @ git+https://github.com/weygoldt/chirpdetector@v2.0.0"
+```
 
 Versions of chirpdetector up to `main` 341fee5 found gridtools through a
 relative path (`../gridtools`) and fail to install from GitHub. To install
@@ -54,7 +61,7 @@ configs; there is no automatic batch sizing.
 ```sh
 git clone https://github.com/weygoldt/chirpdetector
 cd chirpdetector
-uv sync --all-extras          # gridtools comes from its GitHub main
+uv sync --all-extras          # gridtools comes from GitHub, tag v2.0.0
 uv run chirpdetector --help
 ```
 

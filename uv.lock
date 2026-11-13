@@ -178,7 +178,7 @@ wheels = [
 
 [[package]]
 name = "chirpdetector"
-version = "2.0.0.dev0"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "gridtools" },
@@ -213,7 +213,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gridtools", git = "https://github.com/weygoldt/gridtools?rev=main" },
+    { name = "gridtools", git = "https://github.com/weygoldt/gridtools?rev=v2.0.0" },
     { name = "matplotlib", marker = "extra == 'label'", specifier = ">=3.11.2" },
     { name = "numpy", specifier = ">=2.5" },
     { name = "opencv-python", specifier = ">=4.12" },
@@ -587,8 +587,8 @@ wheels = [
 
 [[package]]
 name = "gridtools"
-version = "2.0.0.dev0"
-source = { git = "https://github.com/weygoldt/gridtools?rev=main#6cc3e3f48f34eb95c2977223bc0e294027a24770" }
+version = "2.0.0"
+source = { git = "https://github.com/weygoldt/gridtools?rev=v2.0.0#8a9ddc5cc670514b48013b0e0675fb0fc4fc5991" }
 dependencies = [
     { name = "h5py" },
     { name = "numpy" },
