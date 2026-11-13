@@ -78,6 +78,7 @@ def test_server_never_sends_box_or_model_output(
             "df_bin",
             "delta_f_hz",
             "n_candidates",
+            "hint_box",  # fixed size, never the box's edges (checked below)
         }
         assert view["item"]["t_center_s"] == pytest.approx(4.0)
         # track ids and gaps would tell simulated from real background fish
@@ -138,6 +139,10 @@ def test_matplotlib_blind_view(blind_session: LabelSession) -> None:
     try:
         assert not lab.box.get_visible()
         assert not lab.box_lines.get_visible()
+        assert lab.hint.get_visible()  # fixed-size hint at the candidate
+        assert (lab.hint.get_width(), lab.hint.get_height()) == pytest.approx(
+            (0.3, 200.0)
+        )
         for mark in lab.centre_marks.values():
             assert mark.get_visible()
             xs = np.asarray(mark.get_xdata(), dtype=float)
@@ -187,3 +192,54 @@ def test_label_file_records_blind_and_time(blind_session: LabelSession) -> None:
     row = read_labels(blind_session.store.labels_dir / "2000-01-01-10_00.csv").iloc[0]
     assert row.blind
     assert row.elapsed_s == pytest.approx(1.5)
+
+
+def test_blind_hint_is_a_fixed_size_box_at_the_candidate(
+    candidate_queue: LabelQueue, tmp_path: Path
+) -> None:
+    """The hint shows where (centre time, near the lower edge), never the
+    candidate box's own edges or size."""
+    from chirpdetector.labeling.view import ViewConfig, hint_box
+
+    store = LabelStore(tmp_path / "out", "tester", "2")
+    session = LabelSession(candidate_queue, store, frontend="browser", blind=True)
+    server = LabelServer(session, port=0)
+    server.start()
+    try:
+        client = Client(server)
+        status, raw, _ = client.request("/api/view?index=0&window=0.2048")
+        assert status == 200
+        view = json.loads(raw)
+        t0, t1, f0, f1 = view["item"]["hint_box"]
+        assert (t1 - t0, f1 - f0) == pytest.approx((0.3, 200.0))
+        assert 0.5 * (t0 + t1) == pytest.approx(4.0)  # the candidate's centre
+        assert f0 == pytest.approx(680.0 - 30.0)
+        values = {v for _, v in _walk(view) if isinstance(v, float)}
+        assert not values & {3.93, 4.07, 820.0}
+        item = session.item(0)
+        assert hint_box(item, ViewConfig()) == pytest.approx((t0, t1, f0, f1))
+    finally:
+        server.shutdown()
+        store.close()
+
+
+def test_blind_hint_can_be_switched_off(
+    candidate_queue: LabelQueue, tmp_path: Path
+) -> None:
+    from chirpdetector.labeling.view import ViewConfig
+
+    with LabelStore(tmp_path / "out", "tester", "2") as store:
+        session = LabelSession(
+            candidate_queue,
+            store,
+            background=False,
+            blind=True,
+            config=ViewConfig(blind_hint=False),
+        )
+        lab = SingleLabeller(session, figure=plt.figure(figsize=(16, 9)))
+        try:
+            lab.fig.canvas.draw()
+            assert not lab.hint.get_visible()
+        finally:
+            plt.close(lab.fig)
+            session.shutdown()

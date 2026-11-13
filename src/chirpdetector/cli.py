@@ -182,6 +182,15 @@ def label_emitters(
             ),
         ),
     ] = False,
+    blind_hint: Annotated[
+        bool,
+        typer.Option(
+            help=(
+                "With --blind: a faint fixed-size box (0.3 s x 200 Hz) at the "
+                "candidate, showing where to look but not its shape."
+            )
+        ),
+    ] = True,
     serve: Annotated[
         bool,
         typer.Option(
@@ -283,6 +292,7 @@ def label_emitters(
                     pad_hz=pad_hz,
                     window_s=window_s,
                     max_gap_s=track_gap_s,
+                    blind_hint=blind_hint,
                 ),
                 tolerance_hz=tolerance_hz,
                 frontend="browser" if serve else "mpl",

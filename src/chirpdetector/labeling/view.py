@@ -97,6 +97,13 @@ class ViewConfig:
         Window of the baseline zoom (whatever the overview shows).
     hop_s
         Hop between spectra.
+    blind_hint
+        Blind mode: draw :func:`hint_box`, a faint fixed-size box at the
+        candidate (where to look, not its shape).
+    hint_width_s, hint_height_hz, hint_below_hz
+        The hint box: ``hint_width_s`` centred on the candidate's centre
+        time, from ``hint_below_hz`` below its lower edge, ``hint_height_hz``
+        tall.
     floor_percentile
         Lower colour limit of both panels: this percentile of the panel's
         dB values (the noise floor stays visible); the upper is the maximum.
@@ -126,6 +133,10 @@ class ViewConfig:
     zoom_window_s: float = 0.2048
     hop_s: float = 0.0016
     floor_percentile: float = 5.0
+    blind_hint: bool = True
+    hint_width_s: float = 0.3
+    hint_height_hz: float = 200.0
+    hint_below_hz: float = 30.0
     overview_fft_pad: int = 4
     zoom_bin_hz: float = 0.25
     zoom_pad_hz: float = 8.0
@@ -287,6 +298,21 @@ def prediction_of(item: QueueItem) -> Prediction | None:
         score=None if score is None else float(score),
         source=str(c.get("candidate_source") or ""),
     )
+
+
+def hint_box(item: QueueItem, config: ViewConfig) -> tuple[float, float, float, float]:
+    """Blind mode's location hint ``(t0, t1, f0, f1)``.
+
+    A box of fixed size (``hint_width_s`` by ``hint_height_hz``) centred on
+    the candidate's centre time and starting ``hint_below_hz`` below its
+    lower edge. Its size never depends on the candidate's box, so true
+    chirps (whose boxes are their footprints) cannot be told from other
+    candidates by the hint's shape.
+    """
+    tc = item.t_center_s
+    f0 = item.f_low_hz - config.hint_below_hz
+    half = 0.5 * config.hint_width_s
+    return (tc - half, tc + half, f0, f0 + config.hint_height_hz)
 
 
 def time_window(item: QueueItem, config: ViewConfig) -> tuple[float, float]:

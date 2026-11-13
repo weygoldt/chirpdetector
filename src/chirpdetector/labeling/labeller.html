@@ -182,6 +182,11 @@ function draw() {
       ctx.lineWidth = 2.5; ctx.beginPath();
       ctx.moveTo(x, r.y); ctx.lineTo(x, r.y + tick); ctx.moveTo(x, r.y + r.h); ctx.lineTo(x, r.y + r.h - tick);
       ctx.stroke(); ctx.lineWidth = 1;
+      if (it.hint_box && name === "overview") {  // faint fixed-size hint: where, not what
+        const h = it.hint_box, [hx0, hy1] = toPx(r, e, h[0], h[3]), [hx1, hy0] = toPx(r, e, h[1], h[2]);
+        ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.setLineDash([6, 5]);
+        ctx.strokeRect(hx0, hy1, hx1 - hx0, hy0 - hy1); ctx.restore();
+      }
     } else if (name === "overview") {
       const [x0, y1] = toPx(r, e, it.t_start_s, it.f_high_hz), [x1, y0] = toPx(r, e, it.t_end_s, it.f_low_hz);
       ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
