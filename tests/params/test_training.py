@@ -385,3 +385,73 @@ def test_agreement_summary_gives_the_simulated_correlation_over_the_same_range()
     assert summary["largest_individual_share"] == pytest.approx(250 / 300)
     assert summary["box_top_offset_hz"]["real"] == pytest.approx(60.0)
     assert summary["box_top_offset_hz"]["sim_big"] == pytest.approx(25.0)
+
+
+def test_predict_span_gives_the_decoder_the_training_crop(
+    params_scenes: Path,
+    stub_detector: Bundle,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The crop a detection gets at inference equals the training crop of the
+    same box, with click removal on (it runs on the whole scene in training,
+    on the widened span at inference)."""
+    from dataclasses import replace
+
+    import chirpdetector.inference.spans as spans
+    from chirpdetector.params.crops import CropConfig, decoder_inputs
+    from chirpdetector.params.samples import _prepare_scene
+    from chirpdetector.preprocessing import ClickRemoval, can_remove_clicks
+    from chirpdetector.spectrogram import compute_spectrogram
+
+    detector = replace(
+        stub_detector, preprocessing={"click_removal": ClickRemoval().to_dict()}
+    )
+    ref = next(r for r in discover_scenes([params_scenes]) if r.split == "test")
+    recording = open_recording(ref.directory / "recording.wav")
+    assert can_remove_clicks(
+        recording.n_channels, samplerate_hz=recording.samplerate_hz
+    )
+    monkeypatch.setattr(
+        spans,
+        "detect_in_spectrogram",
+        footprint_detections({ref.source_id: ref.directory}),
+    )
+    crop = CropConfig(size=(48, 48))
+    captured: dict[str, object] = {}
+
+    class Capture(ParamsEstimator):
+        def __init__(self) -> None:  # no bundle: only the crop geometry
+            self.bundle = type("B", (), {"crop": crop})()  # type: ignore[assignment]
+
+        def check_detector(
+            self, detector: Bundle, *, allow_mismatch: bool = False
+        ) -> None:
+            pass
+
+        def estimate(self, spec, boxes):  # type: ignore[no-untyped-def,override]
+            captured["spec"], captured["boxes"] = spec, boxes
+            return pd.DataFrame(index=boxes.index, columns=list(PARAM_COLUMNS))
+
+    t0, t1 = 2.0, 5.5
+    predict_span(
+        detector, recording, t0, t1, name=ref.source_id, device="cpu", params=Capture()
+    )
+    boxes = captured["boxes"]
+    assert isinstance(boxes, pd.DataFrame)
+    centre = 0.5 * (boxes["t_start_s"] + boxes["t_end_s"])
+    boxes = boxes.loc[(centre > t0) & (centre < t1)]
+    assert len(boxes) >= 2
+    edges = boxes[["t_start_s", "t_end_s", "f_low_hz", "f_high_hz"]].to_numpy()
+    at_inference = decoder_inputs(captured["spec"], edges, crop)  # type: ignore[arg-type]
+    # the training path: the whole scene, cleaned as a whole
+    prepared = _prepare_scene(ref, detector.preprocessing["click_removal"])
+    raw = recording.read(0, recording.n_samples)
+    assert not np.allclose(raw, prepared.samples)  # clicks were removed
+    whole = compute_spectrogram(
+        prepared.samples, prepared.samplerate_hz, detector.spectrogram, device="cpu"
+    )
+    in_training = decoder_inputs(whole, edges, crop)
+    assert not at_inference.canvas_shifted.any()
+    np.testing.assert_array_equal(at_inference.crops, in_training.crops)
+    np.testing.assert_array_equal(at_inference.scalars, in_training.scalars)
