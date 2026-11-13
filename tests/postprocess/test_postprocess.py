@@ -110,6 +110,37 @@ def test_dead_tracks_do_not_count() -> None:
     assert reasons(flag_detections(table, tracks)) == [""]
 
 
+def test_tracks_are_alive_across_gaps_up_to_max_gap() -> None:
+    """A 5-s gap in fish 1's track: alive by default (10 s), not at 1 s."""
+    times = np.concatenate([np.arange(0.0, 3.0, 0.1), np.arange(8.0, 12.0, 0.1)])
+    gappy = Tracks(
+        times_s=times,
+        freqs_hz=np.full(len(times), 640.0),
+        idents=np.ones(len(times)),
+        time_indices=np.arange(len(times)),
+    )
+    copy = pd.DataFrame([box(5.0, 1250, 1450, emitter=1281.0)])
+    assert PostprocessConfig().max_gap_s == 10.0
+    assert reasons(flag_detections(copy, {"r": gappy})) == ["harmonic"]
+    short = PostprocessConfig(max_gap_s=1.0)
+    assert reasons(flag_detections(copy, {"r": gappy}, short)) == [""]
+    # a fish at 1280 Hz protects the box only while its own (gappy) track
+    # is alive; fish 2 at 640 Hz is tracked throughout
+    full = np.arange(0.0, 12.0, 0.1)
+    own = Tracks(
+        times_s=full,
+        freqs_hz=np.concatenate(
+            [np.full(len(times), 1280.0), np.full(len(full), 640.0)]
+        ),
+        idents=np.concatenate([np.ones(len(times)), np.full(len(full), 2.0)]),
+        time_indices=np.concatenate(
+            [np.searchsorted(full, times - 1e-9), np.arange(len(full))]
+        ),
+    )
+    assert reasons(flag_detections(copy, {"r": own})) == [""]
+    assert reasons(flag_detections(copy, {"r": own}, short)) == ["harmonic"]
+
+
 def test_box_only_models_use_the_lower_edge() -> None:
     tracks = {"r": constant_tracks({1: 645.0, 2: 760.0})}
     table = pd.DataFrame(

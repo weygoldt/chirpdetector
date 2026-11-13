@@ -44,7 +44,7 @@ import itertools
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -57,6 +57,7 @@ from chirpdetector.data.contract import Tiling
 from chirpdetector.models import Detector
 from chirpdetector.postprocess import (
     DEFAULT_FUNDAMENTAL_TOLERANCE_HZ,
+    DEFAULT_MAX_GAP_S,
     PostprocessConfig,
     drop_flagged,
     flag_detections,
@@ -383,6 +384,7 @@ def predict_span(
     allow_detector_mismatch: bool = False,
     tracks: Tracks | None = None,
     emitter_tolerance_hz: float | None = None,
+    track_max_gap_s: float | None = None,
     postprocess: PostprocessConfig | bool | None = True,
     keep_dropped: bool = False,
 ) -> pd.DataFrame:
@@ -431,6 +433,11 @@ def predict_span(
         Largest distance of ``emitter_hz`` to the assigned track. Default:
         the post-processing's ``fundamental_tolerance_hz`` (50 Hz), so that
         a detection with an assigned emitter is never a harmonic copy.
+    track_max_gap_s
+        A track is alive where its detections are at most this far apart,
+        for the assignment and the post-processing. Default: the
+        post-processing's ``max_gap_s`` (10 s, the production pipeline's
+        rule); given, it replaces that.
     postprocess
         `chirpdetector.postprocess` settings; True (default) for the
         defaults, False or None to switch it off (no columns added).
@@ -463,6 +470,10 @@ def predict_span(
         "tolerance_s": tolerance_s,
     }
     config = _postprocess_config(postprocess)
+    if track_max_gap_s is None:
+        track_max_gap_s = DEFAULT_MAX_GAP_S if config is None else config.max_gap_s
+    elif config is not None:
+        config = replace(config, max_gap_s=float(track_max_gap_s))
     if emitter_tolerance_hz is None:
         emitter_tolerance_hz = (
             DEFAULT_FUNDAMENTAL_TOLERANCE_HZ
@@ -504,7 +515,10 @@ def predict_span(
         from chirpdetector.evaluation.assignment import assign_by_frequency
 
         detections = assign_by_frequency(
-            detections, by_name or {}, emitter_tolerance_hz
+            detections,
+            by_name or {},
+            emitter_tolerance_hz,
+            max_gap_s=track_max_gap_s,
         )
     if values is not None:
         detections = pd.concat([detections, values], axis=1)
@@ -516,6 +530,7 @@ def predict_span(
         "tile_duplicate_tolerance_s": float(tolerance_s),
         "tracks": tracks is not None,
         "emitter_tolerance_hz": float(emitter_tolerance_hz) if assigned else None,
+        "track_max_gap_s": float(track_max_gap_s) if tracks is not None else None,
         "params_sha256": None if estimator is None else _params_sha256(estimator),
         "postprocess": None,
     }

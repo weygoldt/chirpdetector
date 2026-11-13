@@ -54,11 +54,12 @@ four hand-labelled real recordings:
   them (9.7 Hz at score >= 0.5; real copies at 2022-05-12 and 2022-06-01:
   <= 6 Hz). Fundamentals were never closer than 183 Hz (1 % quantile) to
   twice another track.
-- ``fundamental_tolerance_hz = 50``: on real labels, 99 % of the
-  dual-head's true positives had ``emitter_hz`` within 39 Hz of a live
-  track (sim: 9 Hz at score >= 0.5); harmonic copies had no live track
-  within 44 Hz (1 % quantile). 50 Hz is also the assignment tolerance of
-  the dual-head evaluation, so "assigned" and "protected" coincide.
+- ``fundamental_tolerance_hz = 50``: the dual-head's true positives had
+  ``emitter_hz`` within 9 Hz (sim, 99 % at score >= 0.5; 27 Hz at any
+  score) and 6.4 Hz (real labels, all) of a live track; harmonic copies
+  had no live track within 44 Hz (sim, 1 % quantile; real: > 500 Hz).
+  50 Hz is also the assignment tolerance of the dual-head evaluation, so
+  "assigned" and "protected" coincide.
 - ``edge_harmonic_window_hz = (15, 170)``: twice the emitter's baseline
   lay 20-168 Hz above the lower edge of YOLO26s's boxes on harmonic
   copies (min-max, n = 527; real copies: 22-61 Hz).
@@ -71,6 +72,18 @@ any live track within about 150 Hz above their lower edge (11 % of the
 simulated copies at score >= 0.5, whose scenes hold fish up to 1,100 Hz;
 in the competition recordings, harmonic copies lie > 400 Hz above every
 fish). Wide windows trade precision for recall, on purpose.
+
+Live tracks
+-----------
+A track is alive at a time if its detections around it are at most
+``max_gap_s`` apart (10 s, the liveness rule of the production assignment;
+pass the pipeline's value). Wavetracker tracks have gaps: in the 33 trials
+a track lies in gaps longer than 1 s for 5 % of its time on average (up to
+27 %). With a 1-s gap, 45 of the dual-head's 335 true positives on the
+real labels had no live track within 15 Hz of their ``emitter_hz`` (the
+other fish's track was in a gap: up to 45 Hz away, or no live track at
+all); with 10 s, all lay within 6.4 Hz of one. A short gap would keep copies whose reference track
+is in a gap and leave fundamentals unprotected while their own track is.
 
 Without tracks
 --------------
@@ -157,6 +170,7 @@ from gridtools.io import Tracks
 __all__ = [
     "COLUMNS",
     "DEFAULT_FUNDAMENTAL_TOLERANCE_HZ",
+    "DEFAULT_MAX_GAP_S",
     "REASONS",
     "PostprocessConfig",
     "TracklessMode",
@@ -193,6 +207,9 @@ _REFERENCES = ("harmonic_pair_of", "duplicate_of")
 DEFAULT_FUNDAMENTAL_TOLERANCE_HZ = 50.0
 """Default ``fundamental_tolerance_hz`` (and `predict_span`'s assignment tolerance)."""
 
+DEFAULT_MAX_GAP_S = 10.0
+"""Default ``max_gap_s``: the production pipeline's liveness rule (module docstring)."""
+
 
 def _window(value: Any, name: str) -> tuple[float, float]:
     lo, hi = (float(v) for v in value)
@@ -218,7 +235,8 @@ class PostprocessConfig:
         simultaneous.
     max_gap_s
         A track is alive where its detections are at most this far apart
-        (`gridtools.io.Track.frequency_at`).
+        (`gridtools.io.Track.frequency_at`); pass the value the emitter
+        assignment uses.
     harmonic_tolerance_hz, fundamental_tolerance_hz
         Half-widths of the harmonic and fundamental intervals around
         ``emitter_hz`` (head rows).
@@ -239,7 +257,7 @@ class PostprocessConfig:
     harmonic: bool = True
     duplicate: bool = True
     trackless: TracklessMode = "flag"
-    max_gap_s: float = 1.0
+    max_gap_s: float = DEFAULT_MAX_GAP_S
     harmonic_tolerance_hz: float = 15.0
     fundamental_tolerance_hz: float = DEFAULT_FUNDAMENTAL_TOLERANCE_HZ
     edge_harmonic_window_hz: tuple[float, float] = (15.0, 170.0)
