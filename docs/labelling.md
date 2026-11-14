@@ -89,6 +89,8 @@ it.
 | `source` | optional | free text: model, run, stratum |
 | `tracks` | optional | wavetracker directory, if not the recording directory |
 
+| `item_kind` | optional | `window`: a window item (below); anything else or empty: a box |
+
 Other columns are stored with each label as `candidate_<name>`. `score`,
 `emitter_hz`, `track_id` and `source` stay hidden unless the labeller shows
 the prediction. The queue keeps every row, shuffled with `--seed`
@@ -100,6 +102,32 @@ Instead of `--candidates`, trial directories with v1 detections
 `--per-bin` detections per trial and ΔF bin (`--bins`). `--view grid` shows
 pages of small cutouts instead (matplotlib only).
 
+## Window items: mark every chirp in a zone
+
+A row with `item_kind = window` is not one box to decide on but a time
+window in which you mark every chirp: its `t_start_s`-`t_end_s` is the
+*zone*, drawn lightly shaded with dashed edges, and its frequency range
+only sets the view (as a box's does). Mark every chirp whose centre lies in
+the zone; chirps outside it are context only. The item stays on screen
+until you finish it. Browser labeller only (`--serve`).
+
+| input | action in a window |
+|---|---|
+| left click on a baseline, at the chirp's time | a chirp of that fish (a green circle) |
+| middle click on the chirp, or `0` with the mouse on it | a chirp, emitter unclear (orange) |
+| Enter, right click or `x` | done: every chirp in the zone is marked (also when there is none); next item |
+| `c` | clear this window's marks (and its done) |
+| `u` | undo the last mark (or the done) |
+
+Number keys do not mark (a mark needs the chirp's time); clicks outside
+the zone are refused. Every mark is stored as its own row in the label file
+(`kind` `point`: `t_start_s = t_end_s` = the click time, `f_low_hz =
+f_high_hz` = the clicked frequency, `parent_item_id` = the window's
+`item_id`, `emitter_baseline_hz` = the snapped track's frequency at the
+click); finishing writes a `labeled_region` row over the window with
+`label = window_done`. A window counts as labelled once it is done; marks
+of a window that is not done are kept but the window is still open.
+
 ## Output
 
 Every action is appended to `<out>/events.jsonl` and flushed to disk before
@@ -110,7 +138,7 @@ every action: one row per labelled item and labeller, readable by
 
 | column | meaning |
 |---|---|
-| `label` | `chirp`, `not_chirp` or `chirp_emitter_unclear` |
+| `label` | `chirp`, `not_chirp` or `chirp_emitter_unclear`; `window_done` for a finished window |
 | `emitter_id` | track id of the emitter (NA unless a track was picked) |
 | `clicked_hz`, `clicked_t_s` | where you clicked (NA for keyboard picks) |
 | `labeler`, `labeled_at`, `tool_version`, `queue_id`, `item_id`, `det_index`, `df_bin` | provenance |
@@ -121,6 +149,7 @@ every action: one row per labelled item and labeller, readable by
 | `n_candidates`, `delta_f_hz` | live tracks at the box centre, ΔF of the closest two |
 | `recording_dir`, `tracks_dir` | where the data were read |
 | `elapsed_s`, `blind` | seconds to the decision, blind session or not |
+| `parent_item_id` | for a mark in a window: the window's `item_id` (else empty) |
 | `candidate_id`, `candidate_score`, `candidate_emitter_hz`, `candidate_track_id`, `candidate_source`, `candidate_*` | the candidates file's columns |
 
 Only one session per output directory runs at a time (a lock on the log).

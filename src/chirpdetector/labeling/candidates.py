@@ -33,6 +33,14 @@ Optional columns
     ``ident_v.npy``, ``idx_v.npy``, ``times.npy``), if not the recording
     directory. Relative paths as for ``recording``.
 
+``item_kind``
+    ``window`` makes the row a *window item*: the labeller marks every
+    chirp centred in the box's time span (the zone; the frequency range
+    only sets the view) and then finishes the window, instead of deciding
+    once on the box (browser labeller only; see
+    :mod:`chirpdetector.labeling.session`). Any other value, or none, is an
+    ordinary box. Stored with the labels as ``candidate_item_kind``.
+
 Any other column is kept as it is and stored with every label of the box
 (prefixed ``candidate_``). ``score``, ``emitter_hz``, ``track_id`` and
 ``source`` are hidden while labelling unless the labeller shows them.

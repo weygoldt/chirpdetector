@@ -17,6 +17,24 @@ Actions on an item (every one is saved at once):
 
 After an action the frontends move to :meth:`LabelSession.next_index`: the
 next open item in queue order (wrapping around), then skipped items.
+
+Window items (:attr:`QueueItem.is_window`; the browser frontend only) take
+several marks: their box's time span is the *zone*, and the labeller marks
+every chirp centred in it, then finishes the window:
+
+- ``click(t, f)`` inside the zone: a chirp at ``t`` from the snapped track
+  (stays on the item; rejected outside the zone or away from every track);
+- ``mark("chirp_emitter_unclear", t_s=t, f_hz=f)``: a chirp at ``t``,
+  emitter unclear (needs the position);
+- ``done()``, or ``mark("not_chirp")``: every chirp in the zone is marked
+  (also with no marks: the zone holds no chirp); moves on;
+- ``clear()``: reverts the window's marks and its finish;
+- ``pick(key)`` is refused (a mark needs the chirp's time);
+- ``undo()`` reverts the latest mark or finish like any action.
+
+Each mark is stored as its own decision (see
+:mod:`chirpdetector.labeling.store`); a window counts as labelled once it
+is finished.
 """
 
 from __future__ import annotations
@@ -26,14 +44,20 @@ import threading
 from collections import OrderedDict
 from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 from gridtools.io import Recording, Tracks, load_tracks, open_recording
 
 from chirpdetector.labeling.queue import LabelQueue, QueueItem
-from chirpdetector.labeling.store import LABELS, SKIP, Decision, LabelStore
+from chirpdetector.labeling.store import (
+    LABELS,
+    SKIP,
+    WINDOW_DONE,
+    Decision,
+    LabelStore,
+)
 from chirpdetector.labeling.view import (
     CandidateView,
     TrackView,
@@ -148,6 +172,18 @@ def describe(
     without ``ids``, as blind sessions show it)."""
     if decision.label == SKIP:
         return "skipped"
+    if decision.label == WINDOW_DONE:
+        return "window done"
+    if decision.parent_item_id:
+        key = next(
+            (t.key for t in view_tracks if t.track_id == decision.emitter_id), None
+        )
+        at = f" at {decision.clicked_t_s:.2f} s" if decision.clicked_t_s else ""
+        if decision.label == "chirp_emitter_unclear":
+            return f"chirp marked{at}, emitter unclear"
+        who = f" -> {key}" if key is not None else ""
+        ident = f" (id {decision.emitter_id})" if ids else ""
+        return f"chirp marked{at}{who}{ident}"
     if decision.label == "chirp" and decision.emitter_id is not None:
         key = next(
             (t.key for t in view_tracks if t.track_id == decision.emitter_id), None
@@ -244,10 +280,12 @@ class LabelSession:
         return self.queue.items[index]
 
     def index_of(self, item_id: str) -> int | None:
-        """Queue position of an item id."""
-        for i, item in enumerate(self.queue.items):
-            if item.item_id == item_id:
-                return i
+        """Queue position of an item id (a mark's id ``<window>@<seq>``: its
+        window's)."""
+        for wanted in (item_id, item_id.rsplit("@", 1)[0]):
+            for i, item in enumerate(self.queue.items):
+                if item.item_id == wanted:
+                    return i
         return None
 
     def _check_boxes(self) -> None:
@@ -263,6 +301,15 @@ class LabelSession:
                     "their box (use other candidate_id values or another --out)"
                 )
                 raise ValueError(msg)
+
+    def is_window(self, index: int) -> bool:
+        """True if the item at ``index`` is a window (several marks)."""
+        return self.item(index).is_window
+
+    def marks(self, index: int) -> list[Decision]:
+        """Current marks of a window item, in the order they were made."""
+        with self._lock:
+            return self.store.marks(self.item(index).item_id)
 
     def decision(self, index: int) -> Decision | None:
         """Current label of an item (None if open or skipped)."""
@@ -399,8 +446,21 @@ class LabelSession:
         via: str = "",
         prediction_shown: bool | None = None,
         elapsed_s: float | None = None,
+        mark_at: tuple[float, float] | None = None,
     ) -> ActionResult:
         item = self.item(index)
+        parent = ""
+        if mark_at is not None:  # a mark in a window: its own point item
+            parent = item.item_id
+            t_mark, f_mark = (float(v) for v in mark_at)
+            item = replace(
+                item,
+                item_id=f"{item.item_id}@{self.store.next_seq}",
+                t_start_s=t_mark,
+                t_end_s=t_mark,
+                f_low_hz=f_mark,
+                f_high_hz=f_mark,
+            )
         if self.blind:
             prediction_shown = False
         recording_dir, tracks_dir = self.sources.paths[item.trial]
@@ -425,9 +485,12 @@ class LabelSession:
                 tracks_dir=tracks_dir,
                 elapsed_s=elapsed_s,
                 blind=self.blind,
+                parent_item_id=parent,
             )
-            next_index = self.next_index(index)
+            next_index = index if parent else self.next_index(index)
         text = describe(decision, self.tracks(index), ids=not self.blind)
+        if parent:
+            text += f" ({len(self.marks(index))} in this window; Enter: done)"
         return ActionResult(
             ok=True,
             message=f"#{index + 1}: {text}",
@@ -452,6 +515,9 @@ class LabelSession:
         item, stored with the decision.
         """
         tracks = self.tracks(index)
+        window = self.is_window(index)
+        if window and (rejected := self._outside_zone(index, t_s)) is not None:
+            return rejected
         found = snap(tracks, t_s, f_hz, self.tolerance_hz)
         if found is None:
             return ActionResult(
@@ -469,11 +535,26 @@ class LabelSession:
             emitter_id=found.track.track_id,
             clicked_hz=f_hz,
             clicked_t_s=t_s,
-            emitter_baseline_hz=found.track.baseline_hz,
+            # a mark: the track's frequency at the chirp, not at the zone start
+            emitter_baseline_hz=found.track_hz if window else found.track.baseline_hz,
             click_offset_hz=found.offset_hz,
             via="mouse",
             prediction_shown=prediction_shown,
             elapsed_s=elapsed_s,
+            mark_at=(t_s, f_hz) if window else None,
+        )
+
+    def _outside_zone(self, index: int, t_s: float) -> ActionResult | None:
+        item = self.item(index)
+        if item.t_start_s <= t_s <= item.t_end_s:
+            return None
+        return ActionResult(
+            ok=False,
+            message=(
+                f"{t_s:.2f} s is outside the zone ({item.t_start_s:.2f}-"
+                f"{item.t_end_s:.2f} s): mark only chirps centred in it"
+            ),
+            index=index,
         )
 
     def pick(
@@ -486,6 +567,13 @@ class LabelSession:
         elapsed_s: float | None = None,
     ) -> ActionResult:
         """Chirp from the track numbered ``key`` on screen."""
+        if self.is_window(index):
+            return ActionResult(
+                ok=False,
+                message="in a window, click on the baseline at the chirp (a mark "
+                "needs its time)",
+                index=index,
+            )
         tracks = self.tracks(index)
         track = next((t for t in tracks if t.key == key), None)
         if track is None:
@@ -514,11 +602,41 @@ class LabelSession:
         prediction_shown: bool = False,
         via: str = "key",
         elapsed_s: float | None = None,
+        t_s: float | None = None,
+        f_hz: float | None = None,
     ) -> ActionResult:
-        """``not_chirp`` or ``chirp_emitter_unclear``."""
+        """``not_chirp`` or ``chirp_emitter_unclear``.
+
+        In a window item, ``not_chirp`` finishes the window (:meth:`done`)
+        and ``chirp_emitter_unclear`` marks a chirp at ``(t_s, f_hz)``
+        (refused without a position). Elsewhere the position is ignored.
+        """
         if label not in LABELS or label == "chirp":
             msg = f"mark takes not_chirp or chirp_emitter_unclear, got {label!r}"
             raise ValueError(msg)
+        if self.is_window(index):
+            if label == "not_chirp":
+                return self.done(index, window_s=window_s, elapsed_s=elapsed_s)
+            if t_s is None or f_hz is None:
+                return ActionResult(
+                    ok=False,
+                    message="point at the chirp: middle click on it (or 0 with "
+                    "the mouse on it)",
+                    index=index,
+                )
+            if (rejected := self._outside_zone(index, t_s)) is not None:
+                return rejected
+            return self._record(
+                index,
+                label,
+                window_s,
+                clicked_hz=f_hz,
+                clicked_t_s=t_s,
+                via=via,
+                prediction_shown=prediction_shown,
+                elapsed_s=elapsed_s,
+                mark_at=(t_s, f_hz),
+            )
         return self._record(
             index,
             label,
@@ -526,6 +644,41 @@ class LabelSession:
             via=via,
             prediction_shown=prediction_shown,
             elapsed_s=elapsed_s,
+        )
+
+    def done(
+        self,
+        index: int,
+        *,
+        window_s: float | None = None,
+        elapsed_s: float | None = None,
+    ) -> ActionResult:
+        """Finish a window item: every chirp in its zone is marked."""
+        if not self.is_window(index):
+            return ActionResult(
+                ok=False, message="not a window: nothing to finish", index=index
+            )
+        n = len(self.marks(index))
+        result = self._record(index, WINDOW_DONE, window_s, elapsed_s=elapsed_s)
+        word = "chirp" if n == 1 else "chirps"
+        return replace(result, message=f"#{index + 1}: window done, {n} {word}")
+
+    def clear(self, index: int) -> ActionResult:
+        """Revert a window's marks and its finish (the window is open again)."""
+        if not self.is_window(index):
+            return ActionResult(ok=False, message="not a window", index=index)
+        with self._lock:
+            item_id = self.item(index).item_id
+            reverted = [self.store.revert(d.seq) for d in self.store.marks(item_id)]
+            current = self.store.current(item_id)
+            if current is not None:
+                reverted.append(self.store.revert(current.seq))
+        n = sum(d is not None for d in reverted)
+        return ActionResult(
+            ok=True,
+            message=f"#{index + 1}: cleared ({n} actions reverted)",
+            index=index,
+            next_index=index,
         )
 
     def skip(self, index: int, *, elapsed_s: float | None = None) -> ActionResult:

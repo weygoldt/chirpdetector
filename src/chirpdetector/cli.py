@@ -115,7 +115,8 @@ def label_emitters(
                 "CSV or Parquet of boxes to label instead of v1 detections. "
                 "Required columns: recording, t_start_s, t_end_s, f_low_hz, "
                 "f_high_hz; optional: candidate_id, score, emitter_hz, track_id, "
-                "source, tracks (docs/labelling.md)."
+                "source, tracks, item_kind (window: mark every chirp in the "
+                "box's time span; docs/labelling.md)."
             ),
         ),
     ] = None,
@@ -282,6 +283,9 @@ def label_emitters(
     if len(queue) == 0:
         typer.echo("nothing to label: the queue is empty")
         raise typer.Exit(code=0)
+    if not serve and any(item.is_window for item in queue.items):
+        msg = "window items (item_kind = window) need the browser labeller (--serve)"
+        raise typer.BadParameter(msg)
     sources = TrialSources.from_queue(queue, overrides)
     try:
         with LabelStore(out, labeler, chirpdetector.__version__) as store:

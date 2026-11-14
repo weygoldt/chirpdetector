@@ -10,13 +10,23 @@ labeller.
 A *skip* (the labeller moved on without deciding) is logged as a ``skip``
 event, can be undone like a click, and never appears in the label files.
 
+Window items (:attr:`chirpdetector.labeling.queue.QueueItem.is_window`)
+take several clicks: every chirp marked in a window is its own decision, on
+the item ``<window item id>@<seq>`` with ``parent_item_id`` set to the
+window's item id and the click as a point box (``t_start_s == t_end_s``,
+``f_low_hz == f_high_hz``, audian kind ``point``); finishing the window is
+a decision :data:`WINDOW_DONE` on the window item itself, written as an
+audian ``labeled_region`` over the window's box (every chirp in it is
+marked). Marks and the finish are undone like clicks.
+
 From the log, one audian label file per trial (recording) is derived,
 ``<out>/labels/<trial>.csv`` (rewritten atomically after every event and
 rebuilt on start), one row per labelled item and labeller. Columns: the
 audian columns with the box, then :data:`LABEL_COLUMNS`:
 
 ``label``
-    ``chirp``, ``not_chirp`` or ``chirp_emitter_unclear``.
+    ``chirp``, ``not_chirp`` or ``chirp_emitter_unclear``; ``window_done``
+    for a finished window item.
 ``emitter_id``
     Track id of the emitter (Int64; NA unless a track was picked).
 ``clicked_hz``, ``clicked_t_s``
@@ -51,6 +61,8 @@ then :data:`EXTRA_COLUMNS`:
     Seconds from showing the item to this decision (NA for older labels).
 ``blind``
     Whether the session was blind (``--blind``: no box, no model output).
+``parent_item_id``
+    The window item a mark belongs to (empty for every other row).
 ``candidate_id``, ``candidate_score``, ``candidate_emitter_hz``,
 ``candidate_track_id``, ``candidate_source``
     The candidates-file columns (NA for v1 detections), followed by any
@@ -83,6 +95,7 @@ __all__ = [
     "LABELS",
     "LABEL_COLUMNS",
     "SKIP",
+    "WINDOW_DONE",
     "Decision",
     "LabelStore",
     "decision_table",
@@ -121,6 +134,7 @@ EXTRA_COLUMNS = (
     "tracks_dir",
     "elapsed_s",
     "blind",
+    "parent_item_id",
     "candidate_id",
     "candidate_score",
     "candidate_emitter_hz",
@@ -132,8 +146,14 @@ EXTRA_COLUMNS = (
 SKIP = "skip"
 """Pseudo-label of a skip event (never written to the label files)."""
 
+WINDOW_DONE = "window_done"
+"""Label of a finished window item: every chirp in its zone is marked."""
+
 FRONTENDS = ("mpl", "mpl-grid", "browser")
 """Values of ``frontend``."""
+
+_CATEGORY = {"not_chirp": "not_chirp", WINDOW_DONE: "labeled_region"}
+"""audian category of a label (``chirp`` for the others)."""
 
 _CANDIDATE_DTYPES = {
     "candidate_score": "Float64",
@@ -178,6 +198,7 @@ class Decision:
     candidate: tuple[tuple[str, CandidateValue], ...] = ()
     elapsed_s: float | None = None
     blind: bool | None = None
+    parent_item_id: str = ""
 
     @classmethod
     def from_event(cls, event: dict[str, Any]) -> Decision:
@@ -291,6 +312,11 @@ class LabelStore:
         msg = f"unknown event type {event['type']!r}"
         raise ValueError(msg)
 
+    @property
+    def next_seq(self) -> int:
+        """Sequence number the next event will get."""
+        return self._next_seq
+
     def _append(self, event: dict[str, Any]) -> None:
         self._file.write(json.dumps(event) + "\n")
         self._file.flush()
@@ -317,6 +343,7 @@ class LabelStore:
         tracks_dir: str | Path = "",
         elapsed_s: float | None = None,
         blind: bool | None = None,
+        parent_item_id: str = "",
     ) -> Decision:
         """Store a click on ``item`` (overrides earlier clicks on it).
 
@@ -353,13 +380,18 @@ class LabelStore:
             Seconds from showing the item to this decision.
         blind
             Whether the session was blind.
+        parent_item_id
+            For a mark in a window item: the window's item id.
 
         Returns
         -------
         The stored decision.
         """
-        if label not in (*LABELS, SKIP):
-            msg = f"label must be one of {LABELS} or {SKIP!r}, got {label!r}"
+        if label not in (*LABELS, WINDOW_DONE, SKIP):
+            msg = (
+                f"label must be one of {LABELS}, {WINDOW_DONE!r} or {SKIP!r}, "
+                f"got {label!r}"
+            )
             raise ValueError(msg)
         if frontend and frontend not in FRONTENDS:
             msg = f"frontend must be one of {FRONTENDS}, got {frontend!r}"
@@ -399,6 +431,7 @@ class LabelStore:
             candidate=item.candidate,
             elapsed_s=opt(elapsed_s),
             blind=None if blind is None else bool(blind),
+            parent_item_id=str(parent_item_id),
         )
         event_type = SKIP if label == SKIP else "click"
         self._append({"type": event_type, **asdict(decision)})
@@ -417,13 +450,26 @@ class LabelStore:
         history = self._history.get(self.labeler, [])
         if not history:
             return None
+        return self.revert(history[-1].seq)
+
+    def revert(self, seq: int) -> Decision | None:
+        """Revert one of this labeller's clicks (not only the latest), by its
+        ``seq``; logged as an ``undo`` event naming it.
+
+        Returns
+        -------
+        The reverted decision, or None if no such click is in effect.
+        """
+        history = self._history.get(self.labeler, [])
+        if not any(d.seq == seq for d in history):
+            return None
         event = {
             "type": "undo",
             "seq": self._next_seq,
             "labeler": self.labeler,
             "labeled_at": datetime.now(UTC).isoformat(timespec="milliseconds"),
             "tool_version": self.tool_version,
-            "undoes": history[-1].seq,
+            "undoes": int(seq),
         }
         self._append(event)
         decision = self._apply(event)
@@ -452,6 +498,20 @@ class LabelStore:
             if stack and (item_id not in out or stack[-1].seq > out[item_id].seq):
                 out[item_id] = stack[-1]
         return out
+
+    def marks(self, item_id: str) -> list[Decision]:
+        """This labeller's current marks in a window item, in log order."""
+        return sorted(
+            (
+                stack[-1]
+                for (labeler, _), stack in self._stacks.items()
+                if labeler == self.labeler
+                and stack
+                and not stack[-1].is_skip
+                and stack[-1].parent_item_id == item_id
+            ),
+            key=lambda d: d.seq,
+        )
 
     def decisions(self) -> list[Decision]:
         """Every current label of every labeller (no skips), in log order."""
@@ -486,8 +546,8 @@ def decision_table(rows: Sequence[Decision]) -> pd.DataFrame:
         return pd.array(list(values), dtype="Float64")
 
     table: dict[str, Any] = {
-        "category": ["not_chirp" if d.label == "not_chirp" else "chirp" for d in rows],
-        "kind": ["span"] * n,
+        "category": [_CATEGORY.get(d.label, "chirp") for d in rows],
+        "kind": ["point" if d.parent_item_id else "span" for d in rows],
         "channel": pd.array([pd.NA] * n, dtype="Int64"),
         "t_start_s": [d.box[0] for d in rows],
         "t_end_s": [d.box[1] for d in rows],
@@ -519,6 +579,7 @@ def decision_table(rows: Sequence[Decision]) -> pd.DataFrame:
         "tracks_dir": [d.tracks_dir for d in rows],
         "elapsed_s": floats([d.elapsed_s for d in rows]),
         "blind": pd.array([d.blind for d in rows], dtype="boolean"),
+        "parent_item_id": [d.parent_item_id for d in rows],
     }
     for key in (*EXTRA_COLUMNS[EXTRA_COLUMNS.index("candidate_id") :], *extra_keys):
         values = [c.get(key) for c in candidate]

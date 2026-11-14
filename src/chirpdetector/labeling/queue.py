@@ -42,6 +42,7 @@ from gridtools.io import Tracks, load_tracks, read_v1_detections
 __all__ = [
     "DEFAULT_BIN_EDGES_HZ",
     "SINGLE_BIN",
+    "WINDOW_KIND",
     "CandidateValue",
     "LabelQueue",
     "QueueConfig",
@@ -65,6 +66,11 @@ DEFAULT_BIN_EDGES_HZ = (0.0, 10.0, 25.0, 50.0, 100.0)
 
 SINGLE_BIN = "single"
 """Bin of detections with fewer than two live tracks."""
+
+WINDOW_KIND = "window"
+"""Value of a candidates file's ``item_kind`` column for a *window*: an item
+in which every chirp centred in the box's time span (the zone) is marked,
+instead of one decision on one box (see :mod:`chirpdetector.labeling.session`)."""
 
 CandidateValue = str | int | float | bool | None
 """Type of a value in :attr:`QueueItem.candidate`."""
@@ -162,6 +168,13 @@ class QueueItem:
     def candidate_columns(self) -> dict[str, CandidateValue]:
         """``candidate`` as a dict (empty for v1 detections)."""
         return dict(self.candidate)
+
+    @property
+    def is_window(self) -> bool:
+        """True for a window item (``item_kind == "window"`` in its
+        candidates file): every chirp centred in ``t_start_s``..``t_end_s``
+        is marked, the frequency range only sets the view."""
+        return self.candidate_columns.get("candidate_item_kind") == WINDOW_KIND
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> QueueItem:

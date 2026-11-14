@@ -29,12 +29,19 @@ Endpoints
 ``POST /api/action``
     ``{"index", "window_s", "prediction_shown", "elapsed_s", "action", ...}`` with
     ``action`` one of ``click`` (``panel, x, y, width, height``), ``pick``
-    (``key``), ``not_chirp``, ``unclear`` (optional ``via``), ``skip``.
+    (``key``), ``not_chirp``, ``unclear`` (optional ``via``; in a window item
+    with the position as for ``click``), ``skip``, and for window items
+    ``done`` and ``clear``.
 ``POST /api/undo``
     Revert the latest action.
 
 Every response that changes state carries the new progress and the index
 to show next.
+
+Window items (several marks per item, see
+:mod:`chirpdetector.labeling.session`) send their zone (``item.zone``, the
+box's time span, which is not a model output) and their current marks
+(``marks``); they get no hint box.
 
 Blind sessions (``--blind``) send neither the box edges (only its centre
 time, ``t_center_s``) nor the candidate's prediction, score or source, so
@@ -98,6 +105,11 @@ w                         overview window 204.8 / 51.2 ms (zoom: 204.8)
 e                         show / hide the model's prediction
 f                         full screen
 h / ?                     toggle this help
+Window items (shaded zone): mark EVERY chirp centred in the zone
+  left click on the baseline at the chirp   a chirp of that fish (stays)
+  middle click on the chirp (or 0)          a chirp, emitter unclear
+  Enter / right click / x                   done: all chirps marked (also none)
+  c                                         clear this window's marks
 Every action is saved at once; closing the tab loses nothing."""
 
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
@@ -156,6 +168,19 @@ def _decision(
         "clicked_t_s": _num(decision.clicked_t_s),
         "emitter_baseline_hz": _num(decision.emitter_baseline_hz),
         "via": decision.via,
+        "text": describe(decision, view_tracks, ids=ids),
+    }
+
+
+def _mark(decision: Decision, view_tracks: tuple = (), *, ids: bool = True) -> Any:
+    """JSON of one mark of a window item."""
+    key = next((t.key for t in view_tracks if t.track_id == decision.emitter_id), None)
+    return {
+        "t_s": _num(decision.clicked_t_s),
+        "f_hz": _num(decision.clicked_hz),
+        "label": decision.label,
+        "key": key if decision.emitter_id is not None else None,
+        "emitter_baseline_hz": _num(decision.emitter_baseline_hz),
         "text": describe(decision, view_tracks, ids=ids),
     }
 
@@ -286,7 +311,10 @@ class LabelServer:
             "delta_f_hz": _num(item.delta_f_hz),
             "n_candidates": item.n_candidates,
         }
-        if s.blind and s.config.blind_hint:  # fixed-size, never the box itself
+        if item.is_window:  # the zone is the item, not a model output
+            described["kind"] = "window"
+            described["zone"] = [item.t_start_s, item.t_end_s]
+        elif s.blind and s.config.blind_hint:  # fixed-size, never the box itself
             described["hint_box"] = list(hint_box(item, s.config))
         if not s.blind:  # blind: the page never learns the box
             described.update(
@@ -311,6 +339,9 @@ class LabelServer:
                 for t in tracks
             ],
             "prediction": None,
+            "marks": [_mark(d, tracks, ids=not s.blind) for d in s.marks(index)]
+            if item.is_window
+            else [],
             "status": s.status(index),
             "decision": _decision(s.decision(index), tracks, ids=not s.blind),
             "next_index": next_index,
@@ -395,6 +426,10 @@ class LabelServer:
         elif action in ("not_chirp", "unclear"):
             label = "not_chirp" if action == "not_chirp" else "chirp_emitter_unclear"
             via = "mouse" if body.get("via") == "mouse" else "key"
+            at: tuple[float, float] | None = None
+            if action == "unclear" and s.is_window(index) and "panel" in body:
+                at = self._position(body, index, window_s)
+                extra = {"t_s": at[0], "f_hz": at[1]}
             result = s.mark(
                 index,
                 label,
@@ -402,12 +437,35 @@ class LabelServer:
                 prediction_shown=shown,
                 via=via,
                 elapsed_s=elapsed,
+                t_s=None if at is None else at[0],
+                f_hz=None if at is None else at[1],
             )
         elif action == "skip":
             result = s.skip(index, elapsed_s=elapsed)
+        elif action == "done":
+            result = s.done(index, window_s=window_s, elapsed_s=elapsed)
+        elif action == "clear":
+            result = s.clear(index)
         else:
             raise _BadRequest(f"unknown action {action!r}")
         return result, extra
+
+    def _position(
+        self, body: dict[str, Any], index: int, window_s: float
+    ) -> tuple[float, float]:
+        """Time and frequency of a click position in a request body."""
+        panel = body.get("panel")
+        if panel not in PANELS:
+            raise _BadRequest(f"panel must be one of {PANELS}")
+        try:
+            x, y, w, h = (float(body[k]) for k in ("x", "y", "width", "height"))
+        except (KeyError, TypeError, ValueError):
+            raise _BadRequest("a position needs numeric x, y, width, height") from None
+        try:
+            extent = self.session.view(index, window_s).panel(str(panel)).extent
+            return pixel_to_data(x, y, w, h, extent)
+        except ValueError as err:
+            raise _BadRequest(str(err)) from None
 
     def result_payload(
         self, result: ActionResult, extra: dict[str, Any] | None = None

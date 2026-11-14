@@ -51,7 +51,7 @@ function snapTrack(tracks, t, f, tol) {
 // END shared-math
 
 const PANELS = ["overview", "zoom"];
-const COLOURS = { chirp: "#2ecc40", not_chirp: "#ff4136", chirp_emitter_unclear: "#ff851b", skipped: "#aaaaaa", open: "#555" };
+const COLOURS = { chirp: "#2ecc40", not_chirp: "#ff4136", chirp_emitter_unclear: "#ff851b", window_done: "#2ecc40", skipped: "#aaaaaa", open: "#555" };
 const TRACK = "#d0d0d0", HIGHLIGHT = "#00e5ff", PREDICTION = "#ff4fd8";
 const cv = document.getElementById("canvas"), ctx = cv.getContext("2d");
 const S = { state: null, progress: null, view: null, index: 0, windowS: null, showPred: false,
@@ -119,6 +119,7 @@ function renderBar() {
   const state = v.decision ? v.decision.text : v.status;
   const when = st.blind ? `t ${it.t_center_s.toFixed(2)} s` : `${it.t_start_s.toFixed(3)}-${it.t_end_s.toFixed(3)} s`;
   let info = `${it.trial ? it.trial + "   " : ""}${when}   ΔF ${fmt(it.delta_f_hz, 1)} Hz (${it.df_bin})   tracks ${tracks}   [${state}]`;
+  if (it.zone) info = `WINDOW: mark every chirp centred in the shaded zone (${v.marks.length} marked; Enter: done, c: clear)   ` + info;
   const pr = v.prediction;
   if (pr && S.showPred) {
     const parts = ["model:"];
@@ -189,9 +190,15 @@ function draw() {
     ctx.drawImage(v.images[name], r.x, r.y, r.w, r.h);
     ctx.save();
     ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
-    // the box, or in blind mode only a time marker at its centre
+    // the box, or in blind mode only a time marker at its centre; a window's zone
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
-    if (S.state.blind) {
+    if (it.zone) {  // window item: light shade over the zone, dashed edges
+      const [za] = toPx(r, e, it.zone[0], e[2]), [zb] = toPx(r, e, it.zone[1], e[2]);
+      ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.07)"; ctx.fillRect(za, r.y, zb - za, r.h);
+      ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.setLineDash([6, 5]); ctx.beginPath();
+      ctx.moveTo(za, r.y); ctx.lineTo(za, r.y + r.h); ctx.moveTo(zb, r.y); ctx.lineTo(zb, r.y + r.h); ctx.stroke();
+      ctx.restore();
+    } else if (S.state.blind) {
       const [x] = toPx(r, e, it.t_center_s, e[2]), tick = Math.max(8, 0.06 * r.h);
       ctx.lineWidth = 2.5; ctx.beginPath();
       ctx.moveTo(x, r.y); ctx.lineTo(x, r.y + tick); ctx.moveTo(x, r.y + r.h); ctx.lineTo(x, r.y + r.h - tick);
@@ -244,6 +251,13 @@ function draw() {
         ctx.strokeStyle = PREDICTION; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(xa, y); ctx.lineTo(xb, y); ctx.stroke();
         ctx.fillStyle = PREDICTION; ctx.beginPath(); ctx.moveTo(xa, y); ctx.lineTo(xa + 10, y - 6); ctx.lineTo(xa + 10, y + 6); ctx.fill();
       }
+    }
+    // a window's marks
+    for (const m of v.marks || []) {
+      if (m.t_s === null || m.f_hz === null) continue;
+      const [x, y] = toPx(r, e, m.t_s, name === "zoom" && m.emitter_baseline_hz !== null ? m.emitter_baseline_hz : m.f_hz);
+      ctx.strokeStyle = COLOURS[m.label] || COLOURS.chirp; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, 7, 0, 2 * Math.PI); ctx.stroke();
     }
     // the current decision
     const d = v.decision;
@@ -298,6 +312,13 @@ function draw() {
   }
 }
 
+// a point's panel and position, sent with "unclear" (a window's mark needs it)
+function position(pt) {
+  const n = pt ? panelAt(pt) : null;
+  if (!n || !S.view || !S.view.panels) return {};
+  const r = S.rects[n];
+  return { panel: n, x: pt.x - r.x, y: pt.y - r.y, width: r.w, height: r.h };
+}
 function localPoint(ev) { const b = cv.getBoundingClientRect(); return { x: ev.clientX - b.left, y: ev.clientY - b.top }; }
 function panelAt(pt) {
   for (const n of PANELS) {
@@ -379,7 +400,7 @@ cv.addEventListener("mousedown", ev => {
     if (!n || !S.view || !S.view.panels) return;
     const r = S.rects[n];
     act({ action: "click", panel: n, x: pt.x - r.x, y: pt.y - r.y, width: r.w, height: r.h });
-  } else if (ev.button === 1) act({ action: "unclear", via: "mouse" });
+  } else if (ev.button === 1) act(Object.assign({ action: "unclear", via: "mouse" }, position(pt)));
   else if (ev.button === 2) act({ action: "not_chirp", via: "mouse" });
 });
 window.addEventListener("keydown", ev => {
@@ -387,7 +408,9 @@ window.addEventListener("keydown", ev => {
   if (ev.ctrlKey || ev.metaKey || ev.altKey || !S.state) return;
   const k = ev.key, n = (S.progress && S.progress.total) || S.state.n;
   if (/^[1-9]$/.test(k)) act({ action: "pick", key: Number(k) });
-  else if (k === "0") act({ action: "unclear" });
+  else if (k === "0") act(Object.assign({ action: "unclear" }, position(S.mouse)));
+  else if (k === "Enter") act({ action: "done" });
+  else if (k === "c" && S.view && S.view.item.zone) act({ action: "clear" });
   else if (k === "x" || k === "X") act({ action: "not_chirp" });
   else if (k === "s" || k === " ") act({ action: "skip" });
   else if (k === "u" || k === "Backspace") undo();
